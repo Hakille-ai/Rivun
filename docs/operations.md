@@ -91,7 +91,10 @@ Configure a node to enforce that index:
 path = "registry.index.toml"
 ```
 
-`zap send` is a one-shot peer process. It binds to the config `bind` address, sends one signed frame, and exits. This is deliberate: receivers reject datagrams whose source address does not match the configured peer address.
+`zap send` is a one-shot peer process. It validates the config, binds to the
+config `bind` address, sends one signed frame, and exits. This is deliberate:
+receivers reject datagrams whose source address does not match the configured
+peer address.
 
 ZAP can carry raw bytes or universal `ZENV` envelopes. `zap-node` also accepts the older JSON action envelope for compatibility, but new CLI sends use `ZENV`.
 
@@ -136,12 +139,14 @@ Or request attestations from configured validator peers:
 
 ```bash
 cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-network
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-network --poa-timeout-ms 5000
 ```
 
 Each `[poa]` validator used by `--poa-network` must also be configured as a
 peer so `zap send` can reach it over encrypted UDP. Validator nodes answer
 signed `poa.attestation_request` control envelopes with signed
-`poa.attestation_response` envelopes.
+`poa.attestation_response` envelopes. `--poa-timeout-ms` controls how long the
+sender waits for enough validator responses; the default is 2000 ms.
 
 For offline review and future validator workflows, create and sign portable PoA
 attestation JSON:

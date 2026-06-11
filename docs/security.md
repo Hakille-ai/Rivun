@@ -65,7 +65,8 @@ validator quorum.
 `zap send --poa-network` can request attestations from configured validator
 peers. Responses are accepted only when the validator public key matches config,
 the response signature verifies, and the response digest equals the requested
-signed-frame digest.
+signed-frame digest. The sender waits up to `--poa-timeout-ms` for the required
+threshold; the default is 2000 ms.
 
 ## Signed Receipts
 

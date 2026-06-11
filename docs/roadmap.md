@@ -44,8 +44,8 @@ Foundation implemented:
 - validators sign a domain-separated digest of the signed frame;
 - `zap-node` verifies configured validator public keys and threshold before dispatch;
 - `zap send --intent` requires `--poa-validator-key` for critical intent steps.
-- `zap send --poa-network` can collect attestations from configured validator peers;
+- `zap send --poa-network` can collect attestations from configured validator peers with an operator-controlled timeout;
 - portable PoA request/response JSON can be created with `zap poa request` and `zap poa attest`;
 - optional signed action receipts record processed actions for audit.
 
-Next: validator discovery, quorum policy hardening, receipt replication, and operator retention policy.
+Next: dynamic validator discovery, quorum policy hardening, receipt replication, and operator retention policy.
