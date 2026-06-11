@@ -212,6 +212,7 @@ Verify a receipt log after a test run or before archiving it:
 
 ```bash
 cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
+cargo run -p zap-cli -- receipts prune --path logs/actions.jsonl --before-processed-at-micros 1735689600000000 --out logs/actions.retained.jsonl
 ```
 
 ## Logging

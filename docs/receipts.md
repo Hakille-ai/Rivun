@@ -33,4 +33,16 @@ cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl --json
 Verification parses each non-empty JSONL line, validates the signer identity,
 and checks the Ed25519 signature. A tampered line fails with its line number.
 
+Apply an offline retention cutoff after verification:
+
+```bash
+cargo run -p zap-cli -- receipts prune \
+  --path logs/actions.jsonl \
+  --before-processed-at-micros 1735689600000000 \
+  --out logs/actions.retained.jsonl
+```
+
+`prune` keeps receipts whose `processed_at_micros` is greater than or equal to
+the cutoff. It refuses to overwrite the output path unless `--force` is passed.
+
 Receipts make local and future distributed operation auditable without creating financial semantics.

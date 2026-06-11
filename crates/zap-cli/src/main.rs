@@ -283,6 +283,21 @@ enum ReceiptsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Write a verified receipt log without records older than a processing timestamp.
+    Prune {
+        #[arg(long)]
+        path: PathBuf,
+        /// Drop receipts whose processed_at_micros is lower than this value.
+        #[arg(long)]
+        before_processed_at_micros: u64,
+        #[arg(long)]
+        out: PathBuf,
+        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -719,13 +734,86 @@ fn sign_poa_request(request_path: &Path, validator_key_path: &Path) -> Result<()
 fn receipts(command: ReceiptsCommand) -> Result<()> {
     match command {
         ReceiptsCommand::Verify { path, json } => verify_receipts(&path, json),
+        ReceiptsCommand::Prune {
+            path,
+            before_processed_at_micros,
+            out,
+            force,
+            json,
+        } => prune_receipts(&path, before_processed_at_micros, &out, force, json),
     }
 }
 
 fn verify_receipts(path: &Path, json: bool) -> Result<()> {
+    let verified = load_verified_receipts(path)?.len();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "path": path.display().to_string(),
+                "receipts": verified,
+                "verified": true
+            }))?
+        );
+    } else {
+        println!("receipts={verified}");
+        println!("verified=true");
+        println!("path={}", path.display());
+    }
+    Ok(())
+}
+
+fn prune_receipts(
+    path: &Path,
+    before_processed_at_micros: u64,
+    out: &Path,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    let receipts = load_verified_receipts(path)?;
+    let before = before_processed_at_micros;
+    let retained = receipts
+        .iter()
+        .filter(|receipt| receipt.receipt.processed_at_micros >= before)
+        .collect::<Vec<_>>();
+    let mut output = String::new();
+    for receipt in &retained {
+        output.push_str(&receipt.to_json_line()?);
+    }
+    write_text_file(out, &output, force)?;
+
+    let input_count = receipts.len();
+    let retained_count = retained.len();
+    let pruned_count = input_count - retained_count;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "path": path.display().to_string(),
+                "out": out.display().to_string(),
+                "before_processed_at_micros": before,
+                "input_receipts": input_count,
+                "retained_receipts": retained_count,
+                "pruned_receipts": pruned_count,
+                "verified": true
+            }))?
+        );
+    } else {
+        println!("path={}", path.display());
+        println!("out={}", out.display());
+        println!("before_processed_at_micros={before}");
+        println!("input_receipts={input_count}");
+        println!("retained_receipts={retained_count}");
+        println!("pruned_receipts={pruned_count}");
+        println!("verified=true");
+    }
+    Ok(())
+}
+
+fn load_verified_receipts(path: &Path) -> Result<Vec<SignedActionReceipt>> {
     let input = fs::read_to_string(path)
         .with_context(|| format!("failed to read receipt log {}", path.display()))?;
-    let mut verified = 0_usize;
+    let mut receipts = Vec::new();
     for (index, line) in input.lines().enumerate() {
         let line_number = index + 1;
         let line = line.trim();
@@ -746,27 +834,12 @@ fn verify_receipts(path: &Path, json: bool) -> Result<()> {
                 line_number
             )
         })?;
-        verified += 1;
+        receipts.push(receipt);
     }
-    if verified == 0 {
+    if receipts.is_empty() {
         bail!("receipt log {} contains no receipts", path.display());
     }
-
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "path": path.display().to_string(),
-                "receipts": verified,
-                "verified": true
-            }))?
-        );
-    } else {
-        println!("receipts={verified}");
-        println!("verified=true");
-        println!("path={}", path.display());
-    }
-    Ok(())
+    Ok(receipts)
 }
 
 async fn certify_frame_with_network_poa(

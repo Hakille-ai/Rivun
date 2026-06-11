@@ -50,5 +50,6 @@ Foundation implemented:
 - portable PoA request/response JSON can be created with `zap poa request` and `zap poa attest`;
 - optional signed action receipts record processed actions for audit.
 - `zap receipts verify` checks signed receipt JSONL logs offline.
+- `zap receipts prune` applies verified timestamp-based retention to receipt logs.
 
-Next: dynamic validator discovery, quorum policy hardening, receipt replication, and retention policy.
+Next: dynamic validator discovery, quorum policy hardening, and receipt replication.

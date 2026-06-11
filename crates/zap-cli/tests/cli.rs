@@ -897,6 +897,87 @@ fn receipts_verify_checks_signed_jsonl_logs() {
 }
 
 #[test]
+fn receipts_prune_writes_verified_retention_output() {
+    let dir = tempdir().unwrap();
+    let node = Keypair::generate();
+    let source = Keypair::generate();
+    let frame = ZapFrame::with_timestamp(
+        source.node_id(),
+        node.node_id(),
+        ZapFlags::SIGNED,
+        123,
+        Bytes::from_static(b"payload"),
+    )
+    .unwrap();
+    let signed = sign_frame(&source, &frame).unwrap();
+    let old_receipt =
+        SignedActionReceipt::new(&node, &signed, "echo.old", Some(b"old"), 100, None).unwrap();
+    let new_receipt =
+        SignedActionReceipt::new(&node, &signed, "echo.new", Some(b"new"), 200, None).unwrap();
+    let receipt_path = dir.path().join("receipts.jsonl");
+    let pruned_path = dir.path().join("retained.jsonl");
+    std::fs::write(
+        &receipt_path,
+        format!(
+            "{}{}",
+            old_receipt.to_json_line().unwrap(),
+            new_receipt.to_json_line().unwrap()
+        ),
+    )
+    .unwrap();
+
+    let prune = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "prune",
+            "--path",
+            receipt_path.to_str().unwrap(),
+            "--before-processed-at-micros",
+            "150",
+            "--out",
+            pruned_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        prune.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&prune.stdout),
+        String::from_utf8_lossy(&prune.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&prune.stdout).unwrap();
+    assert_eq!(json["input_receipts"], 2);
+    assert_eq!(json["retained_receipts"], 1);
+    assert_eq!(json["pruned_receipts"], 1);
+    assert_eq!(json["verified"], true);
+
+    let retained = std::fs::read_to_string(&pruned_path).unwrap();
+    let retained_lines = retained.lines().collect::<Vec<_>>();
+    assert_eq!(retained_lines.len(), 1);
+    let retained_receipt = SignedActionReceipt::from_json_str(retained_lines[0]).unwrap();
+    retained_receipt.verify().unwrap();
+    assert_eq!(retained_receipt.receipt.subject, "echo.new");
+    assert_eq!(retained_receipt.receipt.processed_at_micros, 200);
+
+    let overwrite = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "prune",
+            "--path",
+            receipt_path.to_str().unwrap(),
+            "--before-processed-at-micros",
+            "150",
+            "--out",
+            pruned_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
+}
+
+#[test]
 fn poa_request_and_attest_commands_exchange_json() {
     let dir = tempdir().unwrap();
     let source = Keypair::generate();
