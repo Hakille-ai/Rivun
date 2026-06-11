@@ -975,6 +975,124 @@ fn receipts_prune_writes_verified_retention_output() {
         .unwrap();
     assert!(!overwrite.status.success());
     assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
+
+    let destructive = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "prune",
+            "--path",
+            receipt_path.to_str().unwrap(),
+            "--before-processed-at-micros",
+            "150",
+            "--out",
+            receipt_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(!destructive.status.success());
+    assert!(
+        String::from_utf8_lossy(&destructive.stderr)
+            .contains("must not point at an input receipt log")
+    );
+}
+
+#[test]
+fn receipts_merge_deduplicates_verified_logs() {
+    let dir = tempdir().unwrap();
+    let node = Keypair::generate();
+    let source = Keypair::generate();
+    let frame = ZapFrame::with_timestamp(
+        source.node_id(),
+        node.node_id(),
+        ZapFlags::SIGNED,
+        123,
+        Bytes::from_static(b"payload"),
+    )
+    .unwrap();
+    let signed = sign_frame(&source, &frame).unwrap();
+    let first =
+        SignedActionReceipt::new(&node, &signed, "echo.first", Some(b"first"), 100, None).unwrap();
+    let duplicate =
+        SignedActionReceipt::new(&node, &signed, "echo.shared", Some(b"shared"), 200, None)
+            .unwrap();
+    let last =
+        SignedActionReceipt::new(&node, &signed, "echo.last", Some(b"last"), 300, None).unwrap();
+    let left_path = dir.path().join("left.jsonl");
+    let right_path = dir.path().join("right.jsonl");
+    let merged_path = dir.path().join("merged.jsonl");
+    std::fs::write(
+        &left_path,
+        format!(
+            "{}{}",
+            first.to_json_line().unwrap(),
+            duplicate.to_json_line().unwrap()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &right_path,
+        format!(
+            "{}{}",
+            duplicate.to_json_line().unwrap(),
+            last.to_json_line().unwrap()
+        ),
+    )
+    .unwrap();
+
+    let merge = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "merge",
+            left_path.to_str().unwrap(),
+            right_path.to_str().unwrap(),
+            "--out",
+            merged_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        merge.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&merge.stdout),
+        String::from_utf8_lossy(&merge.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&merge.stdout).unwrap();
+    assert_eq!(json["input_logs"], 2);
+    assert_eq!(json["input_receipts"], 4);
+    assert_eq!(json["written_receipts"], 3);
+    assert_eq!(json["duplicate_receipts"], 1);
+    assert_eq!(json["verified"], true);
+
+    let merged = std::fs::read_to_string(&merged_path).unwrap();
+    let subjects = merged
+        .lines()
+        .map(|line| {
+            let receipt = SignedActionReceipt::from_json_str(line).unwrap();
+            receipt.verify().unwrap();
+            receipt.receipt.subject
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(subjects, vec!["echo.first", "echo.shared", "echo.last"]);
+
+    let destructive = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "merge",
+            left_path.to_str().unwrap(),
+            right_path.to_str().unwrap(),
+            "--out",
+            left_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(!destructive.status.success());
+    assert!(
+        String::from_utf8_lossy(&destructive.stderr)
+            .contains("must not point at an input receipt log")
+    );
 }
 
 #[test]

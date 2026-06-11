@@ -1,0 +1,52 @@
+[default]
+relative_regression = 0.10
+min_absolute_ns = 100.0
+blocking = true
+
+[[benchmark]]
+pattern = "parse_header_64_bytes"
+relative_regression = 0.07
+min_absolute_ns = 1.0
+blocking = true
+
+[[benchmark]]
+pattern = "encode_frame"
+relative_regression = 0.07
+min_absolute_ns = 1.0
+blocking = true
+
+[[benchmark]]
+pattern = "zenv"
+relative_regression = 0.07
+min_absolute_ns = 1.0
+blocking = true
+
+[[benchmark]]
+pattern = "ed25519"
+relative_regression = 0.08
+min_absolute_ns = 100.0
+blocking = true
+
+[[benchmark]]
+pattern = "poa"
+relative_regression = 0.08
+min_absolute_ns = 100.0
+blocking = true
+
+[[benchmark]]
+pattern = "encrypted_udp"
+relative_regression = 0.15
+min_absolute_ns = 5000.0
+blocking = true
+
+[[benchmark]]
+pattern = "wasm"
+relative_regression = 0.15
+min_absolute_ns = 5000.0
+blocking = true
+
+[[benchmark]]
+pattern = "node_dispatch"
+relative_regression = 0.15
+min_absolute_ns = 5000.0
+blocking = true

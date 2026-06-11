@@ -13,7 +13,10 @@ Describe the change and why it matters.
 
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo test --workspace --all-targets`
+- [ ] `cargo ci-smoke`
+- [ ] `cargo ci-bench-smoke`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
+- [ ] Performance-sensitive changes reviewed against the benchmark summary
 - [ ] Docker build checked when packaging changes
 
 ## Notes for Reviewers

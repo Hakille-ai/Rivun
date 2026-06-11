@@ -1,0 +1,111 @@
+name: performance
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 3 * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  branch-smoke:
+    name: branch benchmark smoke
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo ci-bench-smoke
+
+  compare:
+    name: strict benchmark gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build benchmark tooling from PR head
+        run: cargo build -p xtask --locked
+      - name: Benchmark base
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+          ./target/debug/xtask bench run
+          ./target/debug/xtask bench collect \
+            --out target/bench-results/base.json \
+            --label base \
+            --source-sha ${{ github.event.pull_request.base.sha }}
+      - name: Benchmark head
+        run: |
+          git checkout ${{ github.event.pull_request.head.sha }}
+          ./target/debug/xtask bench run
+          ./target/debug/xtask bench collect \
+            --out target/bench-results/head.json \
+            --label head \
+            --source-sha ${{ github.event.pull_request.head.sha }}
+      - name: Compare benchmarks
+        run: |
+          ./target/debug/xtask bench compare \
+            --base target/bench-results/base.json \
+            --head target/bench-results/head.json \
+            --thresholds tools/bench-thresholds.toml \
+            --out target/bench-results/comparison.md
+          cat target/bench-results/comparison.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-comparison
+          path: target/bench-results
+
+  publish:
+    name: publish benchmark history
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo ci-bench-full
+      - name: Collect benchmarks
+        run: |
+          cargo run -p xtask --locked -- bench collect \
+            --out target/bench-results/latest.json \
+            --label main \
+            --source-sha ${{ github.sha }}
+      - name: Download previous history
+        run: |
+          mkdir -p target/bench-results
+          curl -fsSL https://hakille-ai.github.io/ZAP/history.json \
+            -o target/bench-results/history.json || true
+      - name: Build benchmark site
+        run: |
+          cargo run -p xtask --locked -- bench site \
+            --current target/bench-results/latest.json \
+            --history-in target/bench-results/history.json \
+            --out target/bench-site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/bench-site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -14,7 +14,7 @@ This file tracks the technical specification PDF against the current repository.
 | Broadcast target zero | Implemented | broadcast frames use UUID nil internally while UDP envelopes target concrete peers |
 | Cognitive interpreter | Foundation implemented | `zap-intent`, `zap compile-intent`, and `zap send --intent` |
 | Proof-of-Action | Foundation implemented | `ZPOA` trailer, validator signatures, threshold verification, daemon enforcement, and static configured validator networking exist; dynamic discovery remains future work |
-| Financial layer | Out of scope by product decision | Signed action receipts, offline verification, and retention filtering provide technical auditability only |
+| Financial layer | Out of scope by product decision | Signed action receipts, offline verification, retention filtering, and archive merge provide technical auditability only |
 | ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, signed local registry approval, CLI create/verify/sign/revoke, and daemon config enforcement exist; package publishing remains future work |
 | SDKs for major languages | Planned | Rust crates exist; external language SDKs still to implement |
 
@@ -23,4 +23,4 @@ Next high-impact PDF features:
 1. Add package distribution and remote index publishing for ZapStore.
 2. Add networked validator quorum and discovery.
 3. Expose SDK-friendly schemas for intents, frames, manifests, and receipts.
-4. Add receipt replication tooling for operators.
+4. Add remote receipt replication tooling for operators.

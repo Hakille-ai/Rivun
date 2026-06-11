@@ -298,6 +298,19 @@ enum ReceiptsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Merge verified receipt logs into one deduplicated archive.
+    Merge {
+        /// Input receipt JSONL logs to merge.
+        #[arg(required = true)]
+        inputs: Vec<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -741,6 +754,12 @@ fn receipts(command: ReceiptsCommand) -> Result<()> {
             force,
             json,
         } => prune_receipts(&path, before_processed_at_micros, &out, force, json),
+        ReceiptsCommand::Merge {
+            inputs,
+            out,
+            force,
+            json,
+        } => merge_receipts(&inputs, &out, force, json),
     }
 }
 
@@ -770,6 +789,7 @@ fn prune_receipts(
     force: bool,
     json: bool,
 ) -> Result<()> {
+    ensure_receipt_output_is_separate(out, &[path])?;
     let receipts = load_verified_receipts(path)?;
     let before = before_processed_at_micros;
     let retained = receipts
@@ -810,6 +830,53 @@ fn prune_receipts(
     Ok(())
 }
 
+fn merge_receipts(inputs: &[PathBuf], out: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_receipt_output_is_separate(out, inputs)?;
+    let mut seen = std::collections::HashSet::new();
+    let mut merged = Vec::new();
+    let mut input_count = 0_usize;
+    for input in inputs {
+        let receipts = load_verified_receipts(input)?;
+        input_count += receipts.len();
+        for receipt in receipts {
+            if seen.insert(receipt.signature.clone()) {
+                merged.push(receipt);
+            }
+        }
+    }
+
+    let mut output = String::new();
+    for receipt in &merged {
+        output.push_str(&receipt.to_json_line()?);
+    }
+    write_text_file(out, &output, force)?;
+
+    let written_count = merged.len();
+    let duplicate_count = input_count - written_count;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "inputs": inputs.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+                "out": out.display().to_string(),
+                "input_logs": inputs.len(),
+                "input_receipts": input_count,
+                "written_receipts": written_count,
+                "duplicate_receipts": duplicate_count,
+                "verified": true
+            }))?
+        );
+    } else {
+        println!("out={}", out.display());
+        println!("input_logs={}", inputs.len());
+        println!("input_receipts={input_count}");
+        println!("written_receipts={written_count}");
+        println!("duplicate_receipts={duplicate_count}");
+        println!("verified=true");
+    }
+    Ok(())
+}
+
 fn load_verified_receipts(path: &Path) -> Result<Vec<SignedActionReceipt>> {
     let input = fs::read_to_string(path)
         .with_context(|| format!("failed to read receipt log {}", path.display()))?;
@@ -840,6 +907,26 @@ fn load_verified_receipts(path: &Path) -> Result<Vec<SignedActionReceipt>> {
         bail!("receipt log {} contains no receipts", path.display());
     }
     Ok(receipts)
+}
+
+fn ensure_receipt_output_is_separate(out: &Path, inputs: &[impl AsRef<Path>]) -> Result<()> {
+    let out = normalize_path_for_comparison(out)?;
+    for input in inputs {
+        let input = normalize_path_for_comparison(input.as_ref())?;
+        if out == input {
+            bail!("receipt output must not point at an input receipt log");
+        }
+    }
+    Ok(())
+}
+
+fn normalize_path_for_comparison(path: &Path) -> Result<PathBuf> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    Ok(path.components().collect())
 }
 
 async fn certify_frame_with_network_poa(

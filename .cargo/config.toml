@@ -1,4 +1,8 @@
 [alias]
 ci-clippy = "clippy --workspace --all-targets --locked -- -D warnings"
 ci-fmt = "fmt --all -- --check"
+ci-smoke = "test --locked -p zap-cli --test smoke_node"
+ci-bench-smoke = "test --workspace --benches --locked"
+ci-bench-full = "run --locked -p xtask -- bench run"
+ci-bench-compare = "run -p xtask -- bench compare --thresholds tools/bench-thresholds.toml"
 ci-test = "test --workspace --all-targets --locked"

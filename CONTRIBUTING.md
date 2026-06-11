@@ -10,11 +10,20 @@ Install Rust using the toolchain declared in [rust-toolchain.toml](rust-toolchai
 ```bash
 cargo ci-fmt
 cargo ci-test
+cargo ci-smoke
+cargo ci-bench-smoke
 cargo ci-clippy
 ```
 
 The aliases are defined in [.cargo/config.toml](.cargo/config.toml) and match
 the CI workflow.
+
+Performance-sensitive changes must also review the benchmark summary produced by
+GitHub Actions. The strict benchmark gate compares pull-request code against the
+base commit on the same runner and fails when configured thresholds in
+[tools/bench-thresholds.toml](tools/bench-thresholds.toml) are exceeded. Full
+local benchmark runs use `cargo ci-bench-full`; they require enough free disk
+for release-profile Criterion builds.
 
 Docker users can build the CLI image with:
 
@@ -40,7 +49,10 @@ docker build -t zap:local .
 
 - [ ] `cargo ci-fmt`
 - [ ] `cargo ci-test`
+- [ ] `cargo ci-smoke`
+- [ ] `cargo ci-bench-smoke`
 - [ ] `cargo ci-clippy`
+- [ ] performance-sensitive changes reviewed against benchmark output
 - [ ] docs updated when behavior, configuration, CLI, or security posture
       changes
 - [ ] golden vectors updated for wire-format changes

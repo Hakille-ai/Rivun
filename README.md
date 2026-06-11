@@ -168,6 +168,7 @@ Verify a signed receipt log:
 ```bash
 cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
 cargo run -p zap-cli -- receipts prune --path logs/actions.jsonl --before-processed-at-micros 1735689600000000 --out logs/actions.retained.jsonl
+cargo run -p zap-cli -- receipts merge logs/node-a.jsonl logs/node-b.jsonl --out logs/receipts.archive.jsonl
 ```
 
 Inspect a saved frame and verify it with a public key:
@@ -183,14 +184,33 @@ Required checks:
 ```bash
 cargo ci-fmt
 cargo ci-test
+cargo ci-smoke
+cargo ci-bench-smoke
 cargo ci-clippy
 ```
 
 These aliases are defined in [.cargo/config.toml](.cargo/config.toml) and mirror
-the GitHub Actions workflow.
+the GitHub Actions workflow. `cargo ci-smoke` launches the real `zap` binary,
+sends an action through a local node, and verifies the signed receipt log.
+`cargo ci-bench-smoke` compiles and runs the Criterion benchmark harnesses in
+test mode.
+
+Full performance runs are handled by GitHub Actions on Linux:
+
+```bash
+cargo ci-bench-full
+cargo ci-bench-compare --base target/bench-results/base.json --head target/bench-results/head.json
+```
+
+Pull requests compare the base commit and head commit on the same runner and
+fail when critical benchmark regressions exceed the thresholds in
+[tools/bench-thresholds.toml](tools/bench-thresholds.toml). Pushes to `main`
+publish the benchmark history to GitHub Pages:
+[ZAP Benchmarks](https://hakille-ai.github.io/ZAP/).
 
 The repository includes GitHub Actions CI for Linux, Windows, clippy, tests, and
-Docker build validation. Use `zap check-config --strict` for production
+Docker build validation, plus a separate performance workflow for benchmark
+gates and Pages publishing. Use `zap check-config --strict` for production
 readiness gates where validation warnings should fail deployment.
 
 ## Security

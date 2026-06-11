@@ -51,5 +51,6 @@ Foundation implemented:
 - optional signed action receipts record processed actions for audit.
 - `zap receipts verify` checks signed receipt JSONL logs offline.
 - `zap receipts prune` applies verified timestamp-based retention to receipt logs.
+- `zap receipts merge` builds deduplicated verified receipt archives from multiple logs.
 
-Next: dynamic validator discovery, quorum policy hardening, and receipt replication.
+Next: dynamic validator discovery, quorum policy hardening, and remote receipt replication.

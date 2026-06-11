@@ -11,6 +11,7 @@ members = [
     "crates/zap-node",
     "crates/zap-runtime",
     "crates/zap-store",
+    "tools/xtask",
 ]
 resolver = "3"
 

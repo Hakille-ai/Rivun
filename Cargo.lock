@@ -2527,6 +2527,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xtask"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "zap-cli"
 version = "0.1.0"
 dependencies = [
@@ -2590,6 +2600,7 @@ name = "zap-envelope"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "criterion",
  "thiserror",
  "uuid",
  "zap-core",
@@ -2646,6 +2657,7 @@ dependencies = [
  "base64",
  "blake3",
  "bytes",
+ "criterion",
  "serde",
  "serde_json",
  "tempfile",
@@ -2666,6 +2678,7 @@ dependencies = [
 name = "zap-runtime"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "serde",
  "thiserror",
  "wasmtime",

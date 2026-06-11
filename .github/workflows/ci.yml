@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
 
 jobs:
@@ -21,6 +21,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo ci-fmt
       - run: cargo ci-test
+      - run: cargo ci-smoke
+      - run: cargo ci-bench-smoke
       - run: cargo ci-clippy
 
   docker:

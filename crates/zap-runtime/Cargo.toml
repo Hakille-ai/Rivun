@@ -12,4 +12,9 @@ thiserror.workspace = true
 wasmtime.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 wat.workspace = true
+
+[[bench]]
+name = "runtime"
+harness = false

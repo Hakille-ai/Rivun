@@ -45,4 +45,17 @@ cargo run -p zap-cli -- receipts prune \
 `prune` keeps receipts whose `processed_at_micros` is greater than or equal to
 the cutoff. It refuses to overwrite the output path unless `--force` is passed.
 
+Merge verified receipt logs from multiple nodes or archive shards:
+
+```bash
+cargo run -p zap-cli -- receipts merge \
+  logs/node-a.jsonl \
+  logs/node-b.jsonl \
+  --out logs/receipts.archive.jsonl
+```
+
+`merge` verifies every input log, keeps the first copy of each signed receipt,
+and writes a deduplicated JSONL archive. The output path must be separate from
+all input logs.
+
 Receipts make local and future distributed operation auditable without creating financial semantics.
