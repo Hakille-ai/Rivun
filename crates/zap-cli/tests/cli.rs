@@ -932,6 +932,45 @@ fn inspect_decodes_universal_envelope_fields() {
     assert_eq!(json["body_len"], 10);
 }
 
+#[test]
+fn inspect_verifies_with_public_key_without_private_key_file() {
+    let dir = tempdir().unwrap();
+    let sender = Keypair::generate();
+    let receiver = Keypair::generate();
+    let frame = ZapFrame::with_timestamp(
+        sender.node_id(),
+        receiver.node_id(),
+        ZapFlags::ENCRYPTED,
+        42,
+        Bytes::from_static(b"hello"),
+    )
+    .unwrap();
+    let signed = sign_frame(&sender, &frame).unwrap();
+    let frame_path = dir.path().join("signed-frame.bin");
+    std::fs::write(&frame_path, signed.encode()).unwrap();
+    let public_key = public_key_string(&sender);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "inspect",
+            frame_path.to_str().unwrap(),
+            "--verify-with-public-key",
+            &public_key,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["verified"], true);
+    assert_eq!(json["has_auth_trailer"], true);
+}
+
 #[tokio::test]
 async fn send_with_intent_builds_multiple_action_envelopes() {
     let sender = Keypair::generate();

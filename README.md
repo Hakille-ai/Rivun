@@ -160,6 +160,12 @@ cargo run -p zap-cli -- poa request --frame critical-frame.bin --requester-key .
 cargo run -p zap-cli -- poa attest --request poa-request.json --validator-key .zap/validator.key > poa-response.json
 ```
 
+Inspect a saved frame and verify it with a public key:
+
+```bash
+cargo run -p zap-cli -- inspect frame.bin --verify-with-public-key <base64-public-key>
+```
+
 ## Development
 
 Required checks:

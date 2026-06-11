@@ -123,6 +123,8 @@ enum Commands {
         frame: PathBuf,
         #[arg(long)]
         verify_with_key: Option<PathBuf>,
+        #[arg(long, conflicts_with = "verify_with_key")]
+        verify_with_public_key: Option<String>,
     },
     /// Compile a local intent into an auditable action plan without sending it.
     CompileIntent {
@@ -325,7 +327,12 @@ async fn main() -> Result<()> {
         Commands::Inspect {
             frame,
             verify_with_key,
-        } => inspect(&frame, verify_with_key.as_deref()),
+            verify_with_public_key,
+        } => inspect(
+            &frame,
+            verify_with_key.as_deref(),
+            verify_with_public_key.as_deref(),
+        ),
         Commands::CompileIntent {
             intent,
             explain,
@@ -1250,19 +1257,19 @@ fn write_text_file(out: &Path, contents: &str, force: bool) -> Result<()> {
         .with_context(|| format!("failed to flush {}", out.display()))
 }
 
-fn inspect(frame_path: &Path, verify_with_key: Option<&Path>) -> Result<()> {
+fn inspect(
+    frame_path: &Path,
+    verify_with_key: Option<&Path>,
+    verify_with_public_key: Option<&str>,
+) -> Result<()> {
     let bytes = fs::read(frame_path)
         .with_context(|| format!("failed to read frame {}", frame_path.display()))?;
     let frame = ZapFrame::decode(&bytes)?;
     let mut verified = None;
     let envelope = ZapEnvelopeRef::parse(&frame.payload).ok();
 
-    if let Some(key_path) = verify_with_key {
-        let keypair = Keypair::from_key_file_toml(
-            &fs::read_to_string(key_path)
-                .with_context(|| format!("failed to read key file {}", key_path.display()))?,
-        )?;
-        verify_frame(&keypair.verifying_key(), &frame)?;
+    if let Some(public_key) = inspect_verification_key(verify_with_key, verify_with_public_key)? {
+        verify_frame(&public_key, &frame)?;
         verified = Some(true);
     }
 
@@ -1289,6 +1296,26 @@ fn inspect(frame_path: &Path, verify_with_key: Option<&Path>) -> Result<()> {
         }))?
     );
     Ok(())
+}
+
+fn inspect_verification_key(
+    verify_with_key: Option<&Path>,
+    verify_with_public_key: Option<&str>,
+) -> Result<Option<PublicKey>> {
+    match (verify_with_key, verify_with_public_key) {
+        (Some(key_path), None) => {
+            let keypair = Keypair::from_key_file_toml(
+                &fs::read_to_string(key_path)
+                    .with_context(|| format!("failed to read key file {}", key_path.display()))?,
+            )?;
+            Ok(Some(keypair.verifying_key()))
+        }
+        (None, Some(public_key)) => decode_public_key(public_key)
+            .with_context(|| "invalid --verify-with-public-key".to_string())
+            .map(Some),
+        (None, None) => Ok(None),
+        (Some(_), Some(_)) => bail!("use either --verify-with-key or --verify-with-public-key"),
+    }
 }
 
 fn bench(command: BenchCommand) -> Result<()> {
