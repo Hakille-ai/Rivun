@@ -206,6 +206,12 @@ path = "logs/actions.jsonl"
 
 Receipts are audit records signed by the processing node. They are not financial records.
 
+Verify a receipt log after a test run or before archiving it:
+
+```bash
+cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
+```
+
 ## Logging
 
 Use `RUST_LOG`:

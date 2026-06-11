@@ -2544,6 +2544,7 @@ dependencies = [
  "zap-crypto",
  "zap-envelope",
  "zap-intent",
+ "zap-ledger",
  "zap-net",
  "zap-node",
  "zap-runtime",

@@ -48,5 +48,6 @@ Foundation implemented:
 - `zap send --poa-network` can collect attestations from configured validator peers with an operator-controlled timeout;
 - portable PoA request/response JSON can be created with `zap poa request` and `zap poa attest`;
 - optional signed action receipts record processed actions for audit.
+- `zap receipts verify` checks signed receipt JSONL logs offline.
 
-Next: dynamic validator discovery, quorum policy hardening, receipt replication, and operator retention policy.
+Next: dynamic validator discovery, quorum policy hardening, receipt replication, and retention policy.

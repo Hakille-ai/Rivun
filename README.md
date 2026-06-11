@@ -162,6 +162,12 @@ cargo run -p zap-cli -- poa request --frame critical-frame.bin --requester-key .
 cargo run -p zap-cli -- poa attest --request poa-request.json --validator-key .zap/validator.key > poa-response.json
 ```
 
+Verify a signed receipt log:
+
+```bash
+cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
+```
+
 Inspect a saved frame and verify it with a public key:
 
 ```bash

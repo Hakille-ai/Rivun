@@ -24,6 +24,7 @@ zap-core = { path = "../zap-core" }
 zap-crypto = { path = "../zap-crypto" }
 zap-envelope = { path = "../zap-envelope" }
 zap-intent = { path = "../zap-intent" }
+zap-ledger = { path = "../zap-ledger" }
 zap-net = { path = "../zap-net" }
 zap-node = { path = "../zap-node" }
 zap-runtime = { path = "../zap-runtime" }

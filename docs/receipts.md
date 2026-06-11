@@ -23,4 +23,14 @@ Each processed action appends one signed JSON object containing:
 
 The receipt signature is Ed25519 over a deterministic JSON payload with the domain prefix `ZAP-ACTION-RECEIPT-v1`. The signer is the node that processed the action.
 
+Verify an append-only receipt log offline:
+
+```bash
+cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
+cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl --json
+```
+
+Verification parses each non-empty JSONL line, validates the signer identity,
+and checks the Ed25519 signature. A tampered line fails with its line number.
+
 Receipts make local and future distributed operation auditable without creating financial semantics.

@@ -23,6 +23,7 @@ use zap_envelope::{
     ZapMessageKind,
 };
 use zap_intent::{IntentPolicy, IntentStep, compile_intent, explain_intent};
+use zap_ledger::SignedActionReceipt;
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{ZapNode, ZapNodeConfig};
 use zap_runtime::DriverPermissions;
@@ -147,6 +148,11 @@ enum Commands {
         #[command(subcommand)]
         command: RegistryCommand,
     },
+    /// Verify signed receipt logs.
+    Receipts {
+        #[command(subcommand)]
+        command: ReceiptsCommand,
+    },
     /// Create or sign Proof-of-Action attestation messages.
     Poa {
         #[command(subcommand)]
@@ -255,6 +261,17 @@ enum RegistryCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum ReceiptsCommand {
+    /// Verify every signed JSONL receipt in a log file.
+    Verify {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum PoaCommand {
     /// Create a JSON PoA attestation request from a signed consensus frame.
     Request {
@@ -355,6 +372,7 @@ async fn main() -> Result<()> {
         } => compile_intent_command(&intent, explain, policy.as_deref()),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command),
+        Commands::Receipts { command } => receipts(command),
         Commands::Poa { command } => poa(command),
         Commands::Bench { command } => bench(command),
     }
@@ -681,6 +699,59 @@ fn sign_poa_request(request_path: &Path, validator_key_path: &Path) -> Result<()
     )?;
     let response = sign_poa_attestation_request(&validator, &request)?;
     println!("{}", serde_json::to_string_pretty(&response)?);
+    Ok(())
+}
+
+fn receipts(command: ReceiptsCommand) -> Result<()> {
+    match command {
+        ReceiptsCommand::Verify { path, json } => verify_receipts(&path, json),
+    }
+}
+
+fn verify_receipts(path: &Path, json: bool) -> Result<()> {
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read receipt log {}", path.display()))?;
+    let mut verified = 0_usize;
+    for (index, line) in input.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let receipt = SignedActionReceipt::from_json_str(line).with_context(|| {
+            format!(
+                "failed to parse receipt at {} line {}",
+                path.display(),
+                line_number
+            )
+        })?;
+        receipt.verify().with_context(|| {
+            format!(
+                "invalid receipt signature at {} line {}",
+                path.display(),
+                line_number
+            )
+        })?;
+        verified += 1;
+    }
+    if verified == 0 {
+        bail!("receipt log {} contains no receipts", path.display());
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "path": path.display().to_string(),
+                "receipts": verified,
+                "verified": true
+            }))?
+        );
+    } else {
+        println!("receipts={verified}");
+        println!("verified=true");
+        println!("path={}", path.display());
+    }
     Ok(())
 }
 

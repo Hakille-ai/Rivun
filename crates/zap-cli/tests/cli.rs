@@ -7,6 +7,7 @@ use uuid::Uuid;
 use zap_core::{ZapFlags, ZapFrame};
 use zap_crypto::{Keypair, sign_frame, verify_frame, verify_poa_certificate};
 use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
+use zap_ledger::SignedActionReceipt;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{ZapNode, ZapNodeConfig};
 use zap_store::{DriverManifest, DriverRegistry};
@@ -715,6 +716,66 @@ fn registry_commands_manage_signed_manifest_index() {
         json["operator_node_id"],
         serde_json::Value::String(operator.node_id().to_string())
     );
+}
+
+#[test]
+fn receipts_verify_checks_signed_jsonl_logs() {
+    let dir = tempdir().unwrap();
+    let node = Keypair::generate();
+    let source = Keypair::generate();
+    let frame = ZapFrame::with_timestamp(
+        source.node_id(),
+        node.node_id(),
+        ZapFlags::SIGNED,
+        123,
+        Bytes::from_static(b"payload"),
+    )
+    .unwrap();
+    let signed = sign_frame(&source, &frame).unwrap();
+    let receipt = SignedActionReceipt::new(&node, &signed, "echo", Some(b"ok"), 456, None).unwrap();
+    let receipt_path = dir.path().join("receipts.jsonl");
+    std::fs::write(
+        &receipt_path,
+        format!("\n{}", receipt.to_json_line().unwrap()),
+    )
+    .unwrap();
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "verify",
+            "--path",
+            receipt_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        verify.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&verify.stdout),
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(json["receipts"], 1);
+    assert_eq!(json["verified"], true);
+
+    let mut tampered = receipt.clone();
+    tampered.receipt.subject = "tampered".to_string();
+    std::fs::write(&receipt_path, tampered.to_json_line().unwrap()).unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "verify",
+            "--path",
+            receipt_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+    let stderr = String::from_utf8_lossy(&failed.stderr);
+    assert!(stderr.contains("invalid receipt signature"));
+    assert!(stderr.contains("line 1"));
 }
 
 #[test]
