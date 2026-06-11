@@ -62,12 +62,15 @@ jobs:
             --source-sha ${{ github.event.pull_request.head.sha }}
       - name: Compare benchmarks
         run: |
+          set +e
           ./target/debug/xtask bench compare \
             --base target/bench-results/base.json \
             --head target/bench-results/head.json \
             --thresholds tools/bench-thresholds.toml \
             --out target/bench-results/comparison.md
+          status=$?
           cat target/bench-results/comparison.md >> "$GITHUB_STEP_SUMMARY"
+          exit $status
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -88,7 +91,7 @@ jobs:
       - run: cargo ci-bench-full
       - name: Collect benchmarks
         run: |
-          cargo run -p xtask --locked -- bench collect \
+          cargo run --locked -p xtask -- bench collect \
             --out target/bench-results/latest.json \
             --label main \
             --source-sha ${{ github.sha }}
@@ -99,7 +102,7 @@ jobs:
             -o target/bench-results/history.json || true
       - name: Build benchmark site
         run: |
-          cargo run -p xtask --locked -- bench site \
+          cargo run --locked -p xtask -- bench site \
             --current target/bench-results/latest.json \
             --history-in target/bench-results/history.json \
             --out target/bench-site
