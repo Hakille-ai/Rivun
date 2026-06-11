@@ -10,7 +10,7 @@ use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
 use zap_ledger::SignedActionReceipt;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{ZapNode, ZapNodeConfig};
-use zap_store::{DriverManifest, DriverRegistry};
+use zap_store::{DriverManifest, DriverRegistry, DriverRegistryStatus};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -716,6 +716,124 @@ fn registry_commands_manage_signed_manifest_index() {
         json["operator_node_id"],
         serde_json::Value::String(operator.node_id().to_string())
     );
+}
+
+#[test]
+fn registry_revoke_marks_entry_and_clears_signature() {
+    let dir = tempdir().unwrap();
+    let author = Keypair::generate();
+    let operator = Keypair::generate();
+    let manifest_path = dir.path().join("echo.manifest.toml");
+    let registry_path = dir.path().join("registry.index.toml");
+    let operator_key_path = dir.path().join("operator.key");
+    let manifest = DriverManifest::new(
+        "echo-driver",
+        "0.1.0",
+        "echo",
+        echo_driver_wat().as_bytes(),
+        Default::default(),
+        None,
+        &author,
+    )
+    .unwrap();
+    std::fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
+    std::fs::write(&operator_key_path, operator.to_key_file_toml().unwrap()).unwrap();
+
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args(["registry", "init", "--out", registry_path.to_str().unwrap()])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "registry",
+                "add",
+                "--registry",
+                registry_path.to_str().unwrap(),
+                "--manifest",
+                manifest_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "registry",
+                "sign",
+                "--registry",
+                registry_path.to_str().unwrap(),
+                "--operator-key",
+                operator_key_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+
+    let revoke = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "revoke",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version",
+            "0.1.0",
+            "--reason",
+            "bad release",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        revoke.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&revoke.stdout),
+        String::from_utf8_lossy(&revoke.stderr)
+    );
+
+    let registry =
+        DriverRegistry::from_toml_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    assert_eq!(registry.entries[0].status, DriverRegistryStatus::Revoked);
+    assert_eq!(
+        registry.entries[0].revoked_reason.as_deref(),
+        Some("bad release")
+    );
+    assert!(registry.signature.is_none());
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "verify",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!verify.status.success());
+    assert!(String::from_utf8_lossy(&verify.stderr).contains("revoked"));
+
+    let verify_signature = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "verify-signature",
+            "--registry",
+            registry_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!verify_signature.status.success());
+    assert!(String::from_utf8_lossy(&verify_signature.stderr).contains("not signed"));
 }
 
 #[test]

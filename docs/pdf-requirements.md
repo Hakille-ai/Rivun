@@ -15,7 +15,7 @@ This file tracks the technical specification PDF against the current repository.
 | Cognitive interpreter | Foundation implemented | `zap-intent`, `zap compile-intent`, and `zap send --intent` |
 | Proof-of-Action | Foundation implemented | `ZPOA` trailer, validator signatures, threshold verification, daemon enforcement, and static configured validator networking exist; dynamic discovery remains future work |
 | Financial layer | Out of scope by product decision | Signed action receipts and offline verification provide technical auditability only |
-| ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, signed local registry approval, CLI create/verify/sign, and daemon config enforcement exist; package publishing remains future work |
+| ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, signed local registry approval, CLI create/verify/sign/revoke, and daemon config enforcement exist; package publishing remains future work |
 | SDKs for major languages | Planned | Rust crates exist; external language SDKs still to implement |
 
 Next high-impact PDF features:

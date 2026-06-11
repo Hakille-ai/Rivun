@@ -251,6 +251,20 @@ enum RegistryCommand {
         #[arg(long, default_value = "registry.index.toml")]
         registry: PathBuf,
     },
+    /// Revoke one manifest version in a registry index.
+    Revoke {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        action: String,
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        reason: Option<String>,
+        /// Write to a different registry index path.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// List registry entries.
     List {
         #[arg(long, default_value = "registry.index.toml")]
@@ -1233,6 +1247,13 @@ fn registry(command: RegistryCommand) -> Result<()> {
             out,
         } => sign_registry(&registry, &operator_key, out.as_deref()),
         RegistryCommand::VerifySignature { registry } => verify_registry_signature(&registry),
+        RegistryCommand::Revoke {
+            registry,
+            action,
+            version,
+            reason,
+            out,
+        } => revoke_registry_entry(&registry, &action, &version, reason, out.as_deref()),
         RegistryCommand::List { registry, json } => list_registry(&registry, json),
     }
 }
@@ -1301,6 +1322,27 @@ fn verify_registry_signature(registry_path: &Path) -> Result<()> {
     if let Some(operator_node_id) = registry.operator_node_id {
         println!("operator_node_id={operator_node_id}");
     }
+    Ok(())
+}
+
+fn revoke_registry_entry(
+    registry_path: &Path,
+    action: &str,
+    version: &str,
+    reason: Option<String>,
+    out: Option<&Path>,
+) -> Result<()> {
+    let mut registry = load_driver_registry(registry_path)?;
+    let reason = reason.unwrap_or_else(|| "revoked by operator".to_string());
+    registry.revoke(action, version, reason.clone())?;
+    let out = out.unwrap_or(registry_path);
+    write_text_file(out, &registry.to_toml_string()?, true)?;
+    println!("registry={}", out.display());
+    println!("action={action}");
+    println!("version={version}");
+    println!("status=revoked");
+    println!("reason={reason}");
+    println!("signature=cleared");
     Ok(())
 }
 

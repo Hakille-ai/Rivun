@@ -89,6 +89,11 @@ cargo run -p zap-cli -- registry add \
 cargo run -p zap-cli -- registry verify \
   --registry registry.index.toml \
   --manifest examples/wasm-drivers/echo/echo.manifest.toml
+cargo run -p zap-cli -- registry revoke \
+  --registry registry.index.toml \
+  --action echo \
+  --version 0.1.0 \
+  --reason "bad release"
 cargo run -p zap-cli -- registry sign \
   --registry registry.index.toml \
   --operator-key .zap/node.key
@@ -112,6 +117,9 @@ require_signature = true
 
 `check-config --json` includes `registry_enabled`, `registry_entry_count`, and
 `registry_signature_required` for deployment gates.
+
+Any registry mutation, including `add` and `revoke`, clears the operator
+signature. Re-run `registry sign` after reviewing the changed index.
 
 ## Driver SDK
 

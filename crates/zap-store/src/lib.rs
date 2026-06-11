@@ -290,6 +290,7 @@ impl DriverRegistry {
     ) -> Result<()> {
         self.validate()?;
         manifest.verify_static_and_signature()?;
+        self.clear_signature();
         self.entries.retain(|entry| {
             !(entry.action == manifest.action && entry.version == manifest.version)
         });
@@ -300,6 +301,24 @@ impl DriverRegistry {
                 .cmp(&right.action)
                 .then_with(|| left.version.cmp(&right.version))
         });
+        self.validate()
+    }
+
+    pub fn revoke(&mut self, action: &str, version: &str, reason: impl Into<String>) -> Result<()> {
+        self.validate()?;
+        {
+            let entry = self
+                .entries
+                .iter_mut()
+                .find(|entry| entry.action == action && entry.version == version)
+                .ok_or_else(|| ZapStoreError::MissingRegistryEntry {
+                    action: action.to_string(),
+                    version: version.to_string(),
+                })?;
+            entry.status = DriverRegistryStatus::Revoked;
+            entry.revoked_reason = Some(reason.into());
+        }
+        self.clear_signature();
         self.validate()
     }
 
@@ -423,6 +442,12 @@ impl DriverRegistry {
         message.extend_from_slice(REGISTRY_SIGNATURE_DOMAIN);
         message.extend_from_slice(&encoded);
         Ok(message)
+    }
+
+    fn clear_signature(&mut self) {
+        self.operator_node_id = None;
+        self.operator_public_key = None;
+        self.signature = None;
     }
 }
 
@@ -610,6 +635,66 @@ mod tests {
         let encoded = registry.to_toml_string().unwrap();
         let decoded = DriverRegistry::from_toml_str(&encoded).unwrap();
         decoded.verify_signature().unwrap();
+    }
+
+    #[test]
+    fn registry_mutations_clear_signature() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "0.1.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        registry.add_manifest(&manifest, None).unwrap();
+        registry.sign(&operator).unwrap();
+        assert!(registry.signature.is_some());
+
+        registry
+            .add_manifest(&manifest, Some("echo.manifest.toml".to_string()))
+            .unwrap();
+
+        assert!(registry.operator_node_id.is_none());
+        assert!(registry.operator_public_key.is_none());
+        assert!(registry.signature.is_none());
+    }
+
+    #[test]
+    fn registry_revokes_manifest_version() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "0.1.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(None);
+        registry.add_manifest(&manifest, None).unwrap();
+        registry.sign(&operator).unwrap();
+
+        registry.revoke("echo", "0.1.0", "bad release").unwrap();
+
+        assert_eq!(registry.entries[0].status, DriverRegistryStatus::Revoked);
+        assert_eq!(
+            registry.entries[0].revoked_reason.as_deref(),
+            Some("bad release")
+        );
+        assert!(registry.signature.is_none());
+        assert!(matches!(
+            registry.verify_manifest(&manifest),
+            Err(ZapStoreError::RevokedRegistryEntry { .. })
+        ));
     }
 
     #[test]

@@ -82,6 +82,7 @@ Create a local registry index and add a signed manifest:
 ```bash
 cargo run -p zap-cli -- registry init --out registry.index.toml
 cargo run -p zap-cli -- registry add --registry registry.index.toml --manifest examples/wasm-drivers/echo/echo.manifest.toml
+cargo run -p zap-cli -- registry revoke --registry registry.index.toml --action echo --version 0.1.0 --reason "bad release"
 cargo run -p zap-cli -- registry sign --registry registry.index.toml --operator-key .zap/node.key
 cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
 ```
@@ -95,7 +96,8 @@ require_signature = true
 ```
 
 Set `require_signature = true` for production gates that should fail when the
-local registry was not approved by an operator key.
+local registry was not approved by an operator key. Registry mutations clear the
+operator signature, so review and re-sign after every `add` or `revoke`.
 
 `zap send` is a one-shot peer process. It validates the config, binds to the
 config `bind` address, sends one signed frame, and exits. This is deliberate:

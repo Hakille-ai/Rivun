@@ -31,6 +31,7 @@ Foundation implemented:
 - `zap driver-manifest create` signs local WASM/WAT artifacts;
 - `zap driver-manifest verify` checks manifest signature, hash, ABI, and action;
 - local `registry.index.toml` files track active or revoked manifest versions;
+- `zap registry revoke` marks unsafe manifest versions as revoked;
 - optional operator signatures can approve registry indexes for deployment gates;
 - `zap-node` verifies configured manifests and registry entries before daemon startup;
 - `zap-driver-sdk` provides minimal ABI helpers for driver authors.
