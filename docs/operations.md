@@ -212,6 +212,7 @@ RUST_LOG=info cargo run -p zap-cli -- run --config zap.toml
 
 ```bash
 cargo run -p zap-cli -- inspect frame.bin
+cargo run -p zap-cli -- inspect frame.bin --verify-with-public-key <base64-public-key>
 ```
 
 The inspect command decodes raw ZAP frames, not encrypted UDP datagrams. When the frame payload is a `ZENV` envelope, inspect also prints:
@@ -221,6 +222,10 @@ The inspect command decodes raw ZAP frames, not encrypted UDP datagrams. When th
 - `content_type`;
 - `metadata_len`;
 - `body_len`.
+
+Use `--verify-with-public-key` for offline audit when you only need signature
+verification. `--verify-with-key` remains available for local key files, but it
+is not required to verify a frame.
 
 ## Local Two-Node Smoke Test
 
