@@ -1,0 +1,12 @@
+.git
+.github
+.zap
+target
+zap-docs
+*.log
+*.tmp
+*.wasm
+Dockerfile
+compose.yaml
+docs
+examples

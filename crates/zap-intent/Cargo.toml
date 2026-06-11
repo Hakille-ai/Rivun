@@ -1,0 +1,12 @@
+[package]
+name = "zap-intent"
+description = "Deterministic local intent compiler for ZAP action envelopes."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

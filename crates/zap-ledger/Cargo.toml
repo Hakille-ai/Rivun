@@ -1,0 +1,21 @@
+[package]
+name = "zap-ledger"
+description = "Signed action receipts for ZAP audit logs."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zap-core = { path = "../zap-core" }
+zap-crypto = { path = "../zap-crypto" }
+
+[dev-dependencies]
+bytes.workspace = true

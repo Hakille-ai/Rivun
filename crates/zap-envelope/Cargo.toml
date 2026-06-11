@@ -1,0 +1,13 @@
+[package]
+name = "zap-envelope"
+description = "Binary universal payload envelopes for ZAP-Wire frames."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zap-core = { path = "../zap-core" }

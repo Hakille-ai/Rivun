@@ -1,0 +1,15 @@
+[package]
+name = "zap-runtime"
+description = "Sandboxed WebAssembly action runtime for ZAP."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+wasmtime.workspace = true
+
+[dev-dependencies]
+wat.workspace = true

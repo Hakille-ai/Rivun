@@ -1,0 +1,25 @@
+bind = "127.0.0.1:7000"
+key_file = "../../.zap/node-a.key"
+require_signed = true
+
+[[peers]]
+# Replace with node B's generated node_id before running.
+node_id = "22222222-2222-4222-8222-222222222222"
+addr = "127.0.0.1:7001"
+# Replace with node B's generated public_key before running.
+public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
+
+[[drivers]]
+action = "echo"
+path = "../wasm-drivers/echo/echo.wat"
+
+[runtime]
+fuel = 10000000
+timeout_ms = 1000
+max_memory_bytes = 16777216
+max_output_bytes = 1048576
+
+[security]
+max_clock_skew_micros = 300000000
+replay_cache_capacity = 4096

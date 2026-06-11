@@ -1,0 +1,14 @@
+/target/
+/.zap/
+/.env
+/.env.*
+/dist/
+/coverage/
+*.log
+*.tmp
+*.key
+*.pem
+*.p12
+*.wasm
+!.gitkeep
+!.env.example

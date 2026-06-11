@@ -1,0 +1,33 @@
+name: zap
+
+services:
+  node:
+    build:
+      context: .
+    image: zap:local
+    command: ["run", "--config", "/etc/zap/zap.toml"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7000:7000/udp"
+    environment:
+      RUST_LOG: info
+    volumes:
+      - type: bind
+        source: ./examples/configs/container-node.toml
+        target: /etc/zap/zap.toml
+        read_only: true
+      - type: bind
+        source: ./.zap/container
+        target: /var/lib/zap
+      - type: bind
+        source: ./examples/wasm-drivers
+        target: /opt/zap/drivers
+        read_only: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
