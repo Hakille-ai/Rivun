@@ -19,6 +19,7 @@ pub const DRIVER_ABI_VERSION: u16 = 1;
 pub const DRIVER_HASH_PREFIX: &str = "blake3:";
 
 const MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-MANIFEST-v1";
+const REGISTRY_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-v1";
 const PUBLIC_KEY_LEN: usize = 32;
 const SIGNATURE_LEN: usize = 64;
 
@@ -48,6 +49,14 @@ pub enum ZapStoreError {
         expected: String,
         actual: String,
     },
+    #[error("driver registry is not signed")]
+    MissingRegistrySignature,
+    #[error(
+        "registry operator public key derives node_id {derived}, but registry declares {declared}"
+    )]
+    RegistryOperatorNodeMismatch { declared: Uuid, derived: Uuid },
+    #[error("registry signature verification failed")]
+    InvalidRegistrySignature,
     #[error(
         "driver manifest action `{manifest_action}` does not match configured action `{configured_action}`"
     )]
@@ -75,7 +84,7 @@ pub enum ZapStoreError {
     Base64(#[from] base64::DecodeError),
     #[error("failed to parse Ed25519 manifest key material: {0}")]
     Ed25519(#[from] ed25519_dalek::SignatureError),
-    #[error("failed to serialize manifest signing payload: {0}")]
+    #[error("failed to serialize signing payload: {0}")]
     Json(#[from] serde_json::Error),
     #[error("failed to parse TOML driver manifest: {0}")]
     TomlDecode(#[from] toml::de::Error),
@@ -131,6 +140,12 @@ pub struct DriverRegistry {
     pub schema_version: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_node_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_public_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
     #[serde(default)]
     pub entries: Vec<DriverRegistryEntry>,
 }
@@ -253,6 +268,9 @@ impl DriverRegistry {
         Self {
             schema_version: REGISTRY_SCHEMA_VERSION,
             generated_by,
+            operator_node_id: None,
+            operator_public_key: None,
+            signature: None,
             entries: Vec::new(),
         }
     }
@@ -341,6 +359,71 @@ impl DriverRegistry {
         )?;
         Ok(())
     }
+
+    pub fn sign(&mut self, operator: &Keypair) -> Result<()> {
+        self.validate()?;
+        self.operator_node_id = Some(operator.node_id());
+        self.operator_public_key =
+            Some(STANDARD_NO_PAD.encode(operator.verifying_key().to_bytes()));
+        self.signature = None;
+
+        let signing_key = SigningKey::from_bytes(&operator.secret_bytes());
+        let signature: Signature = signing_key.sign(&self.signing_message()?);
+        self.signature = Some(STANDARD_NO_PAD.encode(signature.to_bytes()));
+        Ok(())
+    }
+
+    pub fn verify_signature(&self) -> Result<()> {
+        self.validate()?;
+        let operator_node_id = self
+            .operator_node_id
+            .ok_or(ZapStoreError::MissingRegistrySignature)?;
+        let operator_public_key = self
+            .operator_public_key
+            .as_deref()
+            .ok_or(ZapStoreError::MissingRegistrySignature)?;
+        let signature = self
+            .signature
+            .as_deref()
+            .ok_or(ZapStoreError::MissingRegistrySignature)?;
+
+        let public_key_bytes =
+            decode_fixed::<PUBLIC_KEY_LEN>(operator_public_key, "registry_public_key")?;
+        let derived_node_id = node_id_from_public_key(&public_key_bytes);
+        if derived_node_id != operator_node_id {
+            return Err(ZapStoreError::RegistryOperatorNodeMismatch {
+                declared: operator_node_id,
+                derived: derived_node_id,
+            });
+        }
+
+        let verifying_key = VerifyingKey::from_bytes(&public_key_bytes)?;
+        let signature_bytes = decode_fixed::<SIGNATURE_LEN>(signature, "registry_signature")?;
+        let signature = Signature::from_bytes(&signature_bytes);
+        verifying_key
+            .verify(&self.signing_message()?, &signature)
+            .map_err(|_| ZapStoreError::InvalidRegistrySignature)
+    }
+
+    fn signing_message(&self) -> Result<Vec<u8>> {
+        let payload = RegistrySigningPayload {
+            schema_version: self.schema_version,
+            generated_by: self.generated_by.as_deref(),
+            operator_node_id: self
+                .operator_node_id
+                .ok_or(ZapStoreError::MissingRegistrySignature)?,
+            operator_public_key: self
+                .operator_public_key
+                .as_deref()
+                .ok_or(ZapStoreError::MissingRegistrySignature)?,
+            entries: &self.entries,
+        };
+        let encoded = serde_json::to_vec(&payload)?;
+        let mut message = Vec::with_capacity(REGISTRY_SIGNATURE_DOMAIN.len() + encoded.len());
+        message.extend_from_slice(REGISTRY_SIGNATURE_DOMAIN);
+        message.extend_from_slice(&encoded);
+        Ok(message)
+    }
 }
 
 impl DriverRegistryEntry {
@@ -371,6 +454,15 @@ struct ManifestSigningPayload<'a> {
     description: Option<&'a str>,
     author_node_id: Uuid,
     author_public_key: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistrySigningPayload<'a> {
+    schema_version: u8,
+    generated_by: Option<&'a str>,
+    operator_node_id: Uuid,
+    operator_public_key: &'a str,
+    entries: &'a [DriverRegistryEntry],
 }
 
 pub fn driver_hash(wasm: &[u8]) -> String {
@@ -490,6 +582,69 @@ mod tests {
         let encoded = registry.to_toml_string().unwrap();
         let decoded = DriverRegistry::from_toml_str(&encoded).unwrap();
         assert_eq!(decoded, registry);
+    }
+
+    #[test]
+    fn registry_signs_and_verifies_index() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "0.1.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        registry.add_manifest(&manifest, None).unwrap();
+        registry.sign(&operator).unwrap();
+
+        registry.verify_signature().unwrap();
+        assert_eq!(registry.operator_node_id, Some(operator.node_id()));
+        assert!(registry.operator_public_key.is_some());
+        assert!(registry.signature.is_some());
+
+        let encoded = registry.to_toml_string().unwrap();
+        let decoded = DriverRegistry::from_toml_str(&encoded).unwrap();
+        decoded.verify_signature().unwrap();
+    }
+
+    #[test]
+    fn registry_signature_rejects_entry_mutation() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "0.1.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(None);
+        registry.add_manifest(&manifest, None).unwrap();
+        registry.sign(&operator).unwrap();
+        registry.entries[0].wasm_hash = driver_hash(b"tampered");
+
+        assert!(matches!(
+            registry.verify_signature(),
+            Err(ZapStoreError::InvalidRegistrySignature)
+        ));
+    }
+
+    #[test]
+    fn registry_signature_is_required_when_verified() {
+        let registry = DriverRegistry::empty(None);
+
+        assert!(matches!(
+            registry.verify_signature(),
+            Err(ZapStoreError::MissingRegistrySignature)
+        ));
     }
 
     #[test]

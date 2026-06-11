@@ -230,6 +230,21 @@ enum RegistryCommand {
         #[arg(long)]
         manifest: PathBuf,
     },
+    /// Sign a registry index with an operator key.
+    Sign {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        operator_key: PathBuf,
+        /// Write to a different registry index path.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Verify the operator signature on a registry index.
+    VerifySignature {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+    },
     /// List registry entries.
     List {
         #[arg(long, default_value = "registry.index.toml")]
@@ -430,6 +445,10 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
         println!("signed_drivers={}", report.signed_driver_count);
         println!("registry_enabled={}", report.registry_enabled);
         println!("registry_entries={}", report.registry_entry_count);
+        println!(
+            "registry_signature_required={}",
+            report.registry_signature_required
+        );
         println!("receipt_log_enabled={}", report.receipt_log_enabled);
         println!("require_signed={}", report.require_signed);
         for warning in &report.warnings {
@@ -1137,6 +1156,12 @@ fn registry(command: RegistryCommand) -> Result<()> {
         RegistryCommand::Verify { registry, manifest } => {
             verify_registry_entry(&registry, &manifest)
         }
+        RegistryCommand::Sign {
+            registry,
+            operator_key,
+            out,
+        } => sign_registry(&registry, &operator_key, out.as_deref()),
+        RegistryCommand::VerifySignature { registry } => verify_registry_signature(&registry),
         RegistryCommand::List { registry, json } => list_registry(&registry, json),
     }
 }
@@ -1186,12 +1211,38 @@ fn verify_registry_entry(registry_path: &Path, manifest_path: &Path) -> Result<(
     Ok(())
 }
 
+fn sign_registry(registry_path: &Path, operator_key_path: &Path, out: Option<&Path>) -> Result<()> {
+    let mut registry = load_driver_registry(registry_path)?;
+    let operator = load_keypair(operator_key_path)?;
+    registry.sign(&operator)?;
+    let out = out.unwrap_or(registry_path);
+    write_text_file(out, &registry.to_toml_string()?, true)?;
+    println!("registry={}", out.display());
+    println!("operator_node_id={}", operator.node_id());
+    println!("signature=ok");
+    Ok(())
+}
+
+fn verify_registry_signature(registry_path: &Path) -> Result<()> {
+    let registry = load_driver_registry(registry_path)?;
+    registry.verify_signature()?;
+    println!("registry={} signature=ok", registry_path.display());
+    if let Some(operator_node_id) = registry.operator_node_id {
+        println!("operator_node_id={operator_node_id}");
+    }
+    Ok(())
+}
+
 fn list_registry(registry_path: &Path, json: bool) -> Result<()> {
     let registry = load_driver_registry(registry_path)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&registry)?);
     } else {
         println!("registry={}", registry_path.display());
+        println!("signed={}", registry.signature.is_some());
+        if let Some(operator_node_id) = registry.operator_node_id {
+            println!("operator_node_id={operator_node_id}");
+        }
         println!("entries={}", registry.entries.len());
         for entry in &registry.entries {
             println!(
@@ -1225,6 +1276,14 @@ fn load_driver_manifest(path: &Path) -> Result<DriverManifest> {
         .verify_static_and_signature()
         .with_context(|| format!("invalid signed driver manifest {}", path.display()))?;
     Ok(manifest)
+}
+
+fn load_keypair(path: &Path) -> Result<Keypair> {
+    Keypair::from_key_file_toml(
+        &fs::read_to_string(path)
+            .with_context(|| format!("failed to read key file {}", path.display()))?,
+    )
+    .with_context(|| format!("invalid key file {}", path.display()))
 }
 
 fn write_text_file(out: &Path, contents: &str, force: bool) -> Result<()> {

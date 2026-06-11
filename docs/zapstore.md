@@ -89,6 +89,11 @@ cargo run -p zap-cli -- registry add \
 cargo run -p zap-cli -- registry verify \
   --registry registry.index.toml \
   --manifest examples/wasm-drivers/echo/echo.manifest.toml
+cargo run -p zap-cli -- registry sign \
+  --registry registry.index.toml \
+  --operator-key .zap/node.key
+cargo run -p zap-cli -- registry verify-signature \
+  --registry registry.index.toml
 cargo run -p zap-cli -- registry list --registry registry.index.toml --json
 ```
 
@@ -96,13 +101,17 @@ When configured, `zap-node` validates signed driver manifests against the local
 registry before startup. Active entries must match name, version, ABI, hash, and
 author node id. Revoked entries are rejected.
 
+Registry signatures are optional by default for compatibility with existing
+local indexes. Production configs can require an operator signature:
+
 ```toml
 [registry]
 path = "registry.index.toml"
+require_signature = true
 ```
 
-`check-config --json` includes `registry_enabled` and `registry_entry_count` for
-deployment gates.
+`check-config --json` includes `registry_enabled`, `registry_entry_count`, and
+`registry_signature_required` for deployment gates.
 
 ## Driver SDK
 

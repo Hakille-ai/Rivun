@@ -197,6 +197,8 @@ pub struct ReceiptsConfig {
 pub struct RegistryConfig {
     #[serde(default)]
     pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub require_signature: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -234,6 +236,7 @@ pub struct ConfigValidationReport {
     pub receipt_log_enabled: bool,
     pub registry_enabled: bool,
     pub registry_entry_count: usize,
+    pub registry_signature_required: bool,
     pub require_signed: bool,
     pub poa_validator_count: usize,
     pub poa_required_threshold: u16,
@@ -434,7 +437,7 @@ impl ZapNode {
         let poa_validators = load_poa_validators(&config.poa)?;
 
         let runtime = WasmExecutor::new()?;
-        let registry = load_driver_registry_optional(config.registry.path.as_deref())?;
+        let registry = load_driver_registry_optional(&config.registry)?;
         let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
         let endpoint = ZapEndpoint::bind(endpoint_config).await?;
 
@@ -699,7 +702,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
     validate_runtime(config.runtime)?;
     validate_peers(config, bind, node_id, &mut warnings)?;
     validate_poa(config, &mut warnings)?;
-    let registry = load_driver_registry_optional(config.registry.path.as_deref())?;
+    let registry = load_driver_registry_optional(&config.registry)?;
     let registry_entry_count = registry
         .as_ref()
         .map(|registry| registry.entries.len())
@@ -720,6 +723,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         receipt_log_enabled: config.receipts.path.is_some(),
         registry_enabled: config.registry.path.is_some(),
         registry_entry_count,
+        registry_signature_required: config.registry.require_signature,
         require_signed: config.require_signed,
         poa_validator_count: config.poa.validators.len(),
         poa_required_threshold: config.poa.required_threshold,
@@ -1016,8 +1020,11 @@ fn load_driver_manifest(path: &Path) -> Result<DriverManifest> {
         .with_context(|| format!("failed to parse driver manifest {}", path.display()))
 }
 
-fn load_driver_registry_optional(path: Option<&Path>) -> Result<Option<DriverRegistry>> {
-    let Some(path) = path else {
+fn load_driver_registry_optional(config: &RegistryConfig) -> Result<Option<DriverRegistry>> {
+    let Some(path) = config.path.as_deref() else {
+        if config.require_signature {
+            bail!("registry.require_signature=true requires registry.path");
+        }
         return Ok(None);
     };
     let input = fs::read_to_string(path)
@@ -1027,6 +1034,11 @@ fn load_driver_registry_optional(path: Option<&Path>) -> Result<Option<DriverReg
     registry
         .validate()
         .with_context(|| format!("invalid driver registry {}", path.display()))?;
+    if config.require_signature {
+        registry
+            .verify_signature()
+            .with_context(|| format!("invalid driver registry signature {}", path.display()))?;
+    }
     Ok(Some(registry))
 }
 
@@ -1602,6 +1614,54 @@ path = "logs/receipts.jsonl"
         let error = config.validate().unwrap_err();
         assert!(format!("{error:#}").contains("revoked"));
         assert!(format!("{error:#}").contains("bad release"));
+    }
+
+    #[test]
+    fn config_validation_can_require_signed_registry() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        let manifest_path = temp.path().join("echo.manifest.toml");
+        let manifest = DriverManifest::new(
+            "echo-driver",
+            "0.1.0",
+            "echo",
+            echo_driver_wat().as_bytes(),
+            DriverPermissions::none(),
+            Some("test driver manifest".to_string()),
+            &author,
+        )
+        .unwrap();
+        std::fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
+        config.drivers[0].manifest = Some(manifest_path.clone());
+
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        registry
+            .add_manifest(&manifest, Some(manifest_path.display().to_string()))
+            .unwrap();
+        let registry_path = temp.path().join("registry.index.toml");
+        std::fs::write(&registry_path, registry.to_toml_string().unwrap()).unwrap();
+        config.registry.path = Some(registry_path.clone());
+        config.registry.require_signature = true;
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("driver registry is not signed"));
+
+        registry.sign(&operator).unwrap();
+        std::fs::write(&registry_path, registry.to_toml_string().unwrap()).unwrap();
+        let report = config.validate().unwrap();
+        assert!(report.registry_enabled);
+        assert!(report.registry_signature_required);
+        assert_eq!(report.registry_entry_count, 1);
     }
 
     #[test]

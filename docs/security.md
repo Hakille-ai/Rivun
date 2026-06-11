@@ -76,7 +76,7 @@ When `[receipts].path` is configured, `zap-node` appends one Ed25519-signed JSON
 
 WASM drivers receive no host imports by default. Network, filesystem, clock, and environment capabilities are denied unless explicitly granted by future host APIs.
 
-Signed ZapStore manifests bind a driver action to a BLAKE3 artifact hash, ABI version, declared permissions, and author Ed25519 identity. `zap-node` verifies the manifest signature and hash before compiling the driver. ABI v1 still rejects every requested host permission because the host capability APIs do not exist yet.
+Signed ZapStore manifests bind a driver action to a BLAKE3 artifact hash, ABI version, declared permissions, and author Ed25519 identity. `zap-node` verifies the manifest signature and hash before compiling the driver. Local registry indexes can also carry an operator signature; set `[registry] require_signature = true` to reject unsigned or tampered indexes during config validation and daemon startup. ABI v1 still rejects every requested host permission because the host capability APIs do not exist yet.
 
 Current enforced limits:
 

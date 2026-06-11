@@ -606,8 +606,10 @@ fn compile_intent_explain_applies_policy() {
 fn registry_commands_manage_signed_manifest_index() {
     let dir = tempdir().unwrap();
     let author = Keypair::generate();
+    let operator = Keypair::generate();
     let manifest_path = dir.path().join("echo.manifest.toml");
     let registry_path = dir.path().join("registry.index.toml");
+    let operator_key_path = dir.path().join("operator.key");
     let manifest = DriverManifest::new(
         "echo-driver",
         "0.1.0",
@@ -619,6 +621,7 @@ fn registry_commands_manage_signed_manifest_index() {
     )
     .unwrap();
     std::fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
+    std::fs::write(&operator_key_path, operator.to_key_file_toml().unwrap()).unwrap();
 
     let init = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args(["registry", "init", "--out", registry_path.to_str().unwrap()])
@@ -657,6 +660,40 @@ fn registry_commands_manage_signed_manifest_index() {
         .unwrap();
     assert!(verify.status.success());
 
+    let sign = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "sign",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--operator-key",
+            operator_key_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        sign.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&sign.stdout),
+        String::from_utf8_lossy(&sign.stderr)
+    );
+
+    let verify_signature = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "verify-signature",
+            "--registry",
+            registry_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        verify_signature.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&verify_signature.stdout),
+        String::from_utf8_lossy(&verify_signature.stderr)
+    );
+
     let list = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
             "registry",
@@ -670,9 +707,14 @@ fn registry_commands_manage_signed_manifest_index() {
     assert!(list.status.success());
     let registry =
         DriverRegistry::from_toml_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    registry.verify_signature().unwrap();
     assert_eq!(registry.entries.len(), 1);
     let json: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
     assert_eq!(json["entries"][0]["action"], "echo");
+    assert_eq!(
+        json["operator_node_id"],
+        serde_json::Value::String(operator.node_id().to_string())
+    );
 }
 
 #[test]

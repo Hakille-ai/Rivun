@@ -142,6 +142,8 @@ Create and verify a local ZapStore registry index:
 cargo run -p zap-cli -- registry init --out registry.index.toml
 cargo run -p zap-cli -- registry add --registry registry.index.toml --manifest examples/wasm-drivers/echo/echo.manifest.toml
 cargo run -p zap-cli -- registry verify --registry registry.index.toml --manifest examples/wasm-drivers/echo/echo.manifest.toml
+cargo run -p zap-cli -- registry sign --registry registry.index.toml --operator-key .zap/node.key
+cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
 ```
 
 Apply an intent policy before sending or inspecting a plan:

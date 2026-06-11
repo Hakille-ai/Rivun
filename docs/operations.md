@@ -74,14 +74,16 @@ cargo run -p zap-cli -- driver-manifest verify --driver examples/wasm-drivers/ec
 ```
 
 `check-config --json` includes `signed_driver_count` so deploy scripts can require signed driver provenance.
-It also includes `registry_enabled` and `registry_entry_count` when a local
-ZapStore registry is configured.
+It also includes `registry_enabled`, `registry_entry_count`, and
+`registry_signature_required` when a local ZapStore registry is configured.
 
 Create a local registry index and add a signed manifest:
 
 ```bash
 cargo run -p zap-cli -- registry init --out registry.index.toml
 cargo run -p zap-cli -- registry add --registry registry.index.toml --manifest examples/wasm-drivers/echo/echo.manifest.toml
+cargo run -p zap-cli -- registry sign --registry registry.index.toml --operator-key .zap/node.key
+cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
 ```
 
 Configure a node to enforce that index:
@@ -89,7 +91,11 @@ Configure a node to enforce that index:
 ```toml
 [registry]
 path = "registry.index.toml"
+require_signature = true
 ```
+
+Set `require_signature = true` for production gates that should fail when the
+local registry was not approved by an operator key.
 
 `zap send` is a one-shot peer process. It validates the config, binds to the
 config `bind` address, sends one signed frame, and exits. This is deliberate:
