@@ -155,6 +155,7 @@ Create and sign a portable PoA attestation request:
 
 ```bash
 cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-network
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-network --poa-timeout-ms 5000
 cargo run -p zap-cli -- poa request --frame critical-frame.bin --requester-key .zap/node.key --threshold 1 > poa-request.json
 cargo run -p zap-cli -- poa attest --request poa-request.json --validator-key .zap/validator.key > poa-response.json
 ```
