@@ -139,6 +139,10 @@ pub enum ZapNetError {
     SourceMismatch { envelope: Uuid, frame: Uuid },
     #[error("decrypted frame target mismatch: envelope {envelope}, frame {frame}")]
     TargetMismatch { envelope: Uuid, frame: Uuid },
+    #[error("outbound frame source {frame} does not match endpoint {endpoint}")]
+    OutboundSourceMismatch { endpoint: Uuid, frame: Uuid },
+    #[error("outbound frame target {frame} does not match requested peer {target}")]
+    OutboundTargetMismatch { target: Uuid, frame: Uuid },
     #[error("broadcast frame target must be nil, got {0}")]
     InvalidBroadcastTarget(Uuid),
     #[error("frame target {0} is not this endpoint")]
@@ -289,6 +293,7 @@ impl ZapEndpoint {
     }
 
     pub async fn send_frame(&self, target: Uuid, frame: &ZapFrame) -> Result<()> {
+        self.validate_outbound_frame(target, frame)?;
         let peer = self.peer_by_id(target).await?;
         let encoded = frame.encode();
         let datagram = encrypt_datagram(
@@ -308,6 +313,28 @@ impl ZapEndpoint {
         }
 
         self.socket.send_to(&datagram, peer.addr).await?;
+        Ok(())
+    }
+
+    fn validate_outbound_frame(&self, target: Uuid, frame: &ZapFrame) -> Result<()> {
+        if frame.header.source_node != self.node_id {
+            return Err(ZapNetError::OutboundSourceMismatch {
+                endpoint: self.node_id,
+                frame: frame.header.source_node,
+            });
+        }
+        if frame.header.flags.contains(ZapFlags::BROADCAST) {
+            if frame.header.target_node != Uuid::nil() {
+                return Err(ZapNetError::InvalidBroadcastTarget(
+                    frame.header.target_node,
+                ));
+            }
+        } else if frame.header.target_node != target {
+            return Err(ZapNetError::OutboundTargetMismatch {
+                target,
+                frame: frame.header.target_node,
+            });
+        }
         Ok(())
     }
 
@@ -890,6 +917,77 @@ mod tests {
         assert!(matches!(
             endpoint.send(id(2), Bytes::from_static(b"ping")).await,
             Err(ZapNetError::NonceCounterExhausted)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_outbound_frame_with_wrong_source() {
+        let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+            "127.0.0.1:0".parse().unwrap(),
+            id(1),
+        ))
+        .await
+        .unwrap();
+        let frame = ZapFrame::with_timestamp(
+            id(9),
+            id(2),
+            ZapFlags::ENCRYPTED,
+            42,
+            Bytes::from_static(b"ping"),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            endpoint.send_frame(id(2), &frame).await,
+            Err(ZapNetError::OutboundSourceMismatch { endpoint: endpoint_id, frame: frame_id })
+                if endpoint_id == id(1) && frame_id == id(9)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_outbound_frame_with_wrong_unicast_target() {
+        let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+            "127.0.0.1:0".parse().unwrap(),
+            id(1),
+        ))
+        .await
+        .unwrap();
+        let frame = ZapFrame::with_timestamp(
+            id(1),
+            id(3),
+            ZapFlags::ENCRYPTED,
+            42,
+            Bytes::from_static(b"ping"),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            endpoint.send_frame(id(2), &frame).await,
+            Err(ZapNetError::OutboundTargetMismatch { target, frame: frame_id })
+                if target == id(2) && frame_id == id(3)
+        ));
+    }
+
+    #[tokio::test]
+    async fn rejects_outbound_broadcast_frame_with_non_nil_target() {
+        let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+            "127.0.0.1:0".parse().unwrap(),
+            id(1),
+        ))
+        .await
+        .unwrap();
+        let frame = ZapFrame::with_timestamp(
+            id(1),
+            id(2),
+            ZapFlags::ENCRYPTED | ZapFlags::BROADCAST,
+            42,
+            Bytes::from_static(b"broadcast"),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            endpoint.send_frame(id(2), &frame).await,
+            Err(ZapNetError::InvalidBroadcastTarget(node_id)) if node_id == id(2)
         ));
     }
 
