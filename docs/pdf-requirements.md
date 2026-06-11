@@ -13,7 +13,7 @@ This file tracks the technical specification PDF against the current repository.
 | WASM sandbox execution | Implemented | `zap-runtime` ABI validation, fuel, memory, output, timeout, permissions |
 | Broadcast target zero | Implemented | broadcast frames use UUID nil internally while UDP envelopes target concrete peers |
 | Cognitive interpreter | Foundation implemented | `zap-intent`, `zap compile-intent`, and `zap send --intent` |
-| Proof-of-Action | Foundation implemented | `ZPOA` trailer, validator signatures, threshold verification, and daemon enforcement exist; distributed quorum networking remains future work |
+| Proof-of-Action | Foundation implemented | `ZPOA` trailer, validator signatures, threshold verification, daemon enforcement, and static configured validator networking exist; dynamic discovery remains future work |
 | Financial layer | Out of scope by product decision | Signed action receipts provide technical auditability only |
 | ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, CLI create/verify, daemon config enforcement; distributed index and package publishing remain future work |
 | SDKs for major languages | Planned | Rust crates exist; external language SDKs still to implement |
