@@ -19,9 +19,6 @@ case, ZAP is not limited to action dispatch — it carries data, events, command
 queries, responses, stream chunks, actions, and control messages through a
 unified wire format.
 
-ZAP is **protocol infrastructure**. It is independent of AI models, LLM
-providers, and application runtimes. Receipts and Proof-of-Action support
-auditability; they are not billing, settlement, rewards, or financial rails.
 
 ## ❓ Why ZAP?
 
