@@ -1,6 +1,6 @@
 [package]
-name = "zap-store"
-description = "Signed ZAP WASM driver manifests and local registry primitives."
+name = "zap-memory"
+description = "Auditable local memory stores for ZAP."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -9,11 +9,10 @@ version.workspace = true
 [dependencies]
 base64.workspace = true
 blake3.workspace = true
-ed25519-dalek.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-toml.workspace = true
 uuid.workspace = true
-zap-crypto = { path = "../zap-crypto" }
-zap-capability.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

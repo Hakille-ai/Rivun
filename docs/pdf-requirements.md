@@ -10,6 +10,9 @@ This file tracks the technical specification PDF against the current repository.
 | Encrypted P2P UDP transport | Implemented for static peers | `zap-net` ChaCha20-Poly1305 datagrams, static peer table, tests |
 | Noise Protocol Framework | Foundation | `zap-net::noise` derives transport material; full live handshake routing remains future work |
 | Reflex action routing | Implemented locally | `zap-node` validates, dispatches action envelopes, and runs registered WASM drivers |
+| Deterministic routing | Foundation implemented | `zap-router`, `[[routes]]`, `zap route explain`, local dispatch fallback, and peer forwarding tests |
+| Capability discovery | Foundation implemented | `zap-capability`, signed `zap.capability.query`/`response`, local CLI inspection, and node response tests |
+| Local memory | Foundation implemented | `zap-memory` JSONL records, BLAKE3 hashes, tombstones, pruning, verification, and CLI commands |
 | WASM sandbox execution | Implemented | `zap-runtime` ABI validation, fuel, memory, output, timeout, permissions |
 | Broadcast target zero | Implemented | broadcast frames use UUID nil internally while UDP envelopes target concrete peers |
 | Cognitive interpreter | Foundation implemented | `zap-intent`, `zap compile-intent`, and `zap send --intent` |
@@ -21,6 +24,6 @@ This file tracks the technical specification PDF against the current repository.
 Next high-impact PDF features:
 
 1. Add package distribution and remote index publishing for ZapStore.
-2. Add networked validator quorum and discovery.
-3. Expose SDK-friendly schemas for intents, frames, manifests, and receipts.
+2. Add durable capability caches and policy-backed grant evaluation.
+3. Expose SDK-friendly schemas for intents, frames, manifests, receipts, routes, capabilities, and memory.
 4. Add remote receipt replication tooling for operators.

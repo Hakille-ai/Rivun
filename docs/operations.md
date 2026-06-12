@@ -15,16 +15,23 @@ Keep the generated key file private. Share only `node_id` and `public_key`.
 Run this before starting a node:
 
 ```bash
+cargo run -p zap-cli -- doctor --config zap.toml
 cargo run -p zap-cli -- check-config --strict --config zap.toml
 ```
 
 For automation:
 
 ```bash
+cargo run -p zap-cli -- doctor --config zap.toml --json --strict
 cargo run -p zap-cli -- check-config --config zap.toml --json
 ```
 
-The validator checks:
+`zap doctor` is the operator readiness gate. It runs config validation, prints a
+score, reports pass/warn/fail checks for production posture, and exits non-zero
+with `--strict` unless the node has no readiness warnings. `zap check-config`
+remains the lower-level structural validator.
+
+The validator and doctor checks cover:
 
 - local bind address syntax;
 - key file readability and parseability;
@@ -34,7 +41,14 @@ The validator checks:
 - runtime/security limits are nonzero where required;
 - duplicate driver actions;
 - WASM/WAT driver files compile and expose ABI v1 before daemon startup;
-- signed driver manifests match the configured action, local driver hash, ABI version, and author signature when `manifest` is configured.
+- signed driver manifests match the configured action, local driver hash, ABI version, and author signature when `manifest` is configured;
+- memory paths do not overlap key files, receipts, registries, drivers, or manifests;
+- route targets reference configured peers or drivers, and capability routes do
+  not silently point at non-executable v1 capabilities without a warning.
+- peer routes with `requires_peer_grant` are backed by the latest verified
+  cached advertisement for the target peer.
+- capability grants reference capabilities actually advertised by the node, and
+  optional policy can require every advertised capability to have a grant.
 
 During daemon startup, configured drivers are compiled, ABI-validated, and kept in memory. Updating a driver file requires a daemon restart.
 
@@ -50,6 +64,8 @@ Node configs are TOML files with:
 - anti-replay policy.
 - optional signed receipt log path.
 - optional local ZapStore registry index path.
+- optional local memory JSONL path.
+- optional deterministic route table.
 
 For container deployment, see [Deployment](deployment.md). The production image
 runs the same `zap run --config <path>` daemon command, but expects config and
@@ -76,6 +92,8 @@ cargo run -p zap-cli -- driver-manifest verify --driver examples/wasm-drivers/ec
 `check-config --json` includes `signed_driver_count` so deploy scripts can require signed driver provenance.
 It also includes `registry_enabled`, `registry_entry_count`, and
 `registry_signature_required` when a local ZapStore registry is configured.
+Capability, route, and memory automation can inspect `capability_count`,
+`route_count`, and `memory_enabled`.
 
 Create a local registry index and add a signed manifest:
 
@@ -98,6 +116,113 @@ require_signature = true
 Set `require_signature = true` for production gates that should fail when the
 local registry was not approved by an operator key. Registry mutations clear the
 operator signature, so review and re-sign after every `add` or `revoke`.
+
+Capability discovery is explicit and signed:
+
+```bash
+cargo run -p zap-cli -- capability list --config zap.toml --json
+cargo run -p zap-cli -- capability inspect-manifest --manifest examples/wasm-drivers/echo/echo.manifest.toml --json
+cargo run -p zap-cli -- capability query --config zap.toml --target <uuid> --cache .zap/capabilities.jsonl --json
+cargo run -p zap-cli -- capability cache verify --path .zap/capabilities.jsonl
+cargo run -p zap-cli -- capability cache list --path .zap/capabilities.jsonl --peer <uuid> --json
+```
+
+Discovery is descriptive only. A discovered capability does not grant a driver
+host access and does not bypass manifests, registry policy, PoA, or route
+validation.
+
+Attach explicit policy grants to local advertisements when a deployment needs
+machine-checkable capability provenance:
+
+```toml
+[capability_policy]
+require_grants_for_advertised = true
+
+[[capability_policy.grants]]
+capability = "driver.execute:echo"
+reason = "operator-approved signed echo driver"
+
+[[capability_policy.requirements]]
+capability = "poa.validator"
+required = true
+reason = "critical actions require validator quorum"
+```
+
+`check-config --json` reports `capability_grant_count`,
+`capability_requirement_count`, `ungranted_capability_count`,
+`capability_cache_enabled`, and `peer_grant_route_count`. `zap doctor` turns
+those counts into readiness checks.
+
+Remote capability responses can be cached locally with `capability query
+--cache`. The cache is append-only JSONL with entry hash chaining; verify it
+before using it for deployment review or routing decisions.
+
+Require cached peer grants before forwarding selected messages:
+
+```toml
+[capability_cache]
+path = ".zap/capabilities.jsonl"
+max_age_micros = 86400000000
+
+[[routes]]
+name = "thermostat-peer"
+requires_peer_grant = "driver.execute:thermostat.setpoint"
+
+[routes.match]
+kind = "action"
+subject = "thermostat.setpoint"
+
+[routes.target]
+peer = "peer-node-id"
+```
+
+`zap check-config --strict` fails when the cache is missing, corrupt, stale
+according to `max_age_micros`, missing the peer advertisement, or when the
+latest advertisement does not grant the required capability.
+
+Routes can forward, broadcast, drop, or dispatch messages deterministically:
+
+```toml
+[[routes]]
+name = "echo-local"
+
+[routes.match]
+kind = "action"
+subject = "echo"
+
+[routes.target]
+local_driver = "echo"
+```
+
+Explain a route before deployment:
+
+```bash
+cargo run -p zap-cli -- route explain --config zap.toml --kind action --subject echo --json
+```
+
+Local memory is append-only JSONL with body hashes, entry hash chaining, and
+tombstones:
+
+```toml
+[memory]
+path = ".zap/memory.jsonl"
+max_record_bytes = 1048576
+allow_driver_read = false
+allow_driver_write = false
+```
+
+Operate on the store:
+
+```bash
+cargo run -p zap-cli -- memory put --path .zap/memory.jsonl --subject note --payload hello
+cargo run -p zap-cli -- memory query --path .zap/memory.jsonl --subject note --json
+cargo run -p zap-cli -- memory verify --path .zap/memory.jsonl
+```
+
+Verification recalculates every body hash, validates the entry hash chain,
+rejects duplicate entry ids, and rejects tombstones whose source record is
+missing. Pruning writes a fresh verifiable chain for retained entries and drops
+tombstones whose source record was pruned.
 
 `zap send` is a one-shot peer process. It validates the config, binds to the
 config `bind` address, sends one signed frame, and exits. This is deliberate:

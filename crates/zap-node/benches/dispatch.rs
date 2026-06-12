@@ -8,8 +8,8 @@ use zap_crypto::{Keypair, sign_frame};
 use zap_envelope::ZapEnvelope;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
-    DriverConfig, PeerConfig, PoaConfig, ReceiptsConfig, RegistryConfig, RuntimeConfig,
-    SecurityConfig, ZapNode, ZapNodeConfig,
+    DriverConfig, MemoryConfig, PeerConfig, PoaConfig, ReceiptsConfig, RegistryConfig,
+    RuntimeConfig, SecurityConfig, ZapNode, ZapNodeConfig,
 };
 
 fn public_key_string(keypair: &Keypair) -> String {
@@ -91,6 +91,10 @@ impl NodeBench {
             poa: PoaConfig::default(),
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
+            memory: MemoryConfig::default(),
+            capability_policy: zap_node::CapabilityPolicyConfig::default(),
+            capability_cache: zap_node::CapabilityCacheConfig::default(),
+            routes: Vec::new(),
         };
         let node = ZapNode::from_config(config).await.unwrap();
         sender_endpoint

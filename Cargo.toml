@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/zap-capability",
     "crates/zap-cli",
     "crates/zap-core",
     "crates/zap-crypto",
@@ -7,8 +8,10 @@ members = [
     "crates/zap-envelope",
     "crates/zap-intent",
     "crates/zap-ledger",
+    "crates/zap-memory",
     "crates/zap-net",
     "crates/zap-node",
+    "crates/zap-router",
     "crates/zap-runtime",
     "crates/zap-store",
     "tools/xtask",
@@ -46,6 +49,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 wasmtime = { version = "45.0.1", default-features = false, features = ["cranelift", "runtime", "std", "wat"] }
 wat = "1"
+zap-capability = { path = "crates/zap-capability" }
+zap-memory = { path = "crates/zap-memory" }
+zap-router = { path = "crates/zap-router" }
 
 [profile.release]
 codegen-units = 1

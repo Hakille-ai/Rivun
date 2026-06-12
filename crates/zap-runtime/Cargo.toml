@@ -10,6 +10,7 @@ version.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 wasmtime.workspace = true
+zap-capability.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

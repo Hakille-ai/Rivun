@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use std::{
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
@@ -11,6 +12,11 @@ use std::{
 };
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
+use zap_capability::{
+    CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT, CapabilityId,
+    CapabilityQuery, CapabilityResponse, DriverPermissions, JsonlCapabilityCache,
+    capabilities_for_driver,
+};
 use zap_core::{PoaAttestation, ZapFlags, ZapFrame, ZapHeader};
 use zap_crypto::{
     Keypair, POA_ATTESTATION_CONTENT_TYPE, POA_ATTESTATION_REQUEST_SUBJECT,
@@ -24,9 +30,10 @@ use zap_envelope::{
 };
 use zap_intent::{IntentPolicy, IntentStep, compile_intent, explain_intent};
 use zap_ledger::SignedActionReceipt;
+use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
-use zap_node::{ZapNode, ZapNodeConfig};
-use zap_runtime::DriverPermissions;
+use zap_node::{ZapNode, ZapNodeConfig, describe_capabilities};
+use zap_router::{RouteMessage, RouteTable};
 use zap_store::{DriverManifest, DriverRegistry};
 
 #[derive(Debug, Parser)]
@@ -65,6 +72,16 @@ enum Commands {
         #[arg(long)]
         json: bool,
         /// Exit non-zero when config validation emits production-safety warnings.
+        #[arg(long)]
+        strict: bool,
+    },
+    /// Run an operator readiness diagnostic for one node config.
+    Doctor {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+        /// Exit non-zero unless the node is production-ready with no warnings.
         #[arg(long)]
         strict: bool,
     },
@@ -137,6 +154,21 @@ enum Commands {
         #[arg(long)]
         policy: Option<PathBuf>,
     },
+    /// Inspect and query ZAP capabilities.
+    Capability {
+        #[command(subcommand)]
+        command: CapabilityCommand,
+    },
+    /// Operate on a local auditable memory JSONL store.
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommand,
+    },
+    /// Explain deterministic message routing.
+    Route {
+        #[command(subcommand)]
+        command: RouteCommand,
+    },
     /// Create or verify signed ZapStore driver manifests.
     #[command(name = "driver-manifest")]
     DriverManifest {
@@ -162,6 +194,166 @@ enum Commands {
     Bench {
         #[command(subcommand)]
         command: BenchCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CapabilityCommand {
+    /// List capabilities advertised by a local node config.
+    List {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect capabilities implied by a signed driver manifest.
+    InspectManifest {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Query a configured peer for its capability advertisement.
+    Query {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        #[arg(long = "capability")]
+        capabilities: Vec<String>,
+        /// Append the signed peer response to a local capability cache JSONL file.
+        #[arg(long)]
+        cache: Option<PathBuf>,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect or verify a local capability cache.
+    Cache {
+        #[command(subcommand)]
+        command: CapabilityCacheCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CapabilityCacheCommand {
+    /// List cached capability advertisements.
+    List {
+        #[arg(long, default_value = ".zap/capabilities.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        peer: Option<Uuid>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify cache hashes, chain integrity, and advertisement consistency.
+    Verify {
+        #[arg(long, default_value = ".zap/capabilities.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MemoryCommand {
+    /// Append one memory record.
+    Put {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        #[arg(long, default_value = "default")]
+        namespace: String,
+        #[arg(long)]
+        subject: String,
+        #[arg(long, default_value = "text/plain")]
+        content_type: String,
+        #[arg(long)]
+        metadata: Option<String>,
+        #[arg(long)]
+        payload: Option<String>,
+        #[arg(long)]
+        payload_file: Option<PathBuf>,
+        #[arg(long, default_value_t = zap_memory::DEFAULT_MEMORY_MAX_RECORD_BYTES)]
+        max_record_bytes: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read one memory record by id.
+    Get {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        id: Uuid,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Query memory records.
+    Query {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        namespace: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        content_type: Option<String>,
+        #[arg(long)]
+        include_tombstoned: bool,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Tombstone one memory record.
+    Tombstone {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        id: Uuid,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a memory JSONL store.
+    Verify {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Copy a memory store without entries older than a creation timestamp.
+    Prune {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        before_created_at_micros: u64,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RouteCommand {
+    /// Explain how one message would route under a node config.
+    Explain {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        source_node: Option<Uuid>,
+        #[arg(long)]
+        target_node: Option<Uuid>,
+        #[arg(long)]
+        content_type: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -358,6 +550,11 @@ async fn main() -> Result<()> {
             json,
             strict,
         } => check_config(&config, json, strict),
+        Commands::Doctor {
+            config,
+            json,
+            strict,
+        } => doctor(&config, json, strict),
         Commands::Send {
             config,
             target,
@@ -412,6 +609,9 @@ async fn main() -> Result<()> {
             explain,
             policy,
         } => compile_intent_command(&intent, explain, policy.as_deref()),
+        Commands::Capability { command } => capability(command).await,
+        Commands::Memory { command } => memory(command),
+        Commands::Route { command } => route(command),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command),
         Commands::Receipts { command } => receipts(command),
@@ -510,6 +710,23 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             report.registry_signature_required
         );
         println!("receipt_log_enabled={}", report.receipt_log_enabled);
+        println!("memory_enabled={}", report.memory_enabled);
+        println!("routes={}", report.route_count);
+        println!("capabilities={}", report.capability_count);
+        println!("capability_grants={}", report.capability_grant_count);
+        println!(
+            "capability_requirements={}",
+            report.capability_requirement_count
+        );
+        println!(
+            "ungranted_capabilities={}",
+            report.ungranted_capability_count
+        );
+        println!(
+            "capability_cache_enabled={}",
+            report.capability_cache_enabled
+        );
+        println!("peer_grant_routes={}", report.peer_grant_route_count);
         println!("require_signed={}", report.require_signed);
         for warning in &report.warnings {
             println!("warning={warning}");
@@ -517,6 +734,299 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
     }
     if strict {
         fail_on_config_warnings(config_path, &report)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    config: String,
+    status: String,
+    score: u8,
+    summary: String,
+    checks: Vec<DoctorCheck>,
+    warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorCheck {
+    name: String,
+    status: String,
+    detail: String,
+}
+
+impl DoctorCheck {
+    fn pass(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "pass".to_string(),
+            detail: detail.into(),
+        }
+    }
+
+    fn warn(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "warn".to_string(),
+            detail: detail.into(),
+        }
+    }
+
+    fn fail(name: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            status: "fail".to_string(),
+            detail: detail.into(),
+        }
+    }
+}
+
+fn doctor(config_path: &Path, json: bool, strict: bool) -> Result<()> {
+    let report = match ZapNodeConfig::from_path(config_path).and_then(|config| config.validate()) {
+        Ok(validation) => build_doctor_report(config_path, &validation),
+        Err(error) => DoctorReport {
+            config: config_path.display().to_string(),
+            status: "failed".to_string(),
+            score: 0,
+            summary: "configuration is invalid".to_string(),
+            checks: vec![DoctorCheck::fail("config validation", format!("{error:#}"))],
+            warnings: Vec::new(),
+            error: Some(format!("{error:#}")),
+        },
+    };
+
+    print_doctor_report(&report, json)?;
+    if report.status == "failed" {
+        bail!("doctor failed for {}", config_path.display());
+    }
+    if strict && report.status != "ready" {
+        bail!(
+            "doctor strict gate failed for {}: {}",
+            config_path.display(),
+            report.summary
+        );
+    }
+    Ok(())
+}
+
+fn build_doctor_report(
+    config_path: &Path,
+    report: &zap_node::ConfigValidationReport,
+) -> DoctorReport {
+    let mut checks = Vec::new();
+
+    checks.push(DoctorCheck::pass(
+        "identity",
+        format!("node_id={}", report.node_id),
+    ));
+    checks.push(if report.require_signed {
+        DoctorCheck::pass("signed frames", "require_signed=true")
+    } else {
+        DoctorCheck::warn("signed frames", "require_signed=false")
+    });
+    checks.push(if report.peer_count > 0 {
+        DoctorCheck::pass("peer topology", format!("peers={}", report.peer_count))
+    } else {
+        DoctorCheck::warn("peer topology", "no configured peers")
+    });
+    checks.push(if report.driver_count > 0 {
+        DoctorCheck::pass("driver surface", format!("drivers={}", report.driver_count))
+    } else {
+        DoctorCheck::warn(
+            "driver surface",
+            "no local drivers configured; node can only route, drop, or answer control messages",
+        )
+    });
+    checks.push(driver_provenance_check(report));
+    checks.push(registry_policy_check(report));
+    checks.push(if report.receipt_log_enabled {
+        DoctorCheck::pass("receipt audit", "signed receipt log enabled")
+    } else {
+        DoctorCheck::warn("receipt audit", "receipts.path is not configured")
+    });
+    checks.push(if report.poa_validator_count > 0 {
+        DoctorCheck::pass(
+            "poa quorum",
+            format!(
+                "threshold={} validators={}",
+                report.poa_required_threshold, report.poa_validator_count
+            ),
+        )
+    } else {
+        DoctorCheck::warn("poa quorum", "no PoA validators configured")
+    });
+    checks.push(if report.memory_enabled {
+        DoctorCheck::pass("memory audit", "local memory path configured")
+    } else {
+        DoctorCheck::warn("memory audit", "memory.path is not configured")
+    });
+    checks.push(if report.route_count > 0 {
+        DoctorCheck::pass("routing policy", format!("routes={}", report.route_count))
+    } else {
+        DoctorCheck::warn("routing policy", "default route behavior only")
+    });
+    checks.push(if report.capability_count > 0 {
+        DoctorCheck::pass(
+            "capability surface",
+            format!("capabilities={}", report.capability_count),
+        )
+    } else {
+        DoctorCheck::warn("capability surface", "no advertised capabilities")
+    });
+    checks.push(capability_policy_check(report));
+    checks.push(peer_grant_routes_check(report));
+    for warning in &report.warnings {
+        checks.push(DoctorCheck::warn("config warning", warning.clone()));
+    }
+
+    let score = doctor_score(&checks);
+    let status = if checks.iter().any(|check| check.status == "fail") {
+        "failed"
+    } else if checks.iter().any(|check| check.status == "warn") {
+        "needs_attention"
+    } else {
+        "ready"
+    }
+    .to_string();
+    let warnings = checks
+        .iter()
+        .filter(|check| check.status == "warn")
+        .map(|check| format!("{}: {}", check.name, check.detail))
+        .collect::<Vec<_>>();
+    let summary = match status.as_str() {
+        "ready" => "node config is production-ready".to_string(),
+        "needs_attention" => format!(
+            "node config is valid but has {} readiness warning(s)",
+            warnings.len()
+        ),
+        _ => "node config failed readiness checks".to_string(),
+    };
+
+    DoctorReport {
+        config: config_path.display().to_string(),
+        status,
+        score,
+        summary,
+        checks,
+        warnings,
+        error: None,
+    }
+}
+
+fn driver_provenance_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.driver_count == 0 {
+        return DoctorCheck::warn("driver provenance", "no local drivers to sign");
+    }
+    if report.signed_driver_count == report.driver_count {
+        return DoctorCheck::pass(
+            "driver provenance",
+            format!("signed_drivers={}", report.signed_driver_count),
+        );
+    }
+    DoctorCheck::warn(
+        "driver provenance",
+        format!(
+            "signed_drivers={} unsigned_drivers={}",
+            report.signed_driver_count,
+            report.driver_count - report.signed_driver_count
+        ),
+    )
+}
+
+fn registry_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if !report.registry_enabled {
+        return DoctorCheck::warn("registry policy", "registry.path is not configured");
+    }
+    if report.registry_signature_required {
+        return DoctorCheck::pass(
+            "registry policy",
+            format!(
+                "signed registry required; entries={}",
+                report.registry_entry_count
+            ),
+        );
+    }
+    DoctorCheck::warn(
+        "registry policy",
+        format!(
+            "registry configured with entries={} but require_signature=false",
+            report.registry_entry_count
+        ),
+    )
+}
+
+fn capability_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.capability_count == 0 {
+        return DoctorCheck::warn("capability policy", "no capabilities to cover");
+    }
+    if report.ungranted_capability_count == 0 {
+        return DoctorCheck::pass(
+            "capability policy",
+            format!(
+                "grants={} requirements={}",
+                report.capability_grant_count, report.capability_requirement_count
+            ),
+        );
+    }
+    DoctorCheck::warn(
+        "capability policy",
+        format!(
+            "ungranted_capabilities={} grants={} requirements={}",
+            report.ungranted_capability_count,
+            report.capability_grant_count,
+            report.capability_requirement_count
+        ),
+    )
+}
+
+fn peer_grant_routes_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.peer_grant_route_count == 0 {
+        return DoctorCheck::warn(
+            "peer capability gates",
+            "no routes require cached peer capability grants",
+        );
+    }
+    DoctorCheck::pass(
+        "peer capability gates",
+        format!(
+            "peer_grant_routes={} cache_enabled={}",
+            report.peer_grant_route_count, report.capability_cache_enabled
+        ),
+    )
+}
+
+fn doctor_score(checks: &[DoctorCheck]) -> u8 {
+    let mut score = 100_i16;
+    for check in checks {
+        match check.status.as_str() {
+            "warn" => score -= 8,
+            "fail" => score -= 35,
+            _ => {}
+        }
+    }
+    score.clamp(0, 100) as u8
+}
+
+fn print_doctor_report(report: &DoctorReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+
+    println!("doctor={}", report.config);
+    println!("status={}", report.status);
+    println!("score={}", report.score);
+    println!("summary={}", report.summary);
+    for check in &report.checks {
+        println!(
+            "check={} status={} detail={}",
+            check.name, check.status, check.detail
+        );
+    }
+    if let Some(error) = &report.error {
+        println!("error={error}");
     }
     Ok(())
 }
@@ -1273,6 +1783,487 @@ fn load_intent_policy(path: &Path) -> Result<IntentPolicy> {
         .with_context(|| format!("failed to read intent policy {}", path.display()))?;
     serde_json::from_str(&input)
         .with_context(|| format!("failed to parse intent policy {}", path.display()))
+}
+
+async fn capability(command: CapabilityCommand) -> Result<()> {
+    match command {
+        CapabilityCommand::List { config, json } => capability_list(&config, json),
+        CapabilityCommand::InspectManifest { manifest, json } => {
+            capability_inspect_manifest(&manifest, json)
+        }
+        CapabilityCommand::Query {
+            config,
+            target,
+            capabilities,
+            cache,
+            timeout_ms,
+            json,
+        } => {
+            capability_query(
+                &config,
+                target,
+                capabilities,
+                cache.as_deref(),
+                timeout_ms,
+                json,
+            )
+            .await
+        }
+        CapabilityCommand::Cache { command } => capability_cache(command),
+    }
+}
+
+fn capability_list(config_path: &Path, json: bool) -> Result<()> {
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let advertisement = describe_capabilities(&config)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&advertisement)?);
+    } else {
+        println!("node_id={}", advertisement.node_id);
+        for capability in advertisement.capabilities.iter() {
+            println!("capability={capability}");
+        }
+    }
+    Ok(())
+}
+
+fn capability_inspect_manifest(manifest_path: &Path, json: bool) -> Result<()> {
+    let manifest = load_driver_manifest(manifest_path)?;
+    manifest.verify_static_and_signature()?;
+    let capabilities = capabilities_for_driver(&manifest.action, manifest.permissions)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "manifest": manifest_path.display().to_string(),
+                "action": manifest.action,
+                "permissions": manifest.permissions,
+                "capabilities": capabilities
+            }))?
+        );
+    } else {
+        println!("manifest={} ok", manifest_path.display());
+        println!("action={}", manifest.action);
+        for capability in capabilities.iter() {
+            println!("capability={capability}");
+        }
+    }
+    Ok(())
+}
+
+async fn capability_query(
+    config_path: &Path,
+    target: Uuid,
+    requested: Vec<String>,
+    cache_path: Option<&Path>,
+    timeout_ms: u64,
+    json: bool,
+) -> Result<()> {
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| format!("target {} not found in {}", target, config_path.display()))?;
+    let bind: SocketAddr = config
+        .bind
+        .parse()
+        .with_context(|| format!("invalid bind address {}", config.bind))?;
+    let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(bind, keypair.node_id())).await?;
+    for peer in &config.peers {
+        endpoint
+            .add_peer(Peer {
+                node_id: peer.node_id,
+                addr: peer.addr.parse()?,
+                transport_key: TransportKey::from_hex(&peer.transport_key)?,
+            })
+            .await;
+    }
+
+    let query = CapabilityQuery {
+        requested: requested
+            .iter()
+            .map(|capability| CapabilityId::new(capability.clone()))
+            .collect::<std::result::Result<Vec<_>, _>>()?,
+    };
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        CAPABILITY_QUERY_SUBJECT,
+        CAPABILITY_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(&query)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(&keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let public_key = decode_public_key(&target_peer.public_key)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!("timed out waiting for capability response from {}", target);
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let inbound = tokio::time::timeout(remaining, endpoint.recv()).await??;
+        if inbound.peer.node_id != target {
+            continue;
+        }
+        if config.require_signed {
+            verify_frame(&public_key, &inbound.frame)?;
+        }
+        let envelope = ZapEnvelopeRef::parse(&inbound.frame.payload)
+            .context("invalid capability response envelope")?;
+        if envelope.kind() != ZapMessageKind::Control
+            || envelope.subject() != CAPABILITY_RESPONSE_SUBJECT
+        {
+            continue;
+        }
+        let response: CapabilityResponse =
+            serde_json::from_slice(envelope.body()).context("invalid capability response body")?;
+        let cached_entry = match cache_path {
+            Some(path) => Some(JsonlCapabilityCache::open(path).put(
+                response.advertisement.node_id,
+                response.advertisement.clone(),
+            )?),
+            None => None,
+        };
+        if json {
+            if cached_entry.is_some() {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "response": response,
+                        "cached_entry": cached_entry,
+                    }))?
+                );
+            } else {
+                println!("{}", serde_json::to_string_pretty(&response)?);
+            }
+        } else {
+            println!("node_id={}", response.advertisement.node_id);
+            for capability in response.advertisement.capabilities.iter() {
+                println!("capability={capability}");
+            }
+            if let Some(entry) = cached_entry {
+                println!("cache_entry={}", entry.id);
+                if let Some(path) = cache_path {
+                    println!("cache={}", path.display());
+                }
+            }
+        }
+        return Ok(());
+    }
+}
+
+fn capability_cache(command: CapabilityCacheCommand) -> Result<()> {
+    match command {
+        CapabilityCacheCommand::List { path, peer, json } => {
+            capability_cache_list(&path, peer, json)
+        }
+        CapabilityCacheCommand::Verify { path, json } => capability_cache_verify(&path, json),
+    }
+}
+
+fn capability_cache_list(path: &Path, peer: Option<Uuid>, json: bool) -> Result<()> {
+    let cache = JsonlCapabilityCache::open(path);
+    let entries = match peer {
+        Some(peer) => cache.latest_for_peer(peer)?.into_iter().collect::<Vec<_>>(),
+        None => cache.entries()?,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entries)?);
+    } else {
+        println!("cache={}", path.display());
+        println!("entries={}", entries.len());
+        for entry in entries {
+            println!(
+                "entry={} peer={} observed_at_micros={} capabilities={} grants={} requirements={}",
+                entry.id,
+                entry.peer_node_id,
+                entry.observed_at_micros,
+                entry.advertisement.capabilities.capabilities.len(),
+                entry.advertisement.grants.len(),
+                entry.advertisement.requirements.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn capability_cache_verify(path: &Path, json: bool) -> Result<()> {
+    let report = JsonlCapabilityCache::open(path).verify()?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("cache={}", path.display());
+        println!("entries={}", report.entries);
+        println!("peers={}", report.peers);
+        println!("verified=true");
+    }
+    Ok(())
+}
+
+fn memory(command: MemoryCommand) -> Result<()> {
+    match command {
+        MemoryCommand::Put {
+            path,
+            namespace,
+            subject,
+            content_type,
+            metadata,
+            payload,
+            payload_file,
+            max_record_bytes,
+            json,
+        } => memory_put(MemoryPutCommand {
+            path: &path,
+            namespace,
+            subject,
+            content_type,
+            metadata,
+            payload,
+            payload_file,
+            max_record_bytes,
+            json,
+        }),
+        MemoryCommand::Get { path, id, json } => memory_get(&path, id, json),
+        MemoryCommand::Query {
+            path,
+            namespace,
+            subject,
+            content_type,
+            include_tombstoned,
+            limit,
+            json,
+        } => memory_query(
+            &path,
+            MemoryQuery {
+                namespace,
+                subject,
+                content_type,
+                include_tombstoned,
+                limit,
+            },
+            json,
+        ),
+        MemoryCommand::Tombstone {
+            path,
+            id,
+            reason,
+            json,
+        } => memory_tombstone(&path, id, reason, json),
+        MemoryCommand::Verify { path, json } => memory_verify(&path, json),
+        MemoryCommand::Prune {
+            path,
+            before_created_at_micros,
+            out,
+            force,
+            json,
+        } => memory_prune(&path, before_created_at_micros, &out, force, json),
+    }
+}
+
+struct MemoryPutCommand<'a> {
+    path: &'a Path,
+    namespace: String,
+    subject: String,
+    content_type: String,
+    metadata: Option<String>,
+    payload: Option<String>,
+    payload_file: Option<PathBuf>,
+    max_record_bytes: usize,
+    json: bool,
+}
+
+fn memory_put(options: MemoryPutCommand<'_>) -> Result<()> {
+    let MemoryPutCommand {
+        path,
+        namespace,
+        subject,
+        content_type,
+        metadata,
+        payload,
+        payload_file,
+        max_record_bytes,
+        json,
+    } = options;
+    let body = payload_bytes_from_input(payload, payload_file)?;
+    let metadata = parse_metadata(metadata)?;
+    let store = JsonlMemoryStore::open(path).with_max_record_bytes(max_record_bytes);
+    let record = store.put(MemoryPut {
+        namespace,
+        subject,
+        content_type,
+        body,
+        metadata,
+        source_node: None,
+        frame_hash: None,
+    })?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+    } else {
+        println!("id={}", record.id);
+        println!("namespace={}", record.namespace);
+        println!("subject={}", record.subject);
+        println!("body_hash={}", record.body_hash);
+        println!("path={}", path.display());
+    }
+    Ok(())
+}
+
+fn memory_get(path: &Path, id: Uuid, json: bool) -> Result<()> {
+    let store = JsonlMemoryStore::open(path);
+    let record = store.get(id)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+    } else {
+        println!("id={}", record.id);
+        println!("namespace={}", record.namespace);
+        println!("subject={}", record.subject);
+        println!("content_type={}", record.content_type);
+        println!("body_hash={}", record.body_hash);
+        println!("created_at_micros={}", record.created_at_micros);
+    }
+    Ok(())
+}
+
+fn memory_query(path: &Path, query: MemoryQuery, json: bool) -> Result<()> {
+    let store = JsonlMemoryStore::open(path);
+    let records = store.query(&query)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&records)?);
+    } else {
+        println!("records={}", records.len());
+        for record in records {
+            println!(
+                "record={} namespace={} subject={} body_hash={}",
+                record.id, record.namespace, record.subject, record.body_hash
+            );
+        }
+    }
+    Ok(())
+}
+
+fn memory_tombstone(path: &Path, id: Uuid, reason: Option<String>, json: bool) -> Result<()> {
+    let store = JsonlMemoryStore::open(path);
+    let tombstone = store.tombstone(id, reason)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&tombstone)?);
+    } else {
+        println!("tombstone={}", tombstone.id);
+        println!("record={}", tombstone.record_id);
+        println!("namespace={}", tombstone.namespace);
+    }
+    Ok(())
+}
+
+fn memory_verify(path: &Path, json: bool) -> Result<()> {
+    let store = JsonlMemoryStore::open(path);
+    let report = store.verify()?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("path={}", report.path.display());
+        println!("entries={}", report.entries);
+        println!("records={}", report.records);
+        println!("tombstones={}", report.tombstones);
+        println!("verified=true");
+    }
+    Ok(())
+}
+
+fn memory_prune(
+    path: &Path,
+    before_created_at_micros: u64,
+    out: &Path,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    let store = JsonlMemoryStore::open(path);
+    let pruned = store.prune_to(before_created_at_micros, out, force)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "path": path.display().to_string(),
+                "out": out.display().to_string(),
+                "before_created_at_micros": before_created_at_micros,
+                "pruned_entries": pruned
+            }))?
+        );
+    } else {
+        println!("path={}", path.display());
+        println!("out={}", out.display());
+        println!("before_created_at_micros={before_created_at_micros}");
+        println!("pruned_entries={pruned}");
+    }
+    Ok(())
+}
+
+fn parse_metadata(metadata: Option<String>) -> Result<serde_json::Value> {
+    match metadata {
+        Some(metadata) => {
+            serde_json::from_str(&metadata).context("failed to parse --metadata JSON")
+        }
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+fn route(command: RouteCommand) -> Result<()> {
+    match command {
+        RouteCommand::Explain {
+            config,
+            kind,
+            subject,
+            source_node,
+            target_node,
+            content_type,
+            json,
+        } => route_explain(
+            &config,
+            RouteMessage {
+                source_node: source_node.unwrap_or_else(Uuid::nil),
+                target_node: target_node.unwrap_or_else(Uuid::nil),
+                kind,
+                subject,
+                content_type,
+            },
+            json,
+        ),
+    }
+}
+
+fn route_explain(config_path: &Path, message: RouteMessage, json: bool) -> Result<()> {
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let table = RouteTable::new(config.routes.clone())?;
+    let explanation = table.explain(&message);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&explanation)?);
+    } else {
+        println!("kind={}", explanation.message.kind);
+        println!("subject={}", explanation.message.subject);
+        println!("route_count={}", explanation.route_count);
+        println!("reason={}", explanation.decision.reason);
+        println!(
+            "matched_rule={}",
+            explanation
+                .decision
+                .matched_rule_name
+                .as_deref()
+                .unwrap_or("default")
+        );
+        println!("target={:?}", explanation.decision.target);
+    }
+    Ok(())
 }
 
 fn driver_manifest(command: DriverManifestCommand) -> Result<()> {

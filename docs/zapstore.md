@@ -9,7 +9,7 @@ A driver manifest binds:
 - one action name;
 - one driver artifact hash;
 - one WASM ABI version;
-- declared host permissions;
+- declared host permissions defined by `zap-capability`;
 - one author Ed25519 identity;
 - one author signature.
 
@@ -42,7 +42,10 @@ The node verifies the manifest before startup dispatch:
 - author public key derives `author_node_id`;
 - author signature is valid.
 
-Current ABI v1 has no host imports, so drivers that request `network`, `filesystem`, `clock`, or `environment` are rejected during `check-config` and daemon startup. This keeps capability declarations honest until host APIs are implemented.
+Current ABI v1 has no general host imports, so drivers that request `network`,
+`filesystem`, `clock`, or `environment` are rejected during `check-config` and
+daemon startup. Capability discovery can advertise declarations, but it does
+not grant host access by itself.
 
 ## CLI
 

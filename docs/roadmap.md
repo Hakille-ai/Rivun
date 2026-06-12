@@ -8,6 +8,9 @@ Implemented in this repository:
 - frame signing and verification;
 - encrypted UDP endpoint;
 - static peer discovery;
+- explicit capability discovery;
+- deterministic route planning;
+- auditable local memory store;
 - sandboxed WASM execution;
 - CLI, docs, tests, benches.
 
@@ -54,3 +57,28 @@ Foundation implemented:
 - `zap receipts merge` builds deduplicated verified receipt archives from multiple logs.
 
 Next: dynamic validator discovery, quorum policy hardening, and remote receipt replication.
+
+## Phase 5: Future Core Interfaces
+
+Foundation implemented:
+
+- `zap-capability` defines capability ids, driver permission contracts, local
+  advertisements, and signed query/response control subjects;
+- `zap-router` provides deterministic route rules and `zap route explain`;
+- `zap-node` applies routes before dispatch and can forward non-consensus
+  messages by creating new signed frames;
+- `zap-memory` provides append-only JSONL memory records, tombstones, pruning,
+  body hash verification, and entry-to-entry hash-chain verification;
+- `zap capability`, `zap route`, and `zap memory` expose operator workflows.
+- `zap doctor` provides a score-based readiness gate over config validation,
+  provenance, registry, receipts, PoA, memory, routing, and capability posture.
+- capability advertisements can carry configured policy grants and
+  requirements, with an optional gate requiring every advertised capability to
+  have an explicit grant.
+- remote capability query responses can be persisted in a hash-chained local
+  cache and verified offline before operator review or deployment automation.
+- peer routes can require a verified cached grant before forwarding messages to
+  a remote node.
+
+Next: active cache refresh workflows, richer peer trust policy, and carefully
+scoped WASM host imports for memory access.

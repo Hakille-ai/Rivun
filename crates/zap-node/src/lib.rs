@@ -18,6 +18,12 @@ use std::{
 };
 use tracing::{info, warn};
 use uuid::Uuid;
+use zap_capability::{
+    CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
+    CapabilityAdvertisement, CapabilityGrant, CapabilityId, CapabilityQuery, CapabilityRequirement,
+    CapabilityResponse, CapabilitySet, DriverPermissions, JsonlCapabilityCache,
+    capabilities_for_driver,
+};
 use zap_core::{ZapFlags, ZapFrame, now_micros};
 use zap_crypto::{
     Keypair, POA_ATTESTATION_CONTENT_TYPE, POA_ATTESTATION_REQUEST_SUBJECT,
@@ -31,7 +37,8 @@ use zap_envelope::{
 };
 use zap_ledger::SignedActionReceipt;
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
-use zap_runtime::{DriverPermissions, ExecutionLimits, WasmDriver, WasmExecutor};
+use zap_router::{RouteDecision, RouteMessage, RouteRule, RouteTable};
+use zap_runtime::{ExecutionLimits, WasmDriver, WasmExecutor};
 use zap_store::{DriverManifest, DriverRegistry};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +63,14 @@ pub struct ZapNodeConfig {
     pub receipts: ReceiptsConfig,
     #[serde(default)]
     pub registry: RegistryConfig,
+    #[serde(default)]
+    pub memory: MemoryConfig,
+    #[serde(default)]
+    pub capability_policy: CapabilityPolicyConfig,
+    #[serde(default)]
+    pub capability_cache: CapabilityCacheConfig,
+    #[serde(default)]
+    pub routes: Vec<RouteRule>,
 }
 
 impl ZapNodeConfig {
@@ -97,6 +112,12 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
     }
     if let Some(path) = config.registry.path.take() {
         config.registry.path = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(path) = config.memory.path.take() {
+        config.memory.path = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(path) = config.capability_cache.path.take() {
+        config.capability_cache.path = Some(resolve_relative_path(base_dir, &path));
     }
     config
 }
@@ -201,6 +222,36 @@ pub struct RegistryConfig {
     pub require_signature: bool,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub max_record_bytes: Option<usize>,
+    #[serde(default)]
+    pub allow_driver_read: bool,
+    #[serde(default)]
+    pub allow_driver_write: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapabilityPolicyConfig {
+    #[serde(default)]
+    pub grants: Vec<CapabilityGrant>,
+    #[serde(default)]
+    pub requirements: Vec<CapabilityRequirement>,
+    #[serde(default)]
+    pub require_grants_for_advertised: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CapabilityCacheConfig {
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub max_age_micros: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct SecurityConfig {
     #[serde(default = "default_max_clock_skew_micros")]
@@ -240,6 +291,14 @@ pub struct ConfigValidationReport {
     pub require_signed: bool,
     pub poa_validator_count: usize,
     pub poa_required_threshold: u16,
+    pub memory_enabled: bool,
+    pub route_count: usize,
+    pub capability_count: usize,
+    pub capability_grant_count: usize,
+    pub capability_requirement_count: usize,
+    pub ungranted_capability_count: usize,
+    pub capability_cache_enabled: bool,
+    pub peer_grant_route_count: usize,
     pub warnings: Vec<String>,
 }
 
@@ -397,6 +456,9 @@ pub struct ZapNode {
     poa_validators: Vec<(Uuid, PublicKey)>,
     poa_required_threshold: u16,
     receipt_log_path: Option<PathBuf>,
+    route_table: RouteTable,
+    peer_ids: Vec<Uuid>,
+    capability_advertisement: CapabilityAdvertisement,
 }
 
 struct DriverRegistration {
@@ -421,6 +483,7 @@ impl ZapNode {
         endpoint_config.inbound_nonce_cache_capacity = config.security.replay_cache_capacity;
 
         let mut public_keys = HashMap::new();
+        let mut peer_ids = Vec::with_capacity(config.peers.len());
         for peer in &config.peers {
             let peer_addr = peer
                 .addr
@@ -433,12 +496,15 @@ impl ZapNode {
                 transport_key,
             });
             public_keys.insert(peer.node_id, decode_public_key(&peer.public_key)?);
+            peer_ids.push(peer.node_id);
         }
         let poa_validators = load_poa_validators(&config.poa)?;
 
         let runtime = WasmExecutor::new()?;
         let registry = load_driver_registry_optional(&config.registry)?;
         let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
+        let route_table = RouteTable::new(config.routes.clone())?;
+        let capability_advertisement = describe_capabilities(&config)?;
         let endpoint = ZapEndpoint::bind(endpoint_config).await?;
 
         Ok(Self {
@@ -454,6 +520,9 @@ impl ZapNode {
             poa_validators,
             poa_required_threshold: config.poa.required_threshold,
             receipt_log_path: config.receipts.path,
+            route_table,
+            peer_ids,
+            capability_advertisement,
         })
     }
 
@@ -507,38 +576,14 @@ impl ZapNode {
             self.respond_to_poa_attestation_request(inbound.peer.node_id, &message.body)
                 .await?;
             None
+        } else if message.kind == ZapMessageKind::Control
+            && message.subject == CAPABILITY_QUERY_SUBJECT
+        {
+            self.respond_to_capability_query(inbound.peer.node_id, &message.body)
+                .await?;
+            None
         } else {
-            match message.kind {
-                ZapMessageKind::Action => match self.drivers.get(&message.subject) {
-                    Some(driver) => {
-                        let mut limits = self.limits;
-                        limits.permissions =
-                            merge_permissions(limits.permissions, driver.permissions);
-                        let result = self.runtime.execute(
-                            &driver.driver,
-                            &message.subject,
-                            &message.body,
-                            limits,
-                        )?;
-                        Some(result.output)
-                    }
-                    None => {
-                        warn!(
-                            action = %message.subject,
-                            "no WASM driver registered; action acknowledged only"
-                        );
-                        None
-                    }
-                },
-                _ => {
-                    info!(
-                        kind = %message.kind,
-                        subject = %message.subject,
-                        "accepted non-action ZAP message without WASM dispatch"
-                    );
-                    None
-                }
-            }
+            self.route_message(&inbound, &message).await?
         };
         self.write_receipt(
             &inbound.frame,
@@ -577,6 +622,158 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    async fn respond_to_capability_query(&self, requester_node: Uuid, body: &[u8]) -> Result<()> {
+        let query = if body.is_empty() {
+            CapabilityQuery::default()
+        } else {
+            serde_json::from_slice::<CapabilityQuery>(body).context("invalid capability query")?
+        };
+        let response = CapabilityResponse {
+            advertisement: self.capability_advertisement.filtered(&query.requested),
+        };
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            CAPABILITY_RESPONSE_SUBJECT,
+            CAPABILITY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&response)?),
+        )?;
+        let frame = ZapFrame::new(
+            self.keypair.node_id(),
+            requester_node,
+            ZapFlags::ENCRYPTED,
+            envelope.encode(),
+        )?;
+        let frame = sign_frame(&self.keypair, &frame)?;
+        self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    async fn route_message(
+        &self,
+        inbound: &zap_net::InboundZap,
+        message: &InboundMessage,
+    ) -> Result<Option<Vec<u8>>> {
+        let route_message = RouteMessage {
+            source_node: inbound.peer.node_id,
+            target_node: inbound.frame.header.target_node,
+            kind: message.kind.as_str().to_string(),
+            subject: message.subject.clone(),
+            content_type: message.content_type.clone(),
+        };
+        let decision = self.route_table.decide(&route_message);
+        self.apply_route_decision(decision, &inbound.frame, message)
+            .await
+    }
+
+    async fn apply_route_decision(
+        &self,
+        decision: RouteDecision,
+        frame: &ZapFrame,
+        message: &InboundMessage,
+    ) -> Result<Option<Vec<u8>>> {
+        let target = decision.target;
+        if target.drop {
+            info!(
+                kind = %message.kind,
+                subject = %message.subject,
+                reason = %decision.reason,
+                "dropped ZAP message by route"
+            );
+            return Ok(None);
+        }
+        if let Some(peer) = target.peer {
+            self.forward_message(peer, frame, message).await?;
+            return Ok(None);
+        }
+        if target.broadcast {
+            for peer in &self.peer_ids {
+                self.forward_message(*peer, frame, message).await?;
+            }
+            return Ok(None);
+        }
+        if let Some(capability) = target.capability {
+            return self.dispatch_capability(capability, message);
+        }
+        if let Some(action) = target.local_driver {
+            return self.dispatch_local_driver(&action, message);
+        }
+        Ok(None)
+    }
+
+    fn dispatch_capability(
+        &self,
+        capability: CapabilityId,
+        message: &InboundMessage,
+    ) -> Result<Option<Vec<u8>>> {
+        if let Some(action) = capability.driver_action() {
+            return self.dispatch_local_driver(action, message);
+        }
+        warn!(
+            capability = %capability,
+            "capability route has no local executor; message acknowledged only"
+        );
+        Ok(None)
+    }
+
+    fn dispatch_local_driver(
+        &self,
+        action: &str,
+        message: &InboundMessage,
+    ) -> Result<Option<Vec<u8>>> {
+        if message.kind != ZapMessageKind::Action {
+            info!(
+                kind = %message.kind,
+                subject = %message.subject,
+                action,
+                "local driver route ignored for non-action message"
+            );
+            return Ok(None);
+        }
+        match self.drivers.get(action) {
+            Some(driver) => {
+                let mut limits = self.limits;
+                limits.permissions = merge_permissions(limits.permissions, driver.permissions);
+                let result = self
+                    .runtime
+                    .execute(&driver.driver, action, &message.body, limits)?;
+                Ok(Some(result.output))
+            }
+            None => {
+                warn!(
+                    action,
+                    "no WASM driver registered; action acknowledged only"
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    async fn forward_message(
+        &self,
+        peer: Uuid,
+        frame: &ZapFrame,
+        message: &InboundMessage,
+    ) -> Result<()> {
+        if frame.header.flags.contains(ZapFlags::REQUIRES_CONSENSUS) {
+            bail!("route forwarding of consensus-protected frames is not supported in v1");
+        }
+        let forwarded = ZapFrame::new(
+            self.keypair.node_id(),
+            peer,
+            ZapFlags::ENCRYPTED,
+            Bytes::from(frame.payload.to_vec()),
+        )
+        .with_context(|| {
+            format!(
+                "failed to build routed frame for {} {}",
+                message.kind, message.subject
+            )
+        })?;
+        let forwarded = sign_frame(&self.keypair, &forwarded)?;
+        self.endpoint.send_frame(peer, &forwarded).await?;
         Ok(())
     }
 
@@ -699,6 +896,8 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
 
     warn_key_file_permissions(&config.key_file, &mut warnings)?;
     validate_receipts(config)?;
+    validate_memory(config)?;
+    validate_capability_cache_config(config)?;
     validate_runtime(config.runtime)?;
     validate_peers(config, bind, node_id, &mut warnings)?;
     validate_poa(config, &mut warnings)?;
@@ -713,6 +912,11 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         registry.as_ref(),
         &mut warnings,
     )?;
+    let peer_grant_route_count = validate_routes(config, &mut warnings)?;
+    let advertisement = describe_capabilities(config)?;
+    let capability_count = advertisement.capabilities.capabilities.len();
+    let ungranted_capability_count =
+        validate_capability_policy(config, &advertisement, &mut warnings)?;
 
     Ok(ConfigValidationReport {
         bind,
@@ -727,6 +931,14 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         require_signed: config.require_signed,
         poa_validator_count: config.poa.validators.len(),
         poa_required_threshold: config.poa.required_threshold,
+        memory_enabled: config.memory.path.is_some(),
+        route_count: config.routes.len(),
+        capability_count,
+        capability_grant_count: advertisement.grants.len(),
+        capability_requirement_count: advertisement.requirements.len(),
+        ungranted_capability_count,
+        capability_cache_enabled: config.capability_cache.path.is_some(),
+        peer_grant_route_count,
         warnings,
     })
 }
@@ -782,6 +994,299 @@ fn validate_receipts(config: &ZapNodeConfig) -> Result<()> {
                 manifest_path.display()
             );
         }
+    }
+    Ok(())
+}
+
+fn validate_memory(config: &ZapNodeConfig) -> Result<()> {
+    if matches!(config.memory.max_record_bytes, Some(0)) {
+        bail!("memory.max_record_bytes must be greater than zero");
+    }
+    if (config.memory.allow_driver_read || config.memory.allow_driver_write)
+        && config.memory.path.is_none()
+    {
+        bail!("memory driver access requires memory.path");
+    }
+    if let Some(memory_path) = &config.memory.path {
+        if memory_path == &config.key_file {
+            bail!(
+                "memory.path must not point at key_file {}",
+                config.key_file.display()
+            );
+        }
+        if let Some(receipt_path) = &config.receipts.path
+            && memory_path == receipt_path
+        {
+            bail!(
+                "memory.path must not point at receipts.path {}",
+                receipt_path.display()
+            );
+        }
+        if let Some(registry_path) = &config.registry.path
+            && memory_path == registry_path
+        {
+            bail!(
+                "memory.path must not point at registry.path {}",
+                registry_path.display()
+            );
+        }
+        for driver in &config.drivers {
+            if memory_path == &driver.path {
+                bail!(
+                    "memory.path must not point at driver `{}` path {}",
+                    driver.action,
+                    driver.path.display()
+                );
+            }
+            if let Some(manifest_path) = &driver.manifest
+                && memory_path == manifest_path
+            {
+                bail!(
+                    "memory.path must not point at driver `{}` manifest {}",
+                    driver.action,
+                    manifest_path.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_capability_cache_config(config: &ZapNodeConfig) -> Result<()> {
+    if matches!(config.capability_cache.max_age_micros, Some(0)) {
+        bail!("capability_cache.max_age_micros must be greater than zero");
+    }
+    let Some(cache_path) = &config.capability_cache.path else {
+        return Ok(());
+    };
+    if cache_path == &config.key_file {
+        bail!(
+            "capability_cache.path must not point at key_file {}",
+            config.key_file.display()
+        );
+    }
+    if let Some(receipt_path) = &config.receipts.path
+        && cache_path == receipt_path
+    {
+        bail!(
+            "capability_cache.path must not point at receipts.path {}",
+            receipt_path.display()
+        );
+    }
+    if let Some(registry_path) = &config.registry.path
+        && cache_path == registry_path
+    {
+        bail!(
+            "capability_cache.path must not point at registry.path {}",
+            registry_path.display()
+        );
+    }
+    if let Some(memory_path) = &config.memory.path
+        && cache_path == memory_path
+    {
+        bail!(
+            "capability_cache.path must not point at memory.path {}",
+            memory_path.display()
+        );
+    }
+    for driver in &config.drivers {
+        if cache_path == &driver.path {
+            bail!(
+                "capability_cache.path must not point at driver `{}` path {}",
+                driver.action,
+                driver.path.display()
+            );
+        }
+        if let Some(manifest_path) = &driver.manifest
+            && cache_path == manifest_path
+        {
+            bail!(
+                "capability_cache.path must not point at driver `{}` manifest {}",
+                driver.action,
+                manifest_path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_routes(config: &ZapNodeConfig, warnings: &mut Vec<String>) -> Result<usize> {
+    let table = RouteTable::new(config.routes.clone())?;
+    let peer_ids = config
+        .peers
+        .iter()
+        .map(|peer| peer.node_id)
+        .collect::<HashSet<_>>();
+    let driver_actions = config
+        .drivers
+        .iter()
+        .map(|driver| driver.action.as_str())
+        .collect::<HashSet<_>>();
+    let mut peer_grant_route_count = 0;
+    for (index, route) in table.routes.iter().enumerate() {
+        let route_name = route.name.clone().unwrap_or_else(|| format!("#{index}"));
+        if let Some(peer) = route.target.peer
+            && !peer_ids.contains(&peer)
+        {
+            bail!("route `{}` targets unknown peer {}", route_name, peer);
+        }
+        if let Some(action) = route.target.local_driver.as_deref()
+            && !driver_actions.contains(action)
+        {
+            bail!(
+                "route `{}` targets unknown local driver `{}`",
+                route_name,
+                action
+            );
+        }
+        if let Some(capability) = &route.target.capability {
+            if let Some(action) = capability.driver_action() {
+                if !driver_actions.contains(action) {
+                    bail!(
+                        "route `{}` targets unknown driver capability `{}`",
+                        route_name,
+                        capability
+                    );
+                }
+            } else {
+                warnings.push(format!(
+                    "route `{}` targets capability `{}` but v1 can only execute driver.execute:* capabilities locally; message will be acknowledged without execution",
+                    route_name, capability
+                ));
+            }
+        }
+        if let Some(required_capability) = &route.requires_peer_grant {
+            let peer = route.target.peer.ok_or_else(|| {
+                anyhow!("route `{route_name}` requires a peer grant but does not target a peer")
+            })?;
+            validate_route_peer_grant(config, &route_name, peer, required_capability)?;
+            peer_grant_route_count += 1;
+        }
+    }
+    Ok(peer_grant_route_count)
+}
+
+fn validate_route_peer_grant(
+    config: &ZapNodeConfig,
+    route_name: &str,
+    peer: Uuid,
+    required_capability: &CapabilityId,
+) -> Result<()> {
+    let cache_path = config.capability_cache.path.as_ref().ok_or_else(|| {
+        anyhow!(
+            "route `{}` requires peer grant `{}` but capability_cache.path is not configured",
+            route_name,
+            required_capability
+        )
+    })?;
+    let cache = JsonlCapabilityCache::open(cache_path);
+    let entry = cache.latest_for_peer(peer)?.ok_or_else(|| {
+        anyhow!(
+            "route `{}` requires peer grant `{}` but cache {} has no advertisement for peer {}",
+            route_name,
+            required_capability,
+            cache_path.display(),
+            peer
+        )
+    })?;
+    if let Some(max_age_micros) = config.capability_cache.max_age_micros {
+        let now = now_micros()?;
+        let age = now.saturating_sub(entry.observed_at_micros);
+        if age > max_age_micros {
+            bail!(
+                "route `{}` requires peer grant `{}` but cached advertisement for peer {} is too old: age_micros={} max_age_micros={}",
+                route_name,
+                required_capability,
+                peer,
+                age,
+                max_age_micros
+            );
+        }
+    }
+    if !entry.advertisement.grants_capability(required_capability) {
+        bail!(
+            "route `{}` requires peer {} to grant `{}`, but latest cache entry {} does not prove that grant",
+            route_name,
+            peer,
+            required_capability,
+            entry.id
+        );
+    }
+    Ok(())
+}
+
+fn validate_capability_policy(
+    config: &ZapNodeConfig,
+    advertisement: &CapabilityAdvertisement,
+    warnings: &mut Vec<String>,
+) -> Result<usize> {
+    let mut granted = HashSet::new();
+    for grant in &config.capability_policy.grants {
+        if !granted.insert(grant.capability.clone()) {
+            bail!("duplicate capability grant `{}`", grant.capability);
+        }
+        validate_policy_reason(
+            "capability grant",
+            &grant.capability,
+            grant.reason.as_deref(),
+        )?;
+        if !advertisement.capabilities.contains(&grant.capability) {
+            bail!(
+                "capability grant `{}` is not advertised by this node",
+                grant.capability
+            );
+        }
+    }
+
+    let mut required = HashSet::new();
+    for requirement in &config.capability_policy.requirements {
+        if !required.insert(requirement.capability.clone()) {
+            bail!(
+                "duplicate capability requirement `{}`",
+                requirement.capability
+            );
+        }
+        validate_policy_reason(
+            "capability requirement",
+            &requirement.capability,
+            requirement.reason.as_deref(),
+        )?;
+    }
+
+    let ungranted = advertisement
+        .capabilities
+        .iter()
+        .filter(|capability| !granted.contains(*capability))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !ungranted.is_empty() && config.capability_policy.require_grants_for_advertised {
+        bail!(
+            "capability_policy.require_grants_for_advertised=true but missing grants for {}",
+            ungranted
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if !ungranted.is_empty() && !config.capability_policy.grants.is_empty() {
+        warnings.push(format!(
+            "capability_policy grants only {} of {} advertised capabilities",
+            config.capability_policy.grants.len(),
+            advertisement.capabilities.capabilities.len()
+        ));
+    }
+
+    Ok(ungranted.len())
+}
+
+fn validate_policy_reason(
+    label: &str,
+    capability: &CapabilityId,
+    reason: Option<&str>,
+) -> Result<()> {
+    if matches!(reason, Some(reason) if reason.trim().is_empty()) {
+        bail!("{label} `{capability}` reason must not be empty when provided");
     }
     Ok(())
 }
@@ -911,6 +1416,37 @@ fn load_poa_validators(config: &PoaConfig) -> Result<Vec<(Uuid, PublicKey)>> {
             ))
         })
         .collect()
+}
+
+pub fn describe_capabilities(config: &ZapNodeConfig) -> Result<CapabilityAdvertisement> {
+    let keypair = load_keypair(&config.key_file)?;
+    let mut advertisement = CapabilityAdvertisement::new(keypair.node_id());
+    let mut capabilities = CapabilitySet::new();
+
+    for driver in &config.drivers {
+        let permissions = match &driver.manifest {
+            Some(manifest_path) => load_driver_manifest(manifest_path)?.permissions,
+            None => DriverPermissions::none(),
+        };
+        for capability in capabilities_for_driver(&driver.action, permissions)?.capabilities {
+            capabilities.insert(capability);
+        }
+    }
+
+    if config.memory.path.is_some() {
+        capabilities.insert(CapabilityId::new("memory.local")?);
+        if config.memory.allow_driver_read {
+            capabilities.insert(CapabilityId::new("memory.read")?);
+        }
+        if config.memory.allow_driver_write {
+            capabilities.insert(CapabilityId::new("memory.write")?);
+        }
+    }
+
+    advertisement.capabilities = capabilities;
+    advertisement.grants = config.capability_policy.grants.clone();
+    advertisement.requirements = config.capability_policy.requirements.clone();
+    Ok(advertisement)
 }
 
 fn validate_drivers(
@@ -1076,12 +1612,7 @@ fn validate_effective_driver_permissions(
 }
 
 fn merge_permissions(a: DriverPermissions, b: DriverPermissions) -> DriverPermissions {
-    DriverPermissions {
-        network: a.network || b.network,
-        filesystem: a.filesystem || b.filesystem,
-        clock: a.clock || b.clock,
-        environment: a.environment || b.environment,
-    }
+    a.merge(b)
 }
 
 #[derive(Debug)]
@@ -1159,10 +1690,11 @@ mod tests {
     use bytes::Bytes;
     use tokio::time::{Duration, timeout};
     use zap_core::{ZapFlags, ZapFrame, now_micros};
-    use zap_crypto::{certify_frame, sign_frame};
+    use zap_crypto::{certify_frame, sign_frame, verify_frame};
     use zap_envelope::{ZapEnvelope, ZapMessageKind};
     use zap_ledger::SignedActionReceipt;
     use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
+    use zap_router::{RouteMatch, RouteTarget};
     use zap_store::{DriverManifest, DriverRegistry, DriverRegistryStatus};
 
     fn public_key_string(keypair: &Keypair) -> String {
@@ -1340,6 +1872,10 @@ mod tests {
             poa,
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
+            memory: MemoryConfig::default(),
+            capability_policy: CapabilityPolicyConfig::default(),
+            capability_cache: CapabilityCacheConfig::default(),
+            routes: Vec::new(),
         };
         let node = ZapNode::from_config(config).await.unwrap();
         sender_endpoint
@@ -1392,6 +1928,10 @@ mod tests {
             poa: PoaConfig::default(),
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
+            memory: MemoryConfig::default(),
+            capability_policy: CapabilityPolicyConfig::default(),
+            capability_cache: CapabilityCacheConfig::default(),
+            routes: Vec::new(),
         }
     }
 
@@ -1463,6 +2003,308 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("no PoA validators configured"))
         );
+    }
+
+    #[test]
+    fn config_validation_reports_memory_routes_and_capabilities() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.memory.path = Some(temp.path().join("memory.jsonl"));
+        config.memory.allow_driver_read = true;
+        config.routes.push(RouteRule {
+            name: Some("echo-local".to_string()),
+            description: None,
+            requires_peer_grant: None,
+            matches: RouteMatch {
+                kind: Some("action".to_string()),
+                subject: Some("echo".to_string()),
+                ..RouteMatch::default()
+            },
+            target: RouteTarget::local_driver("echo"),
+        });
+
+        let report = config.validate().unwrap();
+        assert!(report.memory_enabled);
+        assert_eq!(report.route_count, 1);
+        assert_eq!(report.capability_count, 3);
+
+        let advertisement = describe_capabilities(&config).unwrap();
+        assert!(
+            advertisement
+                .capabilities
+                .contains(&CapabilityId::new("driver.execute:echo").unwrap())
+        );
+        assert!(
+            advertisement
+                .capabilities
+                .contains(&CapabilityId::new("memory.read").unwrap())
+        );
+    }
+
+    #[test]
+    fn config_validation_rejects_unknown_driver_capability_route() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.routes.push(RouteRule {
+            name: Some("missing-capability".to_string()),
+            description: None,
+            requires_peer_grant: None,
+            matches: RouteMatch {
+                kind: Some("action".to_string()),
+                subject: Some("missing".to_string()),
+                ..RouteMatch::default()
+            },
+            target: RouteTarget::capability(CapabilityId::new("driver.execute:missing").unwrap()),
+        });
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("targets unknown driver capability"));
+    }
+
+    #[test]
+    fn config_validation_warns_on_non_executable_capability_route() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.memory.path = Some(temp.path().join("memory.jsonl"));
+        config.routes.push(RouteRule {
+            name: Some("memory-capability".to_string()),
+            description: None,
+            requires_peer_grant: None,
+            matches: RouteMatch {
+                kind: Some("query".to_string()),
+                subject: Some("memory.*".to_string()),
+                ..RouteMatch::default()
+            },
+            target: RouteTarget::capability(CapabilityId::new("memory.local").unwrap()),
+        });
+
+        let report = config.validate().unwrap();
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("v1 can only execute driver.execute:*"))
+        );
+    }
+
+    #[test]
+    fn config_validation_reports_capability_policy() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.capability_policy.grants.push(CapabilityGrant {
+            capability: CapabilityId::new("driver.execute:echo").unwrap(),
+            reason: Some("operator-approved local echo driver".to_string()),
+        });
+        config
+            .capability_policy
+            .requirements
+            .push(CapabilityRequirement {
+                capability: CapabilityId::new("poa.validator").unwrap(),
+                required: true,
+                reason: Some("critical frames require validator quorum".to_string()),
+            });
+
+        let report = config.validate().unwrap();
+        assert_eq!(report.capability_count, 1);
+        assert_eq!(report.capability_grant_count, 1);
+        assert_eq!(report.capability_requirement_count, 1);
+        assert_eq!(report.ungranted_capability_count, 0);
+
+        let advertisement = describe_capabilities(&config).unwrap();
+        assert_eq!(advertisement.grants.len(), 1);
+        assert_eq!(
+            advertisement.grants[0].capability,
+            CapabilityId::new("driver.execute:echo").unwrap()
+        );
+        assert_eq!(advertisement.requirements.len(), 1);
+    }
+
+    #[test]
+    fn config_validation_rejects_unknown_capability_grant() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.capability_policy.grants.push(CapabilityGrant {
+            capability: CapabilityId::new("driver.execute:missing").unwrap(),
+            reason: None,
+        });
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("is not advertised by this node"));
+    }
+
+    #[test]
+    fn config_validation_can_require_grants_for_all_advertised_capabilities() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.memory.path = Some(temp.path().join("memory.jsonl"));
+        config.capability_policy.require_grants_for_advertised = true;
+        config.capability_policy.grants.push(CapabilityGrant {
+            capability: CapabilityId::new("driver.execute:echo").unwrap(),
+            reason: Some("operator-approved".to_string()),
+        });
+
+        let error = config.validate().unwrap_err();
+        assert!(
+            format!("{error:#}").contains(
+                "capability_policy.require_grants_for_advertised=true but missing grants"
+            )
+        );
+        assert!(format!("{error:#}").contains("memory.local"));
+    }
+
+    #[test]
+    fn config_validation_accepts_peer_route_with_cached_grant() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        let cache_path = temp.path().join("capabilities.jsonl");
+        let capability = CapabilityId::new("driver.execute:thermostat.setpoint").unwrap();
+        let mut advertisement = CapabilityAdvertisement::new(peer.node_id());
+        advertisement.capabilities.insert(capability.clone());
+        advertisement.grants.push(CapabilityGrant {
+            capability: capability.clone(),
+            reason: Some("peer-approved thermostat driver".to_string()),
+        });
+        JsonlCapabilityCache::open(&cache_path)
+            .put(peer.node_id(), advertisement)
+            .unwrap();
+        config.capability_cache.path = Some(cache_path);
+        config.routes.push(RouteRule {
+            name: Some("thermostat-peer".to_string()),
+            description: None,
+            requires_peer_grant: Some(capability),
+            matches: RouteMatch {
+                kind: Some("action".to_string()),
+                subject: Some("thermostat.setpoint".to_string()),
+                ..RouteMatch::default()
+            },
+            target: RouteTarget::peer(peer.node_id()),
+        });
+
+        let report = config.validate().unwrap();
+        assert!(report.capability_cache_enabled);
+        assert_eq!(report.peer_grant_route_count, 1);
+    }
+
+    #[test]
+    fn config_validation_rejects_peer_grant_route_without_cache() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.routes.push(RouteRule {
+            name: Some("thermostat-peer".to_string()),
+            description: None,
+            requires_peer_grant: Some(
+                CapabilityId::new("driver.execute:thermostat.setpoint").unwrap(),
+            ),
+            matches: RouteMatch {
+                kind: Some("action".to_string()),
+                subject: Some("thermostat.setpoint".to_string()),
+                ..RouteMatch::default()
+            },
+            target: RouteTarget::peer(peer.node_id()),
+        });
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("capability_cache.path is not configured"));
+    }
+
+    #[test]
+    fn config_validation_rejects_peer_route_without_cached_grant() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        let cache_path = temp.path().join("capabilities.jsonl");
+        let capability = CapabilityId::new("driver.execute:thermostat.setpoint").unwrap();
+        let mut advertisement = CapabilityAdvertisement::new(peer.node_id());
+        advertisement.capabilities.insert(capability.clone());
+        JsonlCapabilityCache::open(&cache_path)
+            .put(peer.node_id(), advertisement)
+            .unwrap();
+        config.capability_cache.path = Some(cache_path);
+        config.routes.push(RouteRule {
+            name: Some("thermostat-peer".to_string()),
+            description: None,
+            requires_peer_grant: Some(capability),
+            matches: RouteMatch {
+                kind: Some("action".to_string()),
+                subject: Some("thermostat.setpoint".to_string()),
+                ..RouteMatch::default()
+            },
+            target: RouteTarget::peer(peer.node_id()),
+        });
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("does not prove that grant"));
     }
 
     #[test]
@@ -1918,6 +2760,176 @@ path = "logs/receipts.jsonl"
         assert_eq!(event.subject, "echo");
         assert_eq!(event.action, "echo");
         assert_eq!(event.output.as_deref(), Some(b"hello-zenv".as_slice()));
+    }
+
+    #[tokio::test]
+    async fn node_responds_to_capability_query() {
+        let harness = node_harness(SecurityConfig::default()).await;
+        let query = CapabilityQuery::default();
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            CAPABILITY_QUERY_SUBJECT,
+            CAPABILITY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&query).unwrap()),
+        )
+        .unwrap();
+        let unsigned = ZapFrame::with_timestamp(
+            harness.sender_key.node_id(),
+            harness.receiver_key.node_id(),
+            ZapFlags::ENCRYPTED,
+            now_micros().unwrap(),
+            envelope.encode(),
+        )
+        .unwrap();
+        let signed = sign_frame(&harness.sender_key, &unsigned).unwrap();
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.kind, ZapMessageKind::Control);
+        assert_eq!(event.subject, CAPABILITY_QUERY_SUBJECT);
+
+        let response = timeout(Duration::from_secs(2), harness.sender_endpoint.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        verify_frame(&harness.receiver_key.verifying_key(), &response.frame).unwrap();
+        let response_envelope = ZapEnvelopeRef::parse(&response.frame.payload).unwrap();
+        assert_eq!(response_envelope.kind(), ZapMessageKind::Control);
+        assert_eq!(response_envelope.subject(), CAPABILITY_RESPONSE_SUBJECT);
+        let response: CapabilityResponse =
+            serde_json::from_slice(response_envelope.body()).unwrap();
+        assert!(
+            response
+                .advertisement
+                .capabilities
+                .contains(&CapabilityId::new("driver.execute:echo").unwrap())
+        );
+    }
+
+    #[tokio::test]
+    async fn node_routes_action_to_configured_peer() {
+        let temp = tempfile::tempdir().unwrap();
+        let router_key = Keypair::generate();
+        let sender_key = Keypair::generate();
+        let target_key = Keypair::generate();
+        let router_key_path = temp.path().join("router.key");
+        std::fs::write(&router_key_path, router_key.to_key_file_toml().unwrap()).unwrap();
+
+        let sender_endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+            "127.0.0.1:0".parse().unwrap(),
+            sender_key.node_id(),
+        ))
+        .await
+        .unwrap();
+        let target_endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+            "127.0.0.1:0".parse().unwrap(),
+            target_key.node_id(),
+        ))
+        .await
+        .unwrap();
+        let sender_transport_key = [0x31_u8; 32];
+        let target_transport_key = [0x32_u8; 32];
+        let config = ZapNodeConfig {
+            bind: "127.0.0.1:0".to_string(),
+            key_file: router_key_path,
+            require_signed: true,
+            max_datagram_size: None,
+            peers: vec![
+                PeerConfig {
+                    node_id: sender_key.node_id(),
+                    addr: sender_endpoint.local_addr().unwrap().to_string(),
+                    public_key: public_key_string(&sender_key),
+                    transport_key: sender_transport_key
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                },
+                PeerConfig {
+                    node_id: target_key.node_id(),
+                    addr: target_endpoint.local_addr().unwrap().to_string(),
+                    public_key: public_key_string(&target_key),
+                    transport_key: target_transport_key
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                },
+            ],
+            drivers: Vec::new(),
+            runtime: RuntimeConfig::default(),
+            security: SecurityConfig::default(),
+            poa: PoaConfig::default(),
+            receipts: ReceiptsConfig::default(),
+            registry: RegistryConfig::default(),
+            memory: MemoryConfig::default(),
+            capability_policy: CapabilityPolicyConfig::default(),
+            capability_cache: CapabilityCacheConfig::default(),
+            routes: vec![RouteRule {
+                name: Some("echo-to-peer".to_string()),
+                description: None,
+                requires_peer_grant: None,
+                matches: RouteMatch {
+                    kind: Some("action".to_string()),
+                    subject: Some("echo".to_string()),
+                    ..RouteMatch::default()
+                },
+                target: RouteTarget::peer(target_key.node_id()),
+            }],
+        };
+        let router = ZapNode::from_config(config).await.unwrap();
+        sender_endpoint
+            .add_peer(Peer::new(
+                router_key.node_id(),
+                router.local_addr().unwrap(),
+                sender_transport_key,
+            ))
+            .await;
+        target_endpoint
+            .add_peer(Peer::new(
+                router_key.node_id(),
+                router.local_addr().unwrap(),
+                target_transport_key,
+            ))
+            .await;
+
+        let payload = zenv_payload(ZapMessageKind::Action, "echo", b"forward-me");
+        let unsigned = ZapFrame::with_timestamp(
+            sender_key.node_id(),
+            router_key.node_id(),
+            ZapFlags::ENCRYPTED,
+            now_micros().unwrap(),
+            Bytes::from(payload),
+        )
+        .unwrap();
+        let signed = sign_frame(&sender_key, &unsigned).unwrap();
+        sender_endpoint
+            .send_frame(router_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), router.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.kind, ZapMessageKind::Action);
+        assert_eq!(event.output, None);
+
+        let forwarded = timeout(Duration::from_secs(2), target_endpoint.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(forwarded.peer.node_id, router_key.node_id());
+        verify_frame(&router_key.verifying_key(), &forwarded.frame).unwrap();
+        let envelope = ZapEnvelopeRef::parse(&forwarded.frame.payload).unwrap();
+        assert_eq!(envelope.kind(), ZapMessageKind::Action);
+        assert_eq!(envelope.subject(), "echo");
+        assert_eq!(envelope.body(), b"forward-me");
     }
 
     #[tokio::test]

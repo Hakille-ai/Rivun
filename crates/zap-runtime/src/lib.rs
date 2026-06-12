@@ -22,6 +22,7 @@ use wasmtime::{
     Config, Engine, ExternType, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
     ValType,
 };
+pub use zap_capability::DriverPermissions;
 
 const MAX_EPOCH_TICK_MS: u64 = 10;
 const MEMORY_EXPORT: &str = "memory";
@@ -62,47 +63,6 @@ pub enum ZapRuntimeError {
 }
 
 pub type Result<T> = std::result::Result<T, ZapRuntimeError>;
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct DriverPermissions {
-    pub network: bool,
-    pub filesystem: bool,
-    pub clock: bool,
-    pub environment: bool,
-}
-
-impl DriverPermissions {
-    pub const fn none() -> Self {
-        Self {
-            network: false,
-            filesystem: false,
-            clock: false,
-            environment: false,
-        }
-    }
-
-    fn validate(self) -> Result<()> {
-        if self.network {
-            return Err(ZapRuntimeError::PermissionDenied("network"));
-        }
-        if self.filesystem {
-            return Err(ZapRuntimeError::PermissionDenied("filesystem"));
-        }
-        if self.clock {
-            return Err(ZapRuntimeError::PermissionDenied("clock"));
-        }
-        if self.environment {
-            return Err(ZapRuntimeError::PermissionDenied("environment"));
-        }
-        Ok(())
-    }
-}
-
-impl Default for DriverPermissions {
-    fn default() -> Self {
-        Self::none()
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExecutionLimits {
@@ -171,7 +131,7 @@ impl WasmExecutor {
         payload: &[u8],
         limits: ExecutionLimits,
     ) -> Result<WasmExecutionResult> {
-        limits.permissions.validate()?;
+        validate_permissions(limits.permissions)?;
         ensure_i32_len(action.len())?;
         ensure_i32_len(payload.len())?;
         driver.validate_abi()?;
@@ -534,6 +494,22 @@ fn read_memory(
 fn ensure_i32_len(len: usize) -> Result<()> {
     if len > i32::MAX as usize {
         return Err(ZapRuntimeError::InputTooLarge(len));
+    }
+    Ok(())
+}
+
+fn validate_permissions(permissions: DriverPermissions) -> Result<()> {
+    if permissions.network {
+        return Err(ZapRuntimeError::PermissionDenied("network"));
+    }
+    if permissions.filesystem {
+        return Err(ZapRuntimeError::PermissionDenied("filesystem"));
+    }
+    if permissions.clock {
+        return Err(ZapRuntimeError::PermissionDenied("clock"));
+    }
+    if permissions.environment {
+        return Err(ZapRuntimeError::PermissionDenied("environment"));
     }
     Ok(())
 }

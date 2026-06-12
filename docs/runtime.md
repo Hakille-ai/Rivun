@@ -26,6 +26,10 @@ The daemon repeats that compile-and-validate step during startup and keeps the c
 
 Wasmtime fuel enforces deterministic instruction budgets. Epoch interruption enforces wall-clock deadlines for long-running code, with the store configured to trap when the deadline is reached.
 
-ABI v1 provides no host imports. Signed manifests can declare future host permissions, but `zap-node` rejects drivers that currently request network, filesystem, clock, or environment access.
+ABI v1 provides no general host imports. Signed manifests can declare future
+host permissions, but `zap-node` rejects drivers that currently request network,
+filesystem, clock, or environment access. `zap-capability` is the source of
+truth for permission declarations and discovery metadata; discovery alone never
+grants runtime authority.
 
 For v1 examples, see `examples/wasm-drivers/echo/echo.wat` and `examples/wasm-drivers/thermostat/thermostat.wat`.

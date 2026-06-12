@@ -31,6 +31,12 @@ wire formats.
   checks, and Noise helper primitives.
 - **Node**: daemon policy, peer verification, replay protection, receipts, and
   dispatch.
+- **Capability**: explicit capability advertisements and query/response control
+  messages with optional policy grants and requirements.
+- **Router**: deterministic route planning before local driver dispatch or peer
+  forwarding.
+- **Memory**: append-only local JSONL memory with body hashes, entry hash
+  chaining, tombstones, pruning, and verification.
 - **Runtime**: Wasmtime execution with ABI checks, fuel, memory, time, output,
   and permission limits.
 - **Adapters**: CLI, SDKs, bridges, model runtimes, devices, and application
@@ -43,14 +49,18 @@ wire formats.
 - `zap-envelope`: universal `ZENV` payload envelopes.
 - `zap-crypto`: node identity, key files, Ed25519 signing, verification, and
   PoA certificates.
+- `zap-capability`: capability ids, advertisements, queries, and driver
+  permission contracts.
 - `zap-net`: encrypted UDP endpoint, peer table, nonce replay checks, and Noise
   helper.
+- `zap-router`: deterministic route tables and explainable route decisions.
 - `zap-runtime`: sandboxed WASM driver execution.
 - `zap-driver-sdk`: minimal ABI helpers for driver authors.
 - `zap-node`: daemon config, verification, receipts, and action dispatch.
 - `zap-cli`: operator commands.
 - `zap-intent`: deterministic local intent compiler.
 - `zap-ledger`: signed receipt records.
+- `zap-memory`: auditable local memory JSONL store.
 - `zap-store`: signed WASM driver manifests.
 
 ## Quickstart
@@ -112,6 +122,8 @@ See [Deployment](docs/deployment.md) for production notes.
 Validate a config:
 
 ```bash
+cargo run -p zap-cli -- doctor --config zap.toml
+cargo run -p zap-cli -- doctor --config zap.toml --json --strict
 cargo run -p zap-cli -- check-config --strict --config zap.toml
 cargo run -p zap-cli -- check-config --config zap.toml --json
 ```
@@ -146,6 +158,25 @@ cargo run -p zap-cli -- registry revoke --registry registry.index.toml --action 
 cargo run -p zap-cli -- registry sign --registry registry.index.toml --operator-key .zap/node.key
 cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
 ```
+
+Inspect local capabilities, query a peer, explain routing, and manage local
+memory:
+
+```bash
+cargo run -p zap-cli -- capability list --config zap.toml --json
+cargo run -p zap-cli -- capability query --config zap.toml --target <uuid> --cache .zap/capabilities.jsonl --json
+cargo run -p zap-cli -- capability cache verify --path .zap/capabilities.jsonl
+cargo run -p zap-cli -- capability cache list --path .zap/capabilities.jsonl --peer <uuid> --json
+cargo run -p zap-cli -- route explain --config zap.toml --kind action --subject echo --json
+cargo run -p zap-cli -- memory put --path .zap/memory.jsonl --subject note --payload hello
+cargo run -p zap-cli -- memory verify --path .zap/memory.jsonl
+```
+
+Production configs can require explicit grants for every advertised capability
+with `[capability_policy] require_grants_for_advertised = true`; `zap doctor`
+reports grant coverage as part of readiness.
+Routes can also set `requires_peer_grant` and use `[capability_cache]` so
+forwarding to a peer depends on a verified cached grant from that peer.
 
 Apply an intent policy before sending or inspecting a plan:
 
@@ -226,6 +257,9 @@ Important defaults:
 - inbound nonce and frame replay checks are enabled by default;
 - WASM drivers have no host capabilities unless explicit future APIs grant
   them;
+- discovered capabilities are descriptive only and do not grant authority;
+- local memory records are hash-chain-verifiable JSONL audit data, not hidden
+  model state;
 - frames marked `REQUIRES_CONSENSUS` require PoA certificates before dispatch.
 
 ## Contributing
@@ -242,6 +276,7 @@ and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - [Operations](docs/operations.md)
 - [Runtime](docs/runtime.md)
 - [ZapStore](docs/zapstore.md)
+- [Capability, Router, and Memory](docs/capability-router-memory.md)
 - [Intent Compiler](docs/intent.md)
 - [Signed Receipts](docs/receipts.md)
 - [Versioning](docs/versioning.md)

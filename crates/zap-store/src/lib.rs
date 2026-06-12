@@ -10,8 +10,8 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
+use zap_capability::DriverPermissions;
 use zap_crypto::{Keypair, node_id_from_public_key};
-use zap_runtime::DriverPermissions;
 
 pub const MANIFEST_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_SCHEMA_VERSION: u8 = 1;

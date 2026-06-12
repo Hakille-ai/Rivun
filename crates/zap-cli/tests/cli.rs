@@ -1877,6 +1877,493 @@ fn check_config_accepts_valid_config_and_prints_json_report() {
     assert_eq!(json["peer_count"], 1);
     assert_eq!(json["driver_count"], 1);
     assert_eq!(json["signed_driver_count"], 0);
+    assert_eq!(json["route_count"], 0);
+    assert_eq!(json["memory_enabled"], false);
+    assert_eq!(json["capability_count"], 1);
+    assert_eq!(json["capability_grant_count"], 0);
+    assert_eq!(json["capability_requirement_count"], 0);
+    assert_eq!(json["ungranted_capability_count"], 1);
+    assert_eq!(json["capability_cache_enabled"], false);
+    assert_eq!(json["peer_grant_route_count"], 0);
+}
+
+#[test]
+fn doctor_reports_readiness_json() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "doctor",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["config"], config_path.display().to_string());
+    assert_eq!(json["status"], "needs_attention");
+    assert!(json["score"].as_u64().unwrap() < 100);
+    assert!(
+        json["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["name"] == "identity" && check["status"] == "pass")
+    );
+    assert!(
+        json["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning.as_str().unwrap().contains("receipt audit"))
+    );
+}
+
+#[test]
+fn check_config_and_doctor_report_capability_policy() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+[capability_policy]
+require_grants_for_advertised = true
+
+[[capability_policy.grants]]
+capability = 'driver.execute:echo'
+reason = 'operator-approved local echo driver'
+
+[[capability_policy.requirements]]
+capability = 'poa.validator'
+required = true
+reason = 'critical frames require validator quorum'
+"#,
+    );
+    std::fs::write(&config_path, config).unwrap();
+
+    let check = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "check-config",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    let check_json: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
+    assert_eq!(check_json["capability_grant_count"], 1);
+    assert_eq!(check_json["capability_requirement_count"], 1);
+    assert_eq!(check_json["ungranted_capability_count"], 0);
+
+    let doctor = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "doctor",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(doctor.status.success());
+    let doctor_json: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert!(
+        doctor_json["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check["name"] == "capability policy" && check["status"] == "pass")
+    );
+}
+
+#[test]
+fn doctor_strict_rejects_readiness_warnings() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "doctor",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+            "--strict",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "needs_attention");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("doctor strict gate failed"),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
+}
+
+#[test]
+fn doctor_reports_validation_errors_as_json() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let wrong_peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&wrong_peer));
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "doctor",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["status"], "failed");
+    assert_eq!(json["score"], 0);
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("peer public_key derives node_id")
+    );
+}
+
+#[test]
+fn capability_list_prints_local_driver_capability() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "capability",
+            "list",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["node_id"], local.node_id().to_string());
+    assert!(
+        json["capabilities"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "driver.execute:echo")
+    );
+}
+
+#[tokio::test]
+async fn capability_query_can_cache_and_verify_peer_advertisement() {
+    let dir = tempdir().unwrap();
+    let receiver = Keypair::generate();
+    let sender = Keypair::generate();
+    let transport_key = [0x63_u8; 32];
+    let sender_addr = free_udp_addr();
+    let receiver_key_path = dir.path().join("receiver.key");
+    let receiver_driver_path = dir.path().join("receiver-echo.wat");
+    let receiver_config_path = dir.path().join("receiver.toml");
+    std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
+    std::fs::write(&receiver_driver_path, echo_driver_wat()).unwrap();
+    std::fs::write(
+        &receiver_config_path,
+        format!(
+            r#"
+bind = '127.0.0.1:0'
+key_file = '{}'
+require_signed = true
+
+[[peers]]
+node_id = '{}'
+addr = '{}'
+public_key = '{}'
+transport_key = '{}'
+
+[[drivers]]
+action = 'echo'
+path = '{}'
+
+[capability_policy]
+require_grants_for_advertised = true
+
+[[capability_policy.grants]]
+capability = 'driver.execute:echo'
+reason = 'operator-approved test driver'
+"#,
+            receiver_key_path.display(),
+            sender.node_id(),
+            sender_addr,
+            public_key_string(&sender),
+            hex_transport_key(transport_key),
+            receiver_driver_path.display(),
+        ),
+    )
+    .unwrap();
+    let receiver_config = ZapNodeConfig::from_path(&receiver_config_path).unwrap();
+    let receiver_node = ZapNode::from_config(receiver_config).await.unwrap();
+    let sender_config = write_sender_config(
+        &dir,
+        &sender,
+        &receiver,
+        receiver_node.local_addr().unwrap(),
+        &sender_addr,
+        transport_key,
+    );
+    let cache_path = dir.path().join("capabilities.jsonl");
+    let target = receiver.node_id().to_string();
+    let config_arg = sender_config.clone();
+    let cache_arg = cache_path.clone();
+
+    let command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "capability",
+                "query",
+                "--config",
+                config_arg.to_str().unwrap(),
+                "--target",
+                &target,
+                "--cache",
+                cache_arg.to_str().unwrap(),
+                "--json",
+            ])
+            .output()
+    });
+    let handled = receiver_node.handle_once();
+    let (event, output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled, command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let output = output.unwrap().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        response["response"]["advertisement"]["node_id"],
+        receiver.node_id().to_string()
+    );
+    assert_eq!(
+        response["cached_entry"]["peer_node_id"],
+        receiver.node_id().to_string()
+    );
+    assert_eq!(
+        response["response"]["advertisement"]["grants"][0]["capability"],
+        "driver.execute:echo"
+    );
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "capability",
+            "cache",
+            "verify",
+            "--path",
+            cache_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(verify.status.success());
+    let verify_json: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(verify_json["verified"], true);
+    assert_eq!(verify_json["entries"], 1);
+
+    let list = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "capability",
+            "cache",
+            "list",
+            "--path",
+            cache_path.to_str().unwrap(),
+            "--peer",
+            &receiver.node_id().to_string(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let list_json: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(list_json.as_array().unwrap().len(), 1);
+    assert!(
+        list_json[0]["advertisement"]["capabilities"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| capability == "driver.execute:echo")
+    );
+}
+
+#[test]
+fn capability_inspect_manifest_prints_capabilities() {
+    let dir = tempdir().unwrap();
+    let author = Keypair::generate();
+    let manifest_path = dir.path().join("echo.manifest.toml");
+    let manifest = DriverManifest::new(
+        "echo-driver",
+        "0.1.0",
+        "echo",
+        echo_driver_wat().as_bytes(),
+        zap_runtime::DriverPermissions::none(),
+        None,
+        &author,
+    )
+    .unwrap();
+    std::fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "capability",
+            "inspect-manifest",
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["action"], "echo");
+    assert!(
+        json["capabilities"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|value| value == "driver.execute:echo")
+    );
+}
+
+#[test]
+fn memory_put_query_and_verify_round_trip() {
+    let dir = tempdir().unwrap();
+    let memory_path = dir.path().join("memory.jsonl");
+    let put = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "memory",
+            "put",
+            "--path",
+            memory_path.to_str().unwrap(),
+            "--subject",
+            "note",
+            "--payload",
+            "hello",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        put.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&put.stdout),
+        String::from_utf8_lossy(&put.stderr)
+    );
+    let record: serde_json::Value = serde_json::from_slice(&put.stdout).unwrap();
+    assert_eq!(record["subject"], "note");
+
+    let query = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "memory",
+            "query",
+            "--path",
+            memory_path.to_str().unwrap(),
+            "--subject",
+            "note",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(query.status.success());
+    let records: serde_json::Value = serde_json::from_slice(&query.stdout).unwrap();
+    assert_eq!(records.as_array().unwrap().len(), 1);
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "memory",
+            "verify",
+            "--path",
+            memory_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(verify.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(report["verified"], true);
+    assert_eq!(report["records"], 1);
+}
+
+#[test]
+fn route_explain_uses_default_local_driver_route() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "route",
+            "explain",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--kind",
+            "action",
+            "--subject",
+            "echo",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["decision"]["target"]["local_driver"], "echo");
+    assert_eq!(json["decision"]["reason"], "default route");
 }
 
 #[test]

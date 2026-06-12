@@ -1,0 +1,13 @@
+[package]
+name = "zap-router"
+description = "Deterministic route planning for ZAP envelopes."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zap-capability.workspace = true

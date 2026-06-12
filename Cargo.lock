@@ -2537,6 +2537,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-capability"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "zap-cli"
 version = "0.1.0"
 dependencies = [
@@ -2545,18 +2557,22 @@ dependencies = [
  "bytes",
  "clap",
  "hex",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "tracing-subscriber",
  "uuid",
+ "zap-capability",
  "zap-core",
  "zap-crypto",
  "zap-envelope",
  "zap-intent",
  "zap-ledger",
+ "zap-memory",
  "zap-net",
  "zap-node",
+ "zap-router",
  "zap-runtime",
  "zap-store",
 ]
@@ -2632,6 +2648,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-memory"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "zap-net"
 version = "0.1.0"
 dependencies = [
@@ -2665,13 +2694,26 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+ "zap-capability",
  "zap-core",
  "zap-crypto",
  "zap-envelope",
  "zap-ledger",
+ "zap-memory",
  "zap-net",
+ "zap-router",
  "zap-runtime",
  "zap-store",
+]
+
+[[package]]
+name = "zap-router"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "uuid",
+ "zap-capability",
 ]
 
 [[package]]
@@ -2683,6 +2725,7 @@ dependencies = [
  "thiserror",
  "wasmtime",
  "wat",
+ "zap-capability",
 ]
 
 [[package]]
@@ -2697,8 +2740,8 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+ "zap-capability",
  "zap-crypto",
- "zap-runtime",
 ]
 
 [[package]]

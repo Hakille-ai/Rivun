@@ -72,6 +72,42 @@ threshold; the default is 2000 ms.
 
 When `[receipts].path` is configured, `zap-node` appends one Ed25519-signed JSONL receipt after each processed action. Receipts contain hashes, action metadata, and optional PoA summaries. They are audit records only, not financial records.
 
+## Capability Discovery, Routing, and Memory
+
+Capability discovery uses signed `ZENV` control messages with subjects
+`zap.capability.query` and `zap.capability.response`. Responses describe local
+drivers, configured memory access, and declared host permissions. They do not
+grant authority by themselves; enforcement still comes from node config, signed
+ZapStore manifests, registry policy, and runtime checks.
+
+Configured capability grants are policy assertions attached to advertisements,
+not ambient authority. `zap-node` rejects grants for capabilities it does not
+actually advertise, and deployments can set
+`capability_policy.require_grants_for_advertised = true` to require explicit
+grant coverage for every advertised capability.
+
+`zap capability query --cache` stores signed peer responses in a local
+hash-chained JSONL cache. Cache verification checks entry hashes, chain
+continuity, peer/ad node identity consistency, duplicate entry ids, and grants
+that reference missing advertised capabilities.
+
+Routes can declare `requires_peer_grant`. During config validation, `zap-node`
+verifies the capability cache and requires the target peer's latest cached
+advertisement to grant the requested capability before the node can start with
+that route.
+
+Routes are deterministic config entries evaluated after frame verification,
+PoA validation, timestamp freshness, and replay checks. Forwarded routes create
+new signed frames from the routing node. Consensus-protected frames are not
+forwarded in v1 because the original PoA certificate is bound to the original
+signed frame.
+
+`zap-memory` stores local memory as append-only JSONL records with BLAKE3 body
+hashes, entry-to-entry hash chaining, and tombstones. `zap memory verify`
+recalculates stored hashes, validates the append-only chain, and rejects
+orphaned tombstones. The v1 memory store is local audit data, not a remote
+database and not a hidden model state channel.
+
 ## Runtime Isolation
 
 WASM drivers receive no host imports by default. Network, filesystem, clock, and environment capabilities are denied unless explicitly granted by future host APIs.
