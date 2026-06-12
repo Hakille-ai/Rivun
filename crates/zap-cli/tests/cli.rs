@@ -210,6 +210,165 @@ fn send_rejects_invalid_config_before_network_send() {
     );
 }
 
+#[test]
+fn send_rejects_target_when_peer_trust_disallows_send() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let mut config_text = std::fs::read_to_string(&config_path).unwrap();
+    config_text = config_text.replace(
+        "\n[[drivers]]",
+        r#"
+[peers.trust]
+allow_send = false
+
+[[drivers]]"#,
+    );
+    std::fs::write(&config_path, config_text).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "send",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--target",
+            &peer.node_id().to_string(),
+            "--payload",
+            "hello",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("peer trust policy"),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn schema_validate_accepts_matching_universal_envelope() {
+    let dir = tempdir().unwrap();
+    let contract_path = dir.path().join("echo.contract.toml");
+    let envelope_path = dir.path().join("echo.zenv");
+    std::fs::write(
+        &contract_path,
+        r#"
+schema_version = 1
+name = "echo contract"
+kind = "action"
+subject = "echo"
+content_type = "application/json"
+
+[body]
+format = "json_object"
+required_json_fields = ["message"]
+"#,
+    )
+    .unwrap();
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Action,
+        "echo",
+        "application/json",
+        Bytes::from_static(br#"{"message":"hello"}"#),
+    )
+    .unwrap()
+    .encode();
+    std::fs::write(&envelope_path, envelope).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "schema",
+            "validate",
+            "--contract",
+            contract_path.to_str().unwrap(),
+            "--envelope",
+            envelope_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["subject"], "echo");
+}
+
+#[test]
+fn policy_evaluate_strict_enforces_required_poa() {
+    let dir = tempdir().unwrap();
+    let policy_path = dir.path().join("policy.toml");
+    std::fs::write(
+        &policy_path,
+        r#"
+[[rules]]
+name = "safety quorum"
+kind = "action"
+subject = "safety.*"
+decision = "require_poa"
+reason = "safety actions require quorum"
+"#,
+    )
+    .unwrap();
+
+    let denied = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "policy",
+            "evaluate",
+            "--policy",
+            policy_path.to_str().unwrap(),
+            "--kind",
+            "action",
+            "--subject",
+            "safety.emergency_stop",
+            "--strict",
+        ])
+        .output()
+        .unwrap();
+    assert!(!denied.status.success());
+    assert!(
+        String::from_utf8_lossy(&denied.stderr).contains("policy strict gate denied"),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&denied.stdout),
+        String::from_utf8_lossy(&denied.stderr)
+    );
+
+    let allowed = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "policy",
+            "evaluate",
+            "--policy",
+            policy_path.to_str().unwrap(),
+            "--kind",
+            "action",
+            "--subject",
+            "safety.emergency_stop",
+            "--requires-consensus",
+            "--strict",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        allowed.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&allowed.stdout),
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&allowed.stdout).unwrap();
+    assert_eq!(json["allowed"], true);
+    assert_eq!(json["required_poa"], true);
+}
+
 fn hex_transport_key(key: [u8; 32]) -> String {
     key.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -354,6 +513,11 @@ fn driver_manifest_create_and_verify_round_trip() {
             author_key_path.to_str().unwrap(),
             "--out",
             manifest_path.to_str().unwrap(),
+            "--allow-emit-event",
+            "--allow-memory-write",
+            "--allow-device-call",
+            "--max-host-call-bytes",
+            "8192",
         ])
         .output()
         .unwrap();
@@ -370,6 +534,10 @@ fn driver_manifest_create_and_verify_round_trip() {
         .verify_for_driver("echo", echo_driver_wat().as_bytes())
         .unwrap();
     assert_eq!(manifest.author_node_id, author.node_id());
+    assert!(manifest.permissions.emit_event);
+    assert!(manifest.permissions.memory_write);
+    assert!(manifest.permissions.device_call);
+    assert_eq!(manifest.permissions.max_host_call_bytes, 8192);
 
     let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
@@ -531,76 +699,6 @@ fn driver_manifest_verify_rejects_tampered_driver() {
         String::from_utf8_lossy(&verify.stdout),
         String::from_utf8_lossy(&verify.stderr)
     );
-}
-
-#[test]
-fn compile_intent_prints_auditable_plan() {
-    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "compile-intent",
-            "Ajuster la temperature a 20 et declencher arret urgence robot",
-        ])
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["compiler"], "zap-intent-rule-v1");
-    assert_eq!(json["steps"][0]["action"], "thermostat.setpoint");
-    assert_eq!(json["steps"][1]["action"], "safety.emergency_stop");
-    assert_eq!(json["steps"][1]["requires_consensus"], true);
-}
-
-#[test]
-fn compile_intent_explain_applies_policy() {
-    let dir = tempdir().unwrap();
-    let policy_path = dir.path().join("policy.json");
-    std::fs::write(
-        &policy_path,
-        r#"{
-          "rules": [
-            {
-              "subject": "thermostat.setpoint",
-              "decision": "require_poa",
-              "reason": "temperature changes require approval"
-            }
-          ]
-        }"#,
-    )
-    .unwrap();
-
-    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "compile-intent",
-            "Ajuster la temperature a 20",
-            "--explain",
-            "--policy",
-            policy_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-
-    assert!(
-        output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(
-        json["explanation"]["plan"]["steps"][0]["subject"],
-        "thermostat.setpoint"
-    );
-    assert_eq!(
-        json["explanation"]["plan"]["steps"][0]["requires_consensus"],
-        true
-    );
-    assert_eq!(json["policy"]["decisions"][0]["decision"], "require_poa");
 }
 
 #[test]
@@ -1392,7 +1490,7 @@ fn inspect_verifies_with_public_key_without_private_key_file() {
 }
 
 #[tokio::test]
-async fn send_with_intent_builds_multiple_action_envelopes() {
+async fn send_requires_consensus_attaches_poa_certificate() {
     let sender = Keypair::generate();
     let receiver = Keypair::generate();
     let validator = Keypair::generate();
@@ -1432,8 +1530,15 @@ async fn send_with_intent_builds_multiple_action_envelopes() {
                 config_path.to_str().unwrap(),
                 "--target",
                 &target,
-                "--intent",
-                "Ajuster la temperature a 20 et declencher arret urgence robot",
+                "--kind",
+                "action",
+                "--subject",
+                "safety.emergency_stop",
+                "--payload",
+                r#"{"reason":"operator_request"}"#,
+                "--content-type",
+                "application/json",
+                "--requires-consensus",
                 "--poa-validator-key",
                 validator_key_path.to_str().unwrap(),
             ])
@@ -1448,25 +1553,6 @@ async fn send_with_intent_builds_multiple_action_envelopes() {
         "stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    );
-
-    let thermostat = timeout(Duration::from_secs(2), receiver_endpoint.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    verify_frame(&sender.verifying_key(), &thermostat.frame).unwrap();
-    let envelope = ZapEnvelopeRef::parse(&thermostat.frame.payload).unwrap();
-    assert_eq!(envelope.kind(), ZapMessageKind::Action);
-    assert_eq!(envelope.subject(), "thermostat.setpoint");
-    assert_eq!(envelope.content_type(), "application/json");
-    let payload: serde_json::Value = serde_json::from_slice(envelope.body()).unwrap();
-    assert_eq!(payload["temperature_c"], 20.0);
-    assert!(
-        !thermostat
-            .frame
-            .header
-            .flags
-            .contains(ZapFlags::REQUIRES_CONSENSUS)
     );
 
     let safety = timeout(Duration::from_secs(2), receiver_endpoint.recv())
@@ -1497,7 +1583,7 @@ async fn send_with_intent_builds_multiple_action_envelopes() {
 }
 
 #[tokio::test]
-async fn send_with_consensus_intent_requires_poa_validator_key() {
+async fn send_with_requires_consensus_requires_poa_validator_key() {
     let sender = Keypair::generate();
     let receiver = Keypair::generate();
     let transport_key = [0x42_u8; 32];
@@ -1534,8 +1620,15 @@ async fn send_with_consensus_intent_requires_poa_validator_key() {
                 config_path.to_str().unwrap(),
                 "--target",
                 &target,
-                "--intent",
-                "declencher arret urgence robot",
+                "--kind",
+                "action",
+                "--subject",
+                "safety.emergency_stop",
+                "--payload",
+                r#"{"reason":"operator_request"}"#,
+                "--content-type",
+                "application/json",
+                "--requires-consensus",
             ])
             .output()
     })
@@ -1611,8 +1704,15 @@ public_key = '{}'
                 sender_config_path.to_str().unwrap(),
                 "--target",
                 &target,
-                "--intent",
-                "declencher arret urgence robot",
+                "--kind",
+                "action",
+                "--subject",
+                "safety.emergency_stop",
+                "--payload",
+                r#"{"reason":"operator_request"}"#,
+                "--content-type",
+                "application/json",
+                "--requires-consensus",
                 "--poa-network",
                 "--poa-timeout-ms",
                 "1",
@@ -1742,8 +1842,15 @@ public_key = '{}'
                 sender_config_path.to_str().unwrap(),
                 "--target",
                 &target,
-                "--intent",
-                "declencher arret urgence robot",
+                "--kind",
+                "action",
+                "--subject",
+                "safety.emergency_stop",
+                "--payload",
+                r#"{"reason":"operator_request"}"#,
+                "--content-type",
+                "application/json",
+                "--requires-consensus",
                 "--poa-network",
             ])
             .output()
@@ -1875,6 +1982,11 @@ fn check_config_accepts_valid_config_and_prints_json_report() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["node_id"], local.node_id().to_string());
     assert_eq!(json["peer_count"], 1);
+    assert_eq!(json["trusted_peer_count"], 1);
+    assert_eq!(json["restricted_peer_count"], 0);
+    assert_eq!(json["peer_send_enabled_count"], 1);
+    assert_eq!(json["peer_receive_enabled_count"], 1);
+    assert_eq!(json["peer_forward_enabled_count"], 1);
     assert_eq!(json["driver_count"], 1);
     assert_eq!(json["signed_driver_count"], 0);
     assert_eq!(json["route_count"], 0);
@@ -1885,6 +1997,85 @@ fn check_config_accepts_valid_config_and_prints_json_report() {
     assert_eq!(json["ungranted_capability_count"], 1);
     assert_eq!(json["capability_cache_enabled"], false);
     assert_eq!(json["peer_grant_route_count"], 0);
+}
+
+#[test]
+fn trust_enroll_outputs_verified_peer_toml() {
+    let peer = Keypair::generate();
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "trust",
+            "enroll",
+            "--node-id",
+            &peer.node_id().to_string(),
+            "--addr",
+            "127.0.0.1:9000",
+            "--public-key",
+            &public_key_string(&peer),
+            "--transport-key",
+            "4242424242424242424242424242424242424242424242424242424242424242",
+            "--transport-key-epoch",
+            "2",
+            "--label",
+            "edge",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[[peers]]"));
+    assert!(stdout.contains(&format!("node_id = \"{}\"", peer.node_id())));
+    assert!(stdout.contains("transport_key_epoch = 2"));
+    assert!(stdout.contains("[[peers.trust.labels]]") || stdout.contains("labels = [\"edge\"]"));
+}
+
+#[test]
+fn trust_inspect_reports_restricted_peer() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let mut config_text = std::fs::read_to_string(&config_path).unwrap();
+    config_text = config_text.replace(
+        "\n[[drivers]]",
+        r#"
+[peers.trust]
+allow_send = false
+labels = ["lab"]
+
+[[drivers]]"#,
+    );
+    std::fs::write(&config_path, config_text).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "trust",
+            "inspect",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["trusted_peer_count"], 1);
+    assert_eq!(json["restricted_peer_count"], 1);
+    assert_eq!(json["peer_send_enabled_count"], 0);
+    assert_eq!(json["peers"][0]["allow_send"], false);
+    assert_eq!(json["peers"][0]["labels"][0], "lab");
 }
 
 #[test]
@@ -2228,6 +2419,128 @@ reason = 'operator-approved test driver'
             .iter()
             .any(|capability| capability == "driver.execute:echo")
     );
+}
+
+#[tokio::test]
+async fn capability_cache_refresh_queries_configured_peer() {
+    let dir = tempdir().unwrap();
+    let receiver = Keypair::generate();
+    let sender = Keypair::generate();
+    let transport_key = [0x64_u8; 32];
+    let sender_addr = free_udp_addr();
+    let receiver_key_path = dir.path().join("receiver.key");
+    let receiver_driver_path = dir.path().join("receiver-echo.wat");
+    let receiver_config_path = dir.path().join("receiver.toml");
+    std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
+    std::fs::write(&receiver_driver_path, echo_driver_wat()).unwrap();
+    std::fs::write(
+        &receiver_config_path,
+        format!(
+            r#"
+bind = '127.0.0.1:0'
+key_file = '{}'
+require_signed = true
+
+[[peers]]
+node_id = '{}'
+addr = '{}'
+public_key = '{}'
+transport_key = '{}'
+
+[[drivers]]
+action = 'echo'
+path = '{}'
+
+[capability_policy]
+require_grants_for_advertised = true
+
+[[capability_policy.grants]]
+capability = 'driver.execute:echo'
+reason = 'operator-approved test driver'
+"#,
+            receiver_key_path.display(),
+            sender.node_id(),
+            sender_addr,
+            public_key_string(&sender),
+            hex_transport_key(transport_key),
+            receiver_driver_path.display(),
+        ),
+    )
+    .unwrap();
+    let receiver_config = ZapNodeConfig::from_path(&receiver_config_path).unwrap();
+    let receiver_node = ZapNode::from_config(receiver_config).await.unwrap();
+    let sender_config = write_sender_config(
+        &dir,
+        &sender,
+        &receiver,
+        receiver_node.local_addr().unwrap(),
+        &sender_addr,
+        transport_key,
+    );
+    let cache_path = dir.path().join("refreshed-capabilities.jsonl");
+    let mut sender_config_text = std::fs::read_to_string(&sender_config).unwrap();
+    sender_config_text.push_str(&format!(
+        r#"
+[capability_cache]
+path = '{}'
+"#,
+        cache_path.display()
+    ));
+    std::fs::write(&sender_config, sender_config_text).unwrap();
+
+    let config_arg = sender_config.clone();
+    let command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "capability",
+                "cache",
+                "refresh",
+                "--config",
+                config_arg.to_str().unwrap(),
+                "--json",
+                "--strict",
+            ])
+            .output()
+    });
+    let handled = receiver_node.handle_once();
+    let (event, output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled, command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let output = output.unwrap().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["requested_peer_count"], 1);
+    assert_eq!(report["refreshed"], 1);
+    assert_eq!(report["skipped"], 0);
+    assert_eq!(report["failed"], 0);
+    assert_eq!(report["results"][0]["peer"], receiver.node_id().to_string());
+    assert_eq!(report["results"][0]["status"], "ok");
+    assert_eq!(report["results"][0]["capabilities"], 1);
+    assert_eq!(report["results"][0]["grants"], 1);
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "capability",
+            "cache",
+            "verify",
+            "--path",
+            cache_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(verify.status.success());
+    let verify_json: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(verify_json["verified"], true);
+    assert_eq!(verify_json["entries"], 1);
 }
 
 #[test]

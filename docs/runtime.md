@@ -26,10 +26,23 @@ The daemon repeats that compile-and-validate step during startup and keeps the c
 
 Wasmtime fuel enforces deterministic instruction budgets. Epoch interruption enforces wall-clock deadlines for long-running code, with the store configured to trap when the deadline is reached.
 
-ABI v1 provides no general host imports. Signed manifests can declare future
-host permissions, but `zap-node` rejects drivers that currently request network,
-filesystem, clock, or environment access. `zap-capability` is the source of
-truth for permission declarations and discovery metadata; discovery alone never
-grants runtime authority.
+ABI v1 provides no general host imports for network, filesystem, clock, or
+environment access. ABI v2 foundations add a small `zap` import module for
+auditable machine-safe host calls:
+
+- `zap.emit_event(ptr, len) -> i32`
+- `zap.memory_read(key_ptr, key_len, out_ptr, out_len) -> i32`
+- `zap.memory_write(ptr, len) -> i32`
+- `zap.device_call(ptr, len) -> i32`
+
+These imports are deny-by-default. They return negative status codes when a
+permission is absent, a pointer is invalid, or the payload exceeds
+`max_host_call_bytes`. `device_call` is captured as an auditable request and
+returns a not-configured status until a real device bridge is configured.
+`memory_write` is committed by `zap-node` only when `[memory] path` is set and
+`allow_driver_write = true`.
+
+`zap-capability` is the source of truth for permission declarations and
+discovery metadata; discovery alone never grants runtime authority.
 
 For v1 examples, see `examples/wasm-drivers/echo/echo.wat` and `examples/wasm-drivers/thermostat/thermostat.wat`.

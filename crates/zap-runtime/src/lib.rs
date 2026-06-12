@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -19,16 +19,26 @@ use std::{
 };
 use thiserror::Error;
 use wasmtime::{
-    Config, Engine, ExternType, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
-    ValType,
+    Caller, Config, Engine, ExternType, Instance, Linker, Module, Store, StoreLimits,
+    StoreLimitsBuilder, ValType,
 };
-pub use zap_capability::DriverPermissions;
+pub use zap_capability::{DEFAULT_MAX_HOST_CALL_BYTES, DriverPermissions};
 
-const MAX_EPOCH_TICK_MS: u64 = 10;
+const SHARED_EPOCH_TICK_MS: u64 = 1;
 const MEMORY_EXPORT: &str = "memory";
 const ALLOC_EXPORT: &str = "zap_alloc";
 const DEALLOC_EXPORT: &str = "zap_dealloc";
 const EXECUTE_EXPORT: &str = "zap_execute";
+const HOST_MODULE: &str = "zap";
+const HOST_EMIT_EVENT: &str = "emit_event";
+const HOST_MEMORY_READ: &str = "memory_read";
+const HOST_MEMORY_WRITE: &str = "memory_write";
+const HOST_DEVICE_CALL: &str = "device_call";
+const HOST_DENIED: i32 = -1;
+const HOST_NOT_CONFIGURED: i32 = -2;
+const HOST_BAD_POINTER: i32 = -3;
+const HOST_TOO_LARGE: i32 = -4;
+const HOST_MEMORY_ERROR: i32 = -5;
 
 #[derive(Debug, Error)]
 pub enum ZapRuntimeError {
@@ -58,6 +68,8 @@ pub enum ZapRuntimeError {
     InputTooLarge(usize),
     #[error("permission `{0}` is not granted to this driver")]
     PermissionDenied(&'static str),
+    #[error("host call byte limit must be greater than zero")]
+    InvalidHostCallLimit,
     #[error("execution exceeded wall-clock budget of {limit_ms} ms")]
     Timeout { limit_ms: u64 },
 }
@@ -90,11 +102,26 @@ pub struct WasmExecutionResult {
     pub output: Vec<u8>,
     pub fuel_consumed: u64,
     pub elapsed_ms: u128,
+    pub host_calls: Vec<HostCallRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostCallRecord {
+    pub kind: HostCallKind,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostCallKind {
+    EmitEvent,
+    MemoryWrite,
+    DeviceCall,
 }
 
 #[derive(Clone)]
 pub struct WasmExecutor {
     engine: Engine,
+    _epoch_ticker: Arc<EngineEpochTicker>,
 }
 
 impl WasmExecutor {
@@ -103,8 +130,10 @@ impl WasmExecutor {
         config.consume_fuel(true);
         config.epoch_interruption(true);
         config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
+        let engine = Engine::new(&config)?;
         Ok(Self {
-            engine: Engine::new(&config)?,
+            _epoch_ticker: Arc::new(EngineEpochTicker::start(engine.clone())),
+            engine,
         })
     }
 
@@ -143,20 +172,23 @@ impl WasmExecutor {
                 .memories(1)
                 .tables(1)
                 .build(),
+            permissions: limits.permissions,
+            host_calls: Vec::new(),
         };
         let mut store = Store::new(&self.engine, state);
         store.limiter(|state| &mut state.limits);
         store.set_fuel(limits.fuel)?;
-        let epoch_tick_ms = epoch_tick_ms(limits.timeout_ms);
-        configure_epoch_deadline(&mut store, deadline_ticks(limits.timeout_ms, epoch_tick_ms));
+        configure_epoch_deadline(
+            &mut store,
+            deadline_ticks(limits.timeout_ms, SHARED_EPOCH_TICK_MS),
+        );
 
-        let linker = Linker::new(&self.engine);
+        let mut linker = Linker::new(&self.engine);
+        define_host_imports(&mut linker)?;
         let started = Instant::now();
-        let epoch_guard = EpochTicker::start(self.engine.clone(), epoch_tick_ms);
         let instance = match linker.instantiate(&mut store, &driver.module) {
             Ok(instance) => instance,
             Err(_error) if wall_clock_exceeded(started, limits.timeout_ms) => {
-                drop(epoch_guard);
                 return Err(ZapRuntimeError::Timeout {
                     limit_ms: limits.timeout_ms,
                 });
@@ -164,7 +196,6 @@ impl WasmExecutor {
             Err(error) => return Err(error.into()),
         };
         if wall_clock_exceeded(started, limits.timeout_ms) {
-            drop(epoch_guard);
             return Err(ZapRuntimeError::Timeout {
                 limit_ms: limits.timeout_ms,
             });
@@ -173,7 +204,6 @@ impl WasmExecutor {
             match execute_instance(&mut store, &instance, action.as_bytes(), payload, limits) {
                 Ok(output) => output,
                 Err(_error) if wall_clock_exceeded(started, limits.timeout_ms) => {
-                    drop(epoch_guard);
                     return Err(ZapRuntimeError::Timeout {
                         limit_ms: limits.timeout_ms,
                     });
@@ -181,7 +211,6 @@ impl WasmExecutor {
                 Err(error) => return Err(error),
             };
         let elapsed_ms = started.elapsed().as_millis();
-        drop(epoch_guard);
         if elapsed_ms > u128::from(limits.timeout_ms) {
             return Err(ZapRuntimeError::Timeout {
                 limit_ms: limits.timeout_ms,
@@ -189,10 +218,12 @@ impl WasmExecutor {
         }
 
         let fuel_remaining = store.get_fuel()?;
+        let host_calls = std::mem::take(&mut store.data_mut().host_calls);
         Ok(WasmExecutionResult {
             output,
             fuel_consumed: limits.fuel.saturating_sub(fuel_remaining),
             elapsed_ms,
+            host_calls,
         })
     }
 
@@ -248,35 +279,43 @@ impl WasmDriver {
 
 struct StoreState {
     limits: StoreLimits,
+    permissions: DriverPermissions,
+    host_calls: Vec<HostCallRecord>,
 }
 
-struct EpochTicker {
+struct EngineEpochTicker {
     stop: Arc<AtomicBool>,
-    handle: Option<thread::JoinHandle<()>>,
+    handle: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
-impl EpochTicker {
-    fn start(engine: Engine, tick_ms: u64) -> Self {
+impl EngineEpochTicker {
+    fn start(engine: Engine) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let interval = Duration::from_millis(tick_ms.max(1));
+        let interval = Duration::from_millis(SHARED_EPOCH_TICK_MS);
         let handle = thread::spawn(move || {
             while !thread_stop.load(Ordering::Relaxed) {
-                thread::sleep(interval);
+                thread::park_timeout(interval);
                 engine.increment_epoch();
             }
         });
         Self {
             stop,
-            handle: Some(handle),
+            handle: Mutex::new(Some(handle)),
         }
     }
 }
 
-impl Drop for EpochTicker {
+impl Drop for EngineEpochTicker {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
+        let handle = self
+            .handle
+            .get_mut()
+            .expect("epoch ticker mutex must not be poisoned")
+            .take();
+        if let Some(handle) = handle {
+            handle.thread().unpark();
             let _ = handle.join();
         }
     }
@@ -290,10 +329,6 @@ fn configure_epoch_deadline(store: &mut Store<StoreState>, ticks: u64) {
 
 #[cfg(not(target_has_atomic = "64"))]
 fn configure_epoch_deadline(_store: &mut Store<StoreState>, _ticks: u64) {}
-
-fn epoch_tick_ms(timeout_ms: u64) -> u64 {
-    timeout_ms.clamp(1, MAX_EPOCH_TICK_MS)
-}
 
 fn deadline_ticks(timeout_ms: u64, tick_ms: u64) -> u64 {
     timeout_ms.max(1).div_ceil(tick_ms.max(1))
@@ -402,6 +437,123 @@ fn format_val_type(value: &ValType) -> String {
     }
 }
 
+fn define_host_imports(linker: &mut Linker<StoreState>) -> Result<()> {
+    linker.func_wrap(
+        HOST_MODULE,
+        HOST_EMIT_EVENT,
+        |mut caller: Caller<'_, StoreState>, ptr: i32, len: i32| -> i32 {
+            host_capture_call(
+                &mut caller,
+                HostCallKind::EmitEvent,
+                ptr,
+                len,
+                |permissions| permissions.emit_event,
+            )
+        },
+    )?;
+    linker.func_wrap(
+        HOST_MODULE,
+        HOST_MEMORY_WRITE,
+        |mut caller: Caller<'_, StoreState>, ptr: i32, len: i32| -> i32 {
+            host_capture_call(
+                &mut caller,
+                HostCallKind::MemoryWrite,
+                ptr,
+                len,
+                |permissions| permissions.memory_write,
+            )
+        },
+    )?;
+    linker.func_wrap(
+        HOST_MODULE,
+        HOST_DEVICE_CALL,
+        |mut caller: Caller<'_, StoreState>, ptr: i32, len: i32| -> i32 {
+            if !caller.data().permissions.device_call {
+                return HOST_DENIED;
+            }
+            match read_import_bytes(&mut caller, ptr, len) {
+                Ok(payload) => {
+                    caller.data_mut().host_calls.push(HostCallRecord {
+                        kind: HostCallKind::DeviceCall,
+                        payload,
+                    });
+                    HOST_NOT_CONFIGURED
+                }
+                Err(status) => status,
+            }
+        },
+    )?;
+    linker.func_wrap(
+        HOST_MODULE,
+        HOST_MEMORY_READ,
+        |mut caller: Caller<'_, StoreState>,
+         key_ptr: i32,
+         key_len: i32,
+         out_ptr: i32,
+         out_len: i32|
+         -> i32 {
+            if !caller.data().permissions.memory_read {
+                return HOST_DENIED;
+            }
+            if out_ptr < 0 || out_len < 0 {
+                return HOST_BAD_POINTER;
+            }
+            match read_import_bytes(&mut caller, key_ptr, key_len) {
+                Ok(_) => 0,
+                Err(status) => status,
+            }
+        },
+    )?;
+    Ok(())
+}
+
+fn host_capture_call(
+    caller: &mut Caller<'_, StoreState>,
+    kind: HostCallKind,
+    ptr: i32,
+    len: i32,
+    allowed: fn(DriverPermissions) -> bool,
+) -> i32 {
+    if !allowed(caller.data().permissions) {
+        return HOST_DENIED;
+    }
+    match read_import_bytes(caller, ptr, len) {
+        Ok(payload) => {
+            caller
+                .data_mut()
+                .host_calls
+                .push(HostCallRecord { kind, payload });
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+fn read_import_bytes(
+    caller: &mut Caller<'_, StoreState>,
+    ptr: i32,
+    len: i32,
+) -> std::result::Result<Vec<u8>, i32> {
+    if ptr < 0 || len < 0 {
+        return Err(HOST_BAD_POINTER);
+    }
+    let max = caller.data().permissions.max_host_call_bytes as usize;
+    let len = len as usize;
+    if len > max {
+        return Err(HOST_TOO_LARGE);
+    }
+    let memory = caller
+        .get_export(MEMORY_EXPORT)
+        .and_then(|export| export.into_memory())
+        .ok_or(HOST_MEMORY_ERROR)?;
+    let start = ptr as usize;
+    let mut out = vec![0_u8; len];
+    memory
+        .read(caller, start, &mut out)
+        .map_err(|_| HOST_MEMORY_ERROR)?;
+    Ok(out)
+}
+
 fn execute_instance(
     store: &mut Store<StoreState>,
     instance: &Instance,
@@ -499,6 +651,9 @@ fn ensure_i32_len(len: usize) -> Result<()> {
 }
 
 fn validate_permissions(permissions: DriverPermissions) -> Result<()> {
+    if permissions.max_host_call_bytes == 0 {
+        return Err(ZapRuntimeError::InvalidHostCallLimit);
+    }
     if permissions.network {
         return Err(ZapRuntimeError::PermissionDenied("network"));
     }
@@ -635,6 +790,142 @@ mod tests {
             executor.execute_bytes(echo_driver(), "echo", b"hello", limits),
             Err(ZapRuntimeError::PermissionDenied("network"))
         ));
+    }
+
+    #[test]
+    fn host_emit_event_records_auditable_call_when_granted() {
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (import "zap" "emit_event" (func $emit_event (param i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "machine-ready")
+              (data (i32.const 2048) "ok")
+              (func (export "zap_alloc") (param i32) (result i32) i32.const 3072)
+              (func (export "zap_dealloc") (param i32 i32))
+              (func (export "zap_execute") (param i32 i32 i32 i32) (result i64)
+                i32.const 1024
+                i32.const 13
+                call $emit_event
+                drop
+                i64.const 2048
+                i64.const 32
+                i64.shl
+                i64.const 2
+                i64.or))
+            "#,
+        )
+        .unwrap();
+        let executor = WasmExecutor::new().unwrap();
+        let mut permissions = DriverPermissions::none();
+        permissions.emit_event = true;
+        let result = executor
+            .execute_bytes(
+                wasm,
+                "machine.status",
+                b"",
+                ExecutionLimits {
+                    permissions,
+                    ..ExecutionLimits::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.output, b"ok");
+        assert_eq!(
+            result.host_calls,
+            vec![HostCallRecord {
+                kind: HostCallKind::EmitEvent,
+                payload: b"machine-ready".to_vec()
+            }]
+        );
+    }
+
+    #[test]
+    fn host_emit_event_denies_without_permission() {
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (import "zap" "emit_event" (func $emit_event (param i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "machine-ready")
+              (data (i32.const 2048) "denied")
+              (func (export "zap_alloc") (param i32) (result i32) i32.const 3072)
+              (func (export "zap_dealloc") (param i32 i32))
+              (func (export "zap_execute") (param i32 i32 i32 i32) (result i64)
+                i32.const 1024
+                i32.const 13
+                call $emit_event
+                i32.const -1
+                i32.eq
+                if
+                  i64.const 2048
+                  i64.const 32
+                  i64.shl
+                  i64.const 6
+                  i64.or
+                  return
+                end
+                i64.const 0))
+            "#,
+        )
+        .unwrap();
+        let executor = WasmExecutor::new().unwrap();
+        let result = executor
+            .execute_bytes(wasm, "machine.status", b"", ExecutionLimits::default())
+            .unwrap();
+
+        assert_eq!(result.output, b"denied");
+        assert!(result.host_calls.is_empty());
+    }
+
+    #[test]
+    fn host_call_byte_limit_is_enforced() {
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (import "zap" "device_call" (func $device_call (param i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (data (i32.const 1024) "0123456789")
+              (data (i32.const 2048) "too-large")
+              (func (export "zap_alloc") (param i32) (result i32) i32.const 3072)
+              (func (export "zap_dealloc") (param i32 i32))
+              (func (export "zap_execute") (param i32 i32 i32 i32) (result i64)
+                i32.const 1024
+                i32.const 10
+                call $device_call
+                i32.const -4
+                i32.eq
+                if
+                  i64.const 2048
+                  i64.const 32
+                  i64.shl
+                  i64.const 9
+                  i64.or
+                  return
+                end
+                i64.const 0))
+            "#,
+        )
+        .unwrap();
+        let executor = WasmExecutor::new().unwrap();
+        let mut permissions = DriverPermissions::none();
+        permissions.device_call = true;
+        permissions.max_host_call_bytes = 4;
+        let result = executor
+            .execute_bytes(
+                wasm,
+                "machine.call",
+                b"",
+                ExecutionLimits {
+                    permissions,
+                    ..ExecutionLimits::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result.output, b"too-large");
+        assert!(result.host_calls.is_empty());
     }
 
     #[test]

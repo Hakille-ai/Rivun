@@ -6,13 +6,14 @@ members = [
     "crates/zap-crypto",
     "crates/zap-driver-sdk",
     "crates/zap-envelope",
-    "crates/zap-intent",
     "crates/zap-ledger",
     "crates/zap-memory",
     "crates/zap-net",
     "crates/zap-node",
+    "crates/zap-policy",
     "crates/zap-router",
     "crates/zap-runtime",
+    "crates/zap-schema",
     "crates/zap-store",
     "examples",
     "tools/xtask",
@@ -52,7 +53,9 @@ wasmtime = { version = "45.0.1", default-features = false, features = ["cranelif
 wat = "1"
 zap-capability = { path = "crates/zap-capability" }
 zap-memory = { path = "crates/zap-memory" }
+zap-policy = { path = "crates/zap-policy" }
 zap-router = { path = "crates/zap-router" }
+zap-schema = { path = "crates/zap-schema" }
 
 [profile.release]
 codegen-units = 1

@@ -8,6 +8,10 @@ described in [docs/versioning.md](docs/versioning.md).
 
 ## Unreleased
 
+- Removed the in-protocol `zap-intent` crate and CLI intent commands in favor
+  of external typed-message agent gateways.
+- Added receiver-side `[message_policy]` rules and `zap send
+  --requires-consensus` for deterministic allow/deny/require-PoA enforcement.
 - Added production Docker packaging with a non-root runtime image.
 - Added open-source project files: license, security policy, contribution guide,
   code of conduct, governance notes, and release/versioning docs.
@@ -21,4 +25,4 @@ described in [docs/versioning.md](docs/versioning.md).
 - Added Ed25519 frame signatures and Proof-of-Action trailers.
 - Added encrypted UDP transport, static peer configuration, and replay checks.
 - Added Wasmtime driver sandboxing and signed driver manifests.
-- Added CLI, daemon, deterministic intent compiler, tests, and benchmarks.
+- Added CLI, daemon, tests, and benchmarks.

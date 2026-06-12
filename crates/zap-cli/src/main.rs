@@ -4,6 +4,7 @@ use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use serde::Serialize;
 use std::{
+    collections::BTreeSet,
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
     net::SocketAddr,
@@ -13,9 +14,9 @@ use std::{
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
 use zap_capability::{
-    CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT, CapabilityId,
-    CapabilityQuery, CapabilityResponse, DriverPermissions, JsonlCapabilityCache,
-    capabilities_for_driver,
+    CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
+    CapabilityCacheEntry, CapabilityId, CapabilityQuery, CapabilityResponse, DriverPermissions,
+    JsonlCapabilityCache, capabilities_for_driver,
 };
 use zap_core::{PoaAttestation, ZapFlags, ZapFrame, ZapHeader};
 use zap_crypto::{
@@ -28,12 +29,13 @@ use zap_envelope::{
     DEFAULT_CONTENT_TYPE as DEFAULT_ENVELOPE_CONTENT_TYPE, ZapEnvelope, ZapEnvelopeRef,
     ZapMessageKind,
 };
-use zap_intent::{IntentPolicy, IntentStep, compile_intent, explain_intent};
 use zap_ledger::SignedActionReceipt;
 use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
-use zap_node::{ZapNode, ZapNodeConfig, describe_capabilities};
+use zap_node::{PeerTrustConfig, PeerTrustStatus, ZapNode, ZapNodeConfig, describe_capabilities};
+use zap_policy::{PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
+use zap_schema::{MessageContract, MessageParts};
 use zap_store::{DriverManifest, DriverRegistry};
 
 #[derive(Debug, Parser)]
@@ -91,12 +93,6 @@ enum Commands {
         config: PathBuf,
         #[arg(long)]
         target: Uuid,
-        /// Compile a local natural-language or JSON intent into action envelope(s).
-        #[arg(long)]
-        intent: Option<String>,
-        /// Apply a JSON intent policy before emitting frames.
-        #[arg(long)]
-        policy: Option<PathBuf>,
         /// Universal envelope kind: data, event, command, query, response, stream_chunk, action, or control.
         #[arg(long)]
         kind: Option<String>,
@@ -121,6 +117,9 @@ enum Commands {
         /// Treat selected payload bytes as opaque and default content type to application/octet-stream.
         #[arg(long)]
         binary_payload: bool,
+        /// Mark the frame as consensus-protected and attach a Proof-of-Action certificate.
+        #[arg(long)]
+        requires_consensus: bool,
         /// Validator key used to attach a Proof-of-Action certificate for critical frames.
         #[arg(long = "poa-validator-key")]
         poa_validator_keys: Vec<PathBuf>,
@@ -144,16 +143,6 @@ enum Commands {
         #[arg(long, conflicts_with = "verify_with_key")]
         verify_with_public_key: Option<String>,
     },
-    /// Compile a local intent into an auditable action plan without sending it.
-    CompileIntent {
-        intent: String,
-        /// Include normalized input and rule metadata.
-        #[arg(long)]
-        explain: bool,
-        /// Apply a JSON intent policy to the compiled plan.
-        #[arg(long)]
-        policy: Option<PathBuf>,
-    },
     /// Inspect and query ZAP capabilities.
     Capability {
         #[command(subcommand)]
@@ -168,6 +157,21 @@ enum Commands {
     Route {
         #[command(subcommand)]
         command: RouteCommand,
+    },
+    /// Inspect and generate explicit peer trust contracts.
+    Trust {
+        #[command(subcommand)]
+        command: TrustCommand,
+    },
+    /// Validate typed message contracts for agents and machines.
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
+    },
+    /// Evaluate deterministic message policies.
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommand,
     },
     /// Create or verify signed ZapStore driver manifests.
     #[command(name = "driver-manifest")]
@@ -238,6 +242,26 @@ enum CapabilityCommand {
 
 #[derive(Debug, Subcommand)]
 enum CapabilityCacheCommand {
+    /// Query configured peers and append fresh advertisements to the cache.
+    Refresh {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        /// Override [capability_cache].path for one refresh run.
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Refresh only selected peer(s). Defaults to every configured peer.
+        #[arg(long = "peer")]
+        peers: Vec<Uuid>,
+        #[arg(long = "capability")]
+        capabilities: Vec<String>,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
+        /// Exit non-zero when any selected peer cannot be refreshed.
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// List cached capability advertisements.
     List {
         #[arg(long, default_value = ".zap/capabilities.jsonl")]
@@ -358,6 +382,91 @@ enum RouteCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum TrustCommand {
+    /// Generate a verified TOML peer enrollment block.
+    Enroll {
+        #[arg(long)]
+        node_id: Uuid,
+        #[arg(long)]
+        addr: String,
+        #[arg(long)]
+        public_key: String,
+        #[arg(long)]
+        transport_key: String,
+        #[arg(long)]
+        transport_key_epoch: Option<u64>,
+        #[arg(long)]
+        transport_key_rotated_at_micros: Option<u64>,
+        #[arg(long)]
+        expires_at_micros: Option<u64>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Inspect configured peer trust status and machine permissions.
+    Inspect {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SchemaCommand {
+    /// Validate one encoded ZENV envelope against a TOML or JSON contract.
+    Validate {
+        #[arg(long)]
+        contract: PathBuf,
+        #[arg(long)]
+        envelope: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a normalized contract after parsing and static validation.
+    Inspect {
+        #[arg(long)]
+        contract: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PolicyCommand {
+    /// Evaluate one message against a TOML policy file.
+    Evaluate {
+        #[arg(long)]
+        policy: PathBuf,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        source_node: Option<Uuid>,
+        #[arg(long)]
+        target_node: Option<Uuid>,
+        #[arg(long)]
+        content_type: Option<String>,
+        #[arg(long)]
+        requires_consensus: bool,
+        #[arg(long = "grant")]
+        grants: Vec<String>,
+        #[arg(long)]
+        human_approved: bool,
+        #[arg(long)]
+        simulation_passed: bool,
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum DriverManifestCommand {
     /// Create a signed manifest for one WASM/WAT driver file.
     Create {
@@ -383,6 +492,16 @@ enum DriverManifestCommand {
         allow_clock: bool,
         #[arg(long)]
         allow_environment: bool,
+        #[arg(long)]
+        allow_emit_event: bool,
+        #[arg(long)]
+        allow_memory_read: bool,
+        #[arg(long)]
+        allow_memory_write: bool,
+        #[arg(long)]
+        allow_device_call: bool,
+        #[arg(long, default_value_t = zap_capability::DEFAULT_MAX_HOST_CALL_BYTES)]
+        max_host_call_bytes: u32,
         /// Overwrite an existing manifest file.
         #[arg(long)]
         force: bool,
@@ -558,8 +677,6 @@ async fn main() -> Result<()> {
         Commands::Send {
             config,
             target,
-            intent,
-            policy,
             kind,
             subject,
             content_type,
@@ -568,6 +685,7 @@ async fn main() -> Result<()> {
             payload,
             payload_file,
             binary_payload,
+            requires_consensus,
             poa_validator_keys,
             poa_threshold,
             poa_network,
@@ -577,8 +695,6 @@ async fn main() -> Result<()> {
             send(SendOptions {
                 config_path: &config,
                 target,
-                intent,
-                policy,
                 kind,
                 subject,
                 content_type,
@@ -587,6 +703,7 @@ async fn main() -> Result<()> {
                 payload,
                 payload_file,
                 binary_payload,
+                requires_consensus,
                 poa_validator_keys,
                 poa_threshold,
                 poa_network,
@@ -604,14 +721,12 @@ async fn main() -> Result<()> {
             verify_with_key.as_deref(),
             verify_with_public_key.as_deref(),
         ),
-        Commands::CompileIntent {
-            intent,
-            explain,
-            policy,
-        } => compile_intent_command(&intent, explain, policy.as_deref()),
         Commands::Capability { command } => capability(command).await,
         Commands::Memory { command } => memory(command),
         Commands::Route { command } => route(command),
+        Commands::Trust { command } => trust(command),
+        Commands::Schema { command } => schema(command),
+        Commands::Policy { command } => policy(command),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command),
         Commands::Receipts { command } => receipts(command),
@@ -701,6 +816,11 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
         println!("bind={}", report.bind);
         println!("node_id={}", report.node_id);
         println!("peers={}", report.peer_count);
+        println!("trusted_peers={}", report.trusted_peer_count);
+        println!("restricted_peers={}", report.restricted_peer_count);
+        println!("peer_send_enabled={}", report.peer_send_enabled_count);
+        println!("peer_receive_enabled={}", report.peer_receive_enabled_count);
+        println!("peer_forward_enabled={}", report.peer_forward_enabled_count);
         println!("drivers={}", report.driver_count);
         println!("signed_drivers={}", report.signed_driver_count);
         println!("registry_enabled={}", report.registry_enabled);
@@ -725,6 +845,15 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
         println!(
             "capability_cache_enabled={}",
             report.capability_cache_enabled
+        );
+        println!("message_policy_rules={}", report.message_policy_rule_count);
+        println!(
+            "message_schema_contracts={}",
+            report.message_schema_contract_count
+        );
+        println!(
+            "message_schema_require_match={}",
+            report.message_schema_require_match
         );
         println!("peer_grant_routes={}", report.peer_grant_route_count);
         println!("require_signed={}", report.require_signed);
@@ -831,6 +960,7 @@ fn build_doctor_report(
     } else {
         DoctorCheck::warn("peer topology", "no configured peers")
     });
+    checks.push(peer_trust_check(report));
     checks.push(if report.driver_count > 0 {
         DoctorCheck::pass("driver surface", format!("drivers={}", report.driver_count))
     } else {
@@ -876,6 +1006,8 @@ fn build_doctor_report(
         DoctorCheck::warn("capability surface", "no advertised capabilities")
     });
     checks.push(capability_policy_check(report));
+    checks.push(message_policy_check(report));
+    checks.push(message_schema_check(report));
     checks.push(peer_grant_routes_check(report));
     for warning in &report.warnings {
         checks.push(DoctorCheck::warn("config warning", warning.clone()));
@@ -957,6 +1089,35 @@ fn registry_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorChe
     )
 }
 
+fn peer_trust_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.peer_count == 0 {
+        return DoctorCheck::warn("peer trust", "no peer trust contracts to validate");
+    }
+    if report.trusted_peer_count == report.peer_count && report.restricted_peer_count == 0 {
+        return DoctorCheck::pass(
+            "peer trust",
+            format!(
+                "trusted={} send={} receive={} forward={}",
+                report.trusted_peer_count,
+                report.peer_send_enabled_count,
+                report.peer_receive_enabled_count,
+                report.peer_forward_enabled_count
+            ),
+        );
+    }
+    DoctorCheck::warn(
+        "peer trust",
+        format!(
+            "trusted={} restricted={} send={} receive={} forward={}",
+            report.trusted_peer_count,
+            report.restricted_peer_count,
+            report.peer_send_enabled_count,
+            report.peer_receive_enabled_count,
+            report.peer_forward_enabled_count
+        ),
+    )
+}
+
 fn capability_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
     if report.capability_count == 0 {
         return DoctorCheck::warn("capability policy", "no capabilities to cover");
@@ -977,6 +1138,38 @@ fn capability_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorC
             report.ungranted_capability_count,
             report.capability_grant_count,
             report.capability_requirement_count
+        ),
+    )
+}
+
+fn message_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.message_policy_rule_count == 0 {
+        return DoctorCheck::warn("message policy", "no message policy rules configured");
+    }
+    DoctorCheck::pass(
+        "message policy",
+        format!("rules={}", report.message_policy_rule_count),
+    )
+}
+
+fn message_schema_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.message_schema_contract_count == 0 {
+        return DoctorCheck::warn("message schema", "no typed message contracts configured");
+    }
+    if report.message_schema_require_match {
+        return DoctorCheck::pass(
+            "message schema",
+            format!(
+                "contracts={} require_match=true",
+                report.message_schema_contract_count
+            ),
+        );
+    }
+    DoctorCheck::warn(
+        "message schema",
+        format!(
+            "contracts={} but require_match=false",
+            report.message_schema_contract_count
         ),
     )
 }
@@ -1048,8 +1241,6 @@ fn fail_on_config_warnings(
 struct SendOptions<'a> {
     config_path: &'a Path,
     target: Uuid,
-    intent: Option<String>,
-    policy: Option<PathBuf>,
     kind: Option<String>,
     subject: Option<String>,
     content_type: Option<String>,
@@ -1058,6 +1249,7 @@ struct SendOptions<'a> {
     payload: Option<String>,
     payload_file: Option<PathBuf>,
     binary_payload: bool,
+    requires_consensus: bool,
     poa_validator_keys: Vec<PathBuf>,
     poa_threshold: Option<u16>,
     poa_network: bool,
@@ -1069,8 +1261,6 @@ async fn send(options: SendOptions<'_>) -> Result<()> {
     let SendOptions {
         config_path,
         target,
-        intent,
-        policy,
         kind,
         subject,
         content_type,
@@ -1079,6 +1269,7 @@ async fn send(options: SendOptions<'_>) -> Result<()> {
         payload,
         payload_file,
         binary_payload,
+        requires_consensus,
         poa_validator_keys,
         poa_threshold,
         poa_network,
@@ -1088,8 +1279,6 @@ async fn send(options: SendOptions<'_>) -> Result<()> {
     let config = ZapNodeConfig::from_path(config_path)?;
     config.validate()?;
     let messages = build_messages(BuildMessageOptions {
-        intent,
-        policy,
         kind,
         subject,
         content_type,
@@ -1098,13 +1287,24 @@ async fn send(options: SendOptions<'_>) -> Result<()> {
         payload,
         payload_file,
         binary_payload,
+        requires_consensus,
     })?;
     let keypair = Keypair::from_key_file_toml(
         &fs::read_to_string(&config.key_file)
             .with_context(|| format!("failed to read key file {}", config.key_file.display()))?,
     )?;
-    if !config.peers.iter().any(|peer| peer.node_id == target) {
-        bail!("target {} not found in {}", target, config_path.display());
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .ok_or_else(|| {
+            anyhow::anyhow!("target {} not found in {}", target, config_path.display())
+        })?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for outbound send",
+            target
+        );
     }
     let bind: SocketAddr = config
         .bind
@@ -1576,8 +1776,6 @@ enum OutboundDisplay {
 }
 
 struct BuildMessageOptions {
-    intent: Option<String>,
-    policy: Option<PathBuf>,
     kind: Option<String>,
     subject: Option<String>,
     content_type: Option<String>,
@@ -1586,12 +1784,11 @@ struct BuildMessageOptions {
     payload: Option<String>,
     payload_file: Option<PathBuf>,
     binary_payload: bool,
+    requires_consensus: bool,
 }
 
 fn build_messages(options: BuildMessageOptions) -> Result<Vec<OutboundMessage>> {
     let BuildMessageOptions {
-        intent,
-        policy,
         kind,
         subject,
         content_type,
@@ -1600,37 +1797,8 @@ fn build_messages(options: BuildMessageOptions) -> Result<Vec<OutboundMessage>> 
         payload,
         payload_file,
         binary_payload,
+        requires_consensus,
     } = options;
-
-    if let Some(intent) = intent {
-        if kind.is_some()
-            || subject.is_some()
-            || content_type.is_some()
-            || metadata.is_some()
-            || action.is_some()
-            || payload.is_some()
-            || payload_file.is_some()
-            || binary_payload
-        {
-            bail!(
-                "--intent cannot be combined with --kind, --subject, --content-type, --metadata, --action, --payload, --payload-file, or --binary-payload"
-            );
-        }
-        let mut plan = compile_intent(&intent)?;
-        if let Some(policy) = policy {
-            let policy = load_intent_policy(&policy)?;
-            plan.apply_policy(&policy)?;
-        }
-        return plan
-            .steps
-            .iter()
-            .map(message_from_intent_step)
-            .collect::<Result<Vec<_>>>();
-    }
-
-    if policy.is_some() {
-        bail!("--policy requires --intent");
-    }
 
     if let Some(kind) = kind {
         if action.is_some() {
@@ -1659,7 +1827,7 @@ fn build_messages(options: BuildMessageOptions) -> Result<Vec<OutboundMessage>> 
         return Ok(vec![OutboundMessage {
             display: OutboundDisplay::Envelope { kind, subject },
             payload: envelope.encode().to_vec(),
-            requires_consensus: false,
+            requires_consensus,
         }]);
     }
 
@@ -1673,29 +1841,8 @@ fn build_messages(options: BuildMessageOptions) -> Result<Vec<OutboundMessage>> 
             .map(|action| OutboundDisplay::Action(action.clone()))
             .unwrap_or(OutboundDisplay::Frame),
         payload: build_payload(action, payload, payload_file, binary_payload)?,
-        requires_consensus: false,
+        requires_consensus,
     }])
-}
-
-fn message_from_intent_step(step: &IntentStep) -> Result<OutboundMessage> {
-    let kind: ZapMessageKind = step
-        .kind
-        .parse()
-        .with_context(|| format!("unsupported intent message kind `{}`", step.kind))?;
-    let envelope = ZapEnvelope::new(
-        kind,
-        step.subject.clone(),
-        step.content_type.clone(),
-        Bytes::from(step.payload.clone()),
-    )?;
-    Ok(OutboundMessage {
-        display: OutboundDisplay::Envelope {
-            kind,
-            subject: step.subject.clone(),
-        },
-        payload: envelope.encode().to_vec(),
-        requires_consensus: step.requires_consensus,
-    })
 }
 
 fn payload_bytes_from_input(
@@ -1744,47 +1891,6 @@ fn build_payload(
     Ok(envelope.encode().to_vec())
 }
 
-fn compile_intent_command(intent: &str, explain: bool, policy_path: Option<&Path>) -> Result<()> {
-    let mut plan = compile_intent(intent)?;
-    let policy_report = match policy_path {
-        Some(path) => {
-            let policy = load_intent_policy(path)?;
-            Some(plan.apply_policy(&policy)?)
-        }
-        None => None,
-    };
-
-    if explain {
-        let mut explanation = explain_intent(intent)?;
-        explanation.plan = plan;
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "explanation": explanation,
-                "policy": policy_report,
-            }))?
-        );
-    } else if let Some(policy_report) = policy_report {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "plan": plan,
-                "policy": policy_report,
-            }))?
-        );
-    } else {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
-    }
-    Ok(())
-}
-
-fn load_intent_policy(path: &Path) -> Result<IntentPolicy> {
-    let input = fs::read_to_string(path)
-        .with_context(|| format!("failed to read intent policy {}", path.display()))?;
-    serde_json::from_str(&input)
-        .with_context(|| format!("failed to parse intent policy {}", path.display()))
-}
-
 async fn capability(command: CapabilityCommand) -> Result<()> {
     match command {
         CapabilityCommand::List { config, json } => capability_list(&config, json),
@@ -1809,7 +1915,7 @@ async fn capability(command: CapabilityCommand) -> Result<()> {
             )
             .await
         }
-        CapabilityCommand::Cache { command } => capability_cache(command),
+        CapabilityCommand::Cache { command } => capability_cache(command).await,
     }
 }
 
@@ -1863,17 +1969,67 @@ async fn capability_query(
     let config = ZapNodeConfig::from_path(config_path)?;
     config.validate()?;
     let keypair = load_keypair(&config.key_file)?;
-    let target_peer = config
-        .peers
+    let requested = parse_capability_ids(&requested)?;
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let result = query_capability_peer(
+        &config, &endpoint, &keypair, target, &requested, cache_path, timeout_ms,
+    )
+    .await?;
+
+    print_capability_query_result(&result, cache_path, json)
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilityQueryCommandResult {
+    response: CapabilityResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cached_entry: Option<CapabilityCacheEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilityCacheRefreshReport {
+    config: String,
+    cache: String,
+    requested_peer_count: usize,
+    refreshed: usize,
+    skipped: usize,
+    failed: usize,
+    results: Vec<CapabilityCacheRefreshPeerResult>,
+}
+
+#[derive(Debug, Serialize)]
+struct CapabilityCacheRefreshPeerResult {
+    peer: Uuid,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_entry: Option<Uuid>,
+    capabilities: usize,
+    grants: usize,
+    requirements: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+fn parse_capability_ids(requested: &[String]) -> Result<Vec<CapabilityId>> {
+    requested
         .iter()
-        .find(|peer| peer.node_id == target)
-        .with_context(|| format!("target {} not found in {}", target, config_path.display()))?;
+        .map(|capability| CapabilityId::new(capability.clone()).map_err(Into::into))
+        .collect()
+}
+
+async fn build_capability_endpoint(
+    config: &ZapNodeConfig,
+    keypair: &Keypair,
+) -> Result<ZapEndpoint> {
     let bind: SocketAddr = config
         .bind
         .parse()
         .with_context(|| format!("invalid bind address {}", config.bind))?;
     let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(bind, keypair.node_id())).await?;
     for peer in &config.peers {
+        if !peer.trust.allows_transport() {
+            continue;
+        }
         endpoint
             .add_peer(Peer {
                 node_id: peer.node_id,
@@ -1882,12 +2038,32 @@ async fn capability_query(
             })
             .await;
     }
+    Ok(endpoint)
+}
+
+async fn query_capability_peer(
+    config: &ZapNodeConfig,
+    endpoint: &ZapEndpoint,
+    keypair: &Keypair,
+    target: Uuid,
+    requested: &[CapabilityId],
+    cache_path: Option<&Path>,
+    timeout_ms: u64,
+) -> Result<CapabilityQueryCommandResult> {
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| format!("target {} not found in node config", target))?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for capability query",
+            target
+        );
+    }
 
     let query = CapabilityQuery {
-        requested: requested
-            .iter()
-            .map(|capability| CapabilityId::new(capability.clone()))
-            .collect::<std::result::Result<Vec<_>, _>>()?,
+        requested: requested.to_vec(),
     };
     let envelope = ZapEnvelope::new(
         ZapMessageKind::Control,
@@ -1901,7 +2077,7 @@ async fn capability_query(
         ZapFlags::ENCRYPTED,
         envelope.encode(),
     )?;
-    let frame = sign_frame(&keypair, &frame)?;
+    let frame = sign_frame(keypair, &frame)?;
     endpoint.send_frame(target, &frame).await?;
 
     let public_key = decode_public_key(&target_peer.public_key)?;
@@ -1928,6 +2104,13 @@ async fn capability_query(
         }
         let response: CapabilityResponse =
             serde_json::from_slice(envelope.body()).context("invalid capability response body")?;
+        if response.advertisement.node_id != target {
+            bail!(
+                "capability response from {} advertised node_id {}",
+                target,
+                response.advertisement.node_id
+            );
+        }
         let cached_entry = match cache_path {
             Some(path) => Some(JsonlCapabilityCache::open(path).put(
                 response.advertisement.node_id,
@@ -1935,41 +2118,248 @@ async fn capability_query(
             )?),
             None => None,
         };
-        if json {
-            if cached_entry.is_some() {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&serde_json::json!({
-                        "response": response,
-                        "cached_entry": cached_entry,
-                    }))?
-                );
-            } else {
-                println!("{}", serde_json::to_string_pretty(&response)?);
-            }
-        } else {
-            println!("node_id={}", response.advertisement.node_id);
-            for capability in response.advertisement.capabilities.iter() {
-                println!("capability={capability}");
-            }
-            if let Some(entry) = cached_entry {
-                println!("cache_entry={}", entry.id);
-                if let Some(path) = cache_path {
-                    println!("cache={}", path.display());
-                }
-            }
-        }
-        return Ok(());
+        return Ok(CapabilityQueryCommandResult {
+            response,
+            cached_entry,
+        });
     }
 }
 
-fn capability_cache(command: CapabilityCacheCommand) -> Result<()> {
+fn print_capability_query_result(
+    result: &CapabilityQueryCommandResult,
+    cache_path: Option<&Path>,
+    json: bool,
+) -> Result<()> {
+    if json {
+        if result.cached_entry.is_some() {
+            println!("{}", serde_json::to_string_pretty(result)?);
+        } else {
+            println!("{}", serde_json::to_string_pretty(&result.response)?);
+        }
+    } else {
+        println!("node_id={}", result.response.advertisement.node_id);
+        for capability in result.response.advertisement.capabilities.iter() {
+            println!("capability={capability}");
+        }
+        if let Some(entry) = &result.cached_entry {
+            println!("cache_entry={}", entry.id);
+            if let Some(path) = cache_path {
+                println!("cache={}", path.display());
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn capability_cache(command: CapabilityCacheCommand) -> Result<()> {
     match command {
+        CapabilityCacheCommand::Refresh {
+            config,
+            path,
+            peers,
+            capabilities,
+            timeout_ms,
+            strict,
+            json,
+        } => {
+            capability_cache_refresh(
+                &config,
+                path.as_deref(),
+                &peers,
+                &capabilities,
+                timeout_ms,
+                strict,
+                json,
+            )
+            .await
+        }
         CapabilityCacheCommand::List { path, peer, json } => {
             capability_cache_list(&path, peer, json)
         }
         CapabilityCacheCommand::Verify { path, json } => capability_cache_verify(&path, json),
     }
+}
+
+async fn capability_cache_refresh(
+    config_path: &Path,
+    cache_path_override: Option<&Path>,
+    peers: &[Uuid],
+    capabilities: &[String],
+    timeout_ms: u64,
+    strict: bool,
+    json: bool,
+) -> Result<()> {
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let cache_path = cache_path_override
+        .map(Path::to_path_buf)
+        .or_else(|| config.capability_cache.path.clone())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "capability cache refresh requires --path or [capability_cache].path in {}",
+                config_path.display()
+            )
+        })?;
+    let requested = parse_capability_ids(capabilities)?;
+    let selected_peers = select_refresh_peers(&config, peers)?;
+    if selected_peers.is_empty() {
+        bail!("no peers selected for capability cache refresh");
+    }
+    let keypair = load_keypair(&config.key_file)?;
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let mut results = Vec::with_capacity(selected_peers.len());
+
+    for peer in selected_peers {
+        let peer_config = config
+            .peers
+            .iter()
+            .find(|candidate| candidate.node_id == peer)
+            .expect("selected peer came from config");
+        if !peer_config.trust.allows_send() {
+            results.push(CapabilityCacheRefreshPeerResult {
+                peer,
+                status: "skipped".to_string(),
+                cache_entry: None,
+                capabilities: 0,
+                grants: 0,
+                requirements: 0,
+                error: Some("peer trust policy disallows outbound capability query".to_string()),
+            });
+            continue;
+        }
+
+        match query_capability_peer(
+            &config,
+            &endpoint,
+            &keypair,
+            peer,
+            &requested,
+            Some(&cache_path),
+            timeout_ms,
+        )
+        .await
+        {
+            Ok(result) => {
+                let advertisement = &result.response.advertisement;
+                results.push(CapabilityCacheRefreshPeerResult {
+                    peer,
+                    status: "ok".to_string(),
+                    cache_entry: result.cached_entry.as_ref().map(|entry| entry.id),
+                    capabilities: advertisement.capabilities.capabilities.len(),
+                    grants: advertisement.grants.len(),
+                    requirements: advertisement.requirements.len(),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                results.push(CapabilityCacheRefreshPeerResult {
+                    peer,
+                    status: "failed".to_string(),
+                    cache_entry: None,
+                    capabilities: 0,
+                    grants: 0,
+                    requirements: 0,
+                    error: Some(format!("{error:#}")),
+                });
+            }
+        }
+    }
+
+    let refreshed = results
+        .iter()
+        .filter(|result| result.status == "ok")
+        .count();
+    let skipped = results
+        .iter()
+        .filter(|result| result.status == "skipped")
+        .count();
+    let failed = results
+        .iter()
+        .filter(|result| result.status == "failed")
+        .count();
+    let report = CapabilityCacheRefreshReport {
+        config: config_path.display().to_string(),
+        cache: cache_path.display().to_string(),
+        requested_peer_count: results.len(),
+        refreshed,
+        skipped,
+        failed,
+        results,
+    };
+    print_capability_cache_refresh_report(&report, json)?;
+    if strict && (report.failed > 0 || report.skipped > 0) {
+        bail!(
+            "capability cache refresh strict failed: refreshed={} skipped={} failed={}",
+            report.refreshed,
+            report.skipped,
+            report.failed
+        );
+    }
+    Ok(())
+}
+
+fn select_refresh_peers(config: &ZapNodeConfig, selected: &[Uuid]) -> Result<Vec<Uuid>> {
+    let configured = config
+        .peers
+        .iter()
+        .map(|peer| peer.node_id)
+        .collect::<BTreeSet<_>>();
+    let mut deduped = BTreeSet::new();
+    let peers = if selected.is_empty() {
+        config
+            .peers
+            .iter()
+            .filter_map(|peer| deduped.insert(peer.node_id).then_some(peer.node_id))
+            .collect::<Vec<_>>()
+    } else {
+        selected
+            .iter()
+            .map(|peer| {
+                if !configured.contains(peer) {
+                    bail!("selected peer {} is not configured", peer);
+                }
+                Ok(*peer)
+            })
+            .filter_map(|peer| match peer {
+                Ok(peer) if deduped.insert(peer) => Some(Ok(peer)),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+    Ok(peers)
+}
+
+fn print_capability_cache_refresh_report(
+    report: &CapabilityCacheRefreshReport,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    println!("config={}", report.config);
+    println!("cache={}", report.cache);
+    println!("requested_peers={}", report.requested_peer_count);
+    println!("refreshed={}", report.refreshed);
+    println!("skipped={}", report.skipped);
+    println!("failed={}", report.failed);
+    for result in &report.results {
+        println!(
+            "peer={} status={} cache_entry={} capabilities={} grants={} requirements={} error={}",
+            result.peer,
+            result.status,
+            result
+                .cache_entry
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            result.capabilities,
+            result.grants,
+            result.requirements,
+            result.error.as_deref().unwrap_or("none")
+        );
+    }
+    Ok(())
 }
 
 fn capability_cache_list(path: &Path, peer: Option<Uuid>, json: bool) -> Result<()> {
@@ -2266,6 +2656,375 @@ fn route_explain(config_path: &Path, message: RouteMessage, json: bool) -> Resul
     Ok(())
 }
 
+fn trust(command: TrustCommand) -> Result<()> {
+    match command {
+        TrustCommand::Enroll {
+            node_id,
+            addr,
+            public_key,
+            transport_key,
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            expires_at_micros,
+            labels,
+            out,
+            force,
+        } => trust_enroll(TrustEnrollOptions {
+            node_id,
+            addr,
+            public_key,
+            transport_key,
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            expires_at_micros,
+            labels,
+            out,
+            force,
+        }),
+        TrustCommand::Inspect { config, json } => trust_inspect(&config, json),
+    }
+}
+
+struct TrustEnrollOptions {
+    node_id: Uuid,
+    addr: String,
+    public_key: String,
+    transport_key: String,
+    transport_key_epoch: Option<u64>,
+    transport_key_rotated_at_micros: Option<u64>,
+    expires_at_micros: Option<u64>,
+    labels: Vec<String>,
+    out: Option<PathBuf>,
+    force: bool,
+}
+
+#[derive(Serialize)]
+struct TrustEnrollDocument {
+    peers: Vec<zap_node::PeerConfig>,
+}
+
+#[derive(Serialize)]
+struct PeerTrustInspection {
+    node_id: Uuid,
+    addr: String,
+    status: &'static str,
+    allow_send: bool,
+    allow_receive: bool,
+    allow_forward: bool,
+    allow_poa_attestation: bool,
+    transport_key_epoch: Option<u64>,
+    transport_key_rotated_at_micros: Option<u64>,
+    expires_at_micros: Option<u64>,
+    labels: Vec<String>,
+}
+
+fn trust_enroll(options: TrustEnrollOptions) -> Result<()> {
+    let public_key = decode_public_key(&options.public_key)
+        .with_context(|| format!("invalid public key for peer {}", options.node_id))?;
+    if public_key.node_id() != options.node_id {
+        bail!(
+            "public_key derives node_id {}, but --node-id is {}",
+            public_key.node_id(),
+            options.node_id
+        );
+    }
+    let transport_key = TransportKey::from_hex(&options.transport_key)?;
+    if transport_key.0 == [0_u8; 32] {
+        bail!("transport_key must not be all zeros");
+    }
+    if matches!(options.transport_key_epoch, Some(0)) {
+        bail!("transport_key_epoch must be greater than zero");
+    }
+    validate_trust_labels(&options.labels)?;
+
+    let document = TrustEnrollDocument {
+        peers: vec![zap_node::PeerConfig {
+            node_id: options.node_id,
+            addr: options.addr,
+            public_key: options.public_key,
+            transport_key: options.transport_key,
+            transport_key_epoch: options.transport_key_epoch,
+            transport_key_rotated_at_micros: options.transport_key_rotated_at_micros,
+            trust: PeerTrustConfig {
+                expires_at_micros: options.expires_at_micros,
+                labels: options.labels,
+                ..PeerTrustConfig::default()
+            },
+        }],
+    };
+    let output = toml::to_string_pretty(&document)?;
+    if let Some(out) = options.out {
+        write_text_file(&out, &output, options.force)?;
+        println!("trust_enrollment={}", out.display());
+    } else {
+        print!("{output}");
+    }
+    Ok(())
+}
+
+fn trust_inspect(config_path: &Path, json: bool) -> Result<()> {
+    let config = ZapNodeConfig::from_path(config_path)?;
+    let report = config.validate()?;
+    let peers = config
+        .peers
+        .iter()
+        .map(|peer| PeerTrustInspection {
+            node_id: peer.node_id,
+            addr: peer.addr.clone(),
+            status: peer_trust_status_name(peer.trust.status),
+            allow_send: peer.trust.allow_send,
+            allow_receive: peer.trust.allow_receive,
+            allow_forward: peer.trust.allow_forward,
+            allow_poa_attestation: peer.trust.allow_poa_attestation,
+            transport_key_epoch: peer.transport_key_epoch,
+            transport_key_rotated_at_micros: peer.transport_key_rotated_at_micros,
+            expires_at_micros: peer.trust.expires_at_micros,
+            labels: peer.trust.labels.clone(),
+        })
+        .collect::<Vec<_>>();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "config": config_path.display().to_string(),
+                "peer_count": report.peer_count,
+                "trusted_peer_count": report.trusted_peer_count,
+                "restricted_peer_count": report.restricted_peer_count,
+                "peer_send_enabled_count": report.peer_send_enabled_count,
+                "peer_receive_enabled_count": report.peer_receive_enabled_count,
+                "peer_forward_enabled_count": report.peer_forward_enabled_count,
+                "peers": peers
+            }))?
+        );
+    } else {
+        println!("config={}", config_path.display());
+        println!("peers={}", report.peer_count);
+        println!("trusted_peers={}", report.trusted_peer_count);
+        println!("restricted_peers={}", report.restricted_peer_count);
+        for peer in peers {
+            println!(
+                "peer={} addr={} status={} send={} receive={} forward={} poa_attestation={} key_epoch={} expires_at_micros={} labels={}",
+                peer.node_id,
+                peer.addr,
+                peer.status,
+                peer.allow_send,
+                peer.allow_receive,
+                peer.allow_forward,
+                peer.allow_poa_attestation,
+                peer.transport_key_epoch
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                peer.expires_at_micros
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                if peer.labels.is_empty() {
+                    "none".to_string()
+                } else {
+                    peer.labels.join(",")
+                }
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_trust_labels(labels: &[String]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    for label in labels {
+        if label.trim().is_empty() {
+            bail!("trust labels must not be empty");
+        }
+        if label.len() > 64 {
+            bail!("trust label `{}` exceeds 64 bytes", label);
+        }
+        if label.chars().any(char::is_control) {
+            bail!(
+                "trust label `{}` must not contain control characters",
+                label
+            );
+        }
+        if !seen.insert(label) {
+            bail!("duplicate trust label `{}`", label);
+        }
+    }
+    Ok(())
+}
+
+fn peer_trust_status_name(status: PeerTrustStatus) -> &'static str {
+    match status {
+        PeerTrustStatus::Trusted => "trusted",
+        PeerTrustStatus::Quarantined => "quarantined",
+        PeerTrustStatus::Revoked => "revoked",
+    }
+}
+
+fn schema(command: SchemaCommand) -> Result<()> {
+    match command {
+        SchemaCommand::Validate {
+            contract,
+            envelope,
+            json,
+        } => schema_validate(&contract, &envelope, json),
+        SchemaCommand::Inspect { contract, json } => schema_inspect(&contract, json),
+    }
+}
+
+fn schema_validate(contract_path: &Path, envelope_path: &Path, json: bool) -> Result<()> {
+    let contract = load_message_contract(contract_path)?;
+    let envelope_bytes = fs::read(envelope_path)
+        .with_context(|| format!("failed to read envelope {}", envelope_path.display()))?;
+    let envelope = ZapEnvelopeRef::parse(&envelope_bytes).context("invalid ZENV envelope")?;
+    contract.validate_message(&MessageParts {
+        kind: envelope.kind().as_str(),
+        subject: envelope.subject(),
+        content_type: Some(envelope.content_type()),
+        metadata: envelope.metadata(),
+        body: envelope.body(),
+    })?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "contract": contract.contract_name(),
+                "envelope": envelope_path.display().to_string(),
+                "kind": envelope.kind().as_str(),
+                "subject": envelope.subject(),
+                "content_type": envelope.content_type(),
+                "valid": true
+            }))?
+        );
+    } else {
+        println!("contract={}", contract.contract_name());
+        println!("envelope={}", envelope_path.display());
+        println!("kind={}", envelope.kind());
+        println!("subject={}", envelope.subject());
+        println!("valid=true");
+    }
+    Ok(())
+}
+
+fn schema_inspect(contract_path: &Path, json: bool) -> Result<()> {
+    let contract = load_message_contract(contract_path)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&contract)?);
+    } else {
+        println!("contract={}", contract.contract_name());
+        println!("kind={}", contract.kind);
+        println!("subject={}", contract.subject);
+        println!(
+            "content_type={}",
+            contract.content_type.as_deref().unwrap_or("*")
+        );
+        println!("body_format={}", contract.body.format);
+    }
+    Ok(())
+}
+
+fn load_message_contract(path: &Path) -> Result<MessageContract> {
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read message contract {}", path.display()))?;
+    match path.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) if extension.eq_ignore_ascii_case("json") => {
+            MessageContract::from_json_str(&input).map_err(Into::into)
+        }
+        _ => MessageContract::from_toml_str(&input).map_err(Into::into),
+    }
+}
+
+fn policy(command: PolicyCommand) -> Result<()> {
+    match command {
+        PolicyCommand::Evaluate {
+            policy,
+            kind,
+            subject,
+            source_node,
+            target_node,
+            content_type,
+            requires_consensus,
+            grants,
+            human_approved,
+            simulation_passed,
+            strict,
+            json,
+        } => policy_evaluate(PolicyEvaluateOptions {
+            policy_path: &policy,
+            kind: &kind,
+            subject: &subject,
+            source_node,
+            target_node,
+            content_type: content_type.as_deref(),
+            requires_consensus,
+            grants,
+            human_approved,
+            simulation_passed,
+            strict,
+            json,
+        }),
+    }
+}
+
+struct PolicyEvaluateOptions<'a> {
+    policy_path: &'a Path,
+    kind: &'a str,
+    subject: &'a str,
+    source_node: Option<Uuid>,
+    target_node: Option<Uuid>,
+    content_type: Option<&'a str>,
+    requires_consensus: bool,
+    grants: Vec<String>,
+    human_approved: bool,
+    simulation_passed: bool,
+    strict: bool,
+    json: bool,
+}
+
+fn policy_evaluate(options: PolicyEvaluateOptions<'_>) -> Result<()> {
+    let input = fs::read_to_string(options.policy_path)
+        .with_context(|| format!("failed to read policy {}", options.policy_path.display()))?;
+    let policy = PolicySet::from_toml_str(&input)?;
+    let granted_capabilities = options
+        .grants
+        .iter()
+        .map(|grant| grant.parse::<CapabilityId>())
+        .collect::<std::result::Result<BTreeSet<_>, _>>()?;
+    let evaluation = policy.evaluate(&PolicyInput {
+        kind: options.kind,
+        subject: options.subject,
+        source_node: options.source_node,
+        target_node: options.target_node,
+        content_type: options.content_type,
+        consensus_protected: options.requires_consensus,
+        granted_capabilities: &granted_capabilities,
+        human_approved: options.human_approved,
+        simulation_passed: options.simulation_passed,
+    });
+    if options.json {
+        println!("{}", serde_json::to_string_pretty(&evaluation)?);
+    } else {
+        println!("decision={:?}", evaluation.decision);
+        println!("allowed={}", evaluation.allowed);
+        println!("reason={}", evaluation.reason);
+        if let Some(capability) = &evaluation.required_capability {
+            println!("required_capability={capability}");
+        }
+        println!("required_poa={}", evaluation.required_poa);
+        println!(
+            "human_approval_required={}",
+            evaluation.human_approval_required
+        );
+        println!("simulation_required={}", evaluation.simulation_required);
+    }
+    if options.strict && !evaluation.allowed {
+        bail!(
+            "policy strict gate denied {} {}: {}",
+            options.kind,
+            options.subject,
+            evaluation.reason
+        );
+    }
+    Ok(())
+}
+
 fn driver_manifest(command: DriverManifestCommand) -> Result<()> {
     match command {
         DriverManifestCommand::Create {
@@ -2280,6 +3039,11 @@ fn driver_manifest(command: DriverManifestCommand) -> Result<()> {
             allow_filesystem,
             allow_clock,
             allow_environment,
+            allow_emit_event,
+            allow_memory_read,
+            allow_memory_write,
+            allow_device_call,
+            max_host_call_bytes,
             force,
         } => create_driver_manifest(CreateDriverManifestOptions {
             driver_path: &driver,
@@ -2294,6 +3058,11 @@ fn driver_manifest(command: DriverManifestCommand) -> Result<()> {
                 filesystem: allow_filesystem,
                 clock: allow_clock,
                 environment: allow_environment,
+                emit_event: allow_emit_event,
+                memory_read: allow_memory_read,
+                memory_write: allow_memory_write,
+                device_call: allow_device_call,
+                max_host_call_bytes,
             },
             force,
         }),

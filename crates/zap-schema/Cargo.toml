@@ -1,6 +1,6 @@
 [package]
-name = "zap-intent"
-description = "Deterministic local intent compiler for ZAP action envelopes."
+name = "zap-schema"
+description = "Typed ZAP message contracts for agents, machines, and gateways."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -10,3 +10,5 @@ version.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+toml.workspace = true
+zap-envelope = { path = "../zap-envelope" }

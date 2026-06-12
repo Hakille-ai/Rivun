@@ -2561,19 +2561,21 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml",
  "tracing-subscriber",
  "uuid",
  "zap-capability",
  "zap-core",
  "zap-crypto",
  "zap-envelope",
- "zap-intent",
  "zap-ledger",
  "zap-memory",
  "zap-net",
  "zap-node",
+ "zap-policy",
  "zap-router",
  "zap-runtime",
+ "zap-schema",
  "zap-store",
 ]
 
@@ -2638,21 +2640,11 @@ dependencies = [
  "zap-crypto",
  "zap-driver-sdk",
  "zap-envelope",
- "zap-intent",
  "zap-memory",
  "zap-net",
  "zap-node",
  "zap-runtime",
  "zap-store",
-]
-
-[[package]]
-name = "zap-intent"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -2725,9 +2717,22 @@ dependencies = [
  "zap-ledger",
  "zap-memory",
  "zap-net",
+ "zap-policy",
  "zap-router",
  "zap-runtime",
+ "zap-schema",
  "zap-store",
+]
+
+[[package]]
+name = "zap-policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "toml",
+ "uuid",
+ "zap-capability",
 ]
 
 [[package]]
@@ -2750,6 +2755,17 @@ dependencies = [
  "wasmtime",
  "wat",
  "zap-capability",
+]
+
+[[package]]
+name = "zap-schema"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+ "zap-envelope",
 ]
 
 [[package]]

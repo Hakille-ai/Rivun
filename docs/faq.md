@@ -8,7 +8,7 @@ This document addresses common questions regarding the architecture, security mo
 
 ### How does ZAP compare to MQTT, gRPC, or NATS?
 - **MQTT**: Designed for low-bandwidth client-broker message broker topologies. It relies on a central, single-point-of-failure broker, uses TCP (susceptible to HOL blocking), and lacks native payload signing or sandboxed processing. ZAP is a decentralized, peer-to-peer UDP protocol with end-to-end cryptographic signatures and sandboxed edge execution.
-- **gRPC**: A client-server RPC framework running over HTTP/2 (TCP). It has large protocol parsing overhead, lacks native multi-node consensus gates, and does not have built-in local intent compilers or sandboxed driver execution.
+- **gRPC**: A client-server RPC framework running over HTTP/2 (TCP). It has large protocol parsing overhead, lacks native multi-node consensus gates, and does not have built-in message policy gates or sandboxed driver execution.
 - **NATS**: A high-performance pub-sub messaging system. While fast, it relies on NATS cluster servers and does not enforce end-to-end signature verification or action sandboxing at the protocol layer.
 
 ### Is ZAP a replacement for TLS?
@@ -60,5 +60,8 @@ No. ZAP does not use a global distributed ledger, mining, or proof-of-stake. PoA
 ### Why are host capabilities denied by default in WASM?
 To enforce a zero-trust model. If a driver needs filesystem or network access, this must be explicitly requested in its manifest and approved by the operator in the node configuration. In the initial version (v1), all host imports are denied to guarantee maximum security.
 
-### How do I compile intents without an internet connection?
-The intent compiler (`zap-intent`) is completely **deterministic** and **offline-first**. It uses a rule-based parser and unicode normalization directly in Rust. It does not call any external LLM APIs, making it perfect for air-gapped systems.
+### Where does AI or natural-language planning run?
+Outside ZAP. Models, agents, or operator tools should produce strict typed
+messages such as `kind=action`, `subject=safety.emergency_stop`, and a JSON
+payload. ZAP then enforces signatures, encryption, replay protection, routing,
+message policy, PoA, and sandboxed execution deterministically.

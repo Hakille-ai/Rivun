@@ -18,6 +18,33 @@ Receivers keep a bounded in-memory nonce cache per peer and reject repeated data
 
 The crate also includes a Noise `NN_25519_ChaChaPoly_BLAKE2s` helper for future dynamic session bootstrap.
 
+## Peer Trust
+
+Transport keys prove that a datagram came from a configured peer, but transport
+trust is not the same as operational permission. Each peer can carry a local
+trust contract:
+
+```toml
+[trust]
+require_peer_expiry = true
+max_transport_key_age_micros = 2592000000000
+
+[peers.trust]
+status = "trusted"
+allow_send = true
+allow_receive = true
+allow_forward = false
+allow_poa_attestation = true
+expires_at_micros = 1765000000000000
+```
+
+`zap-node` rejects revoked peers during config validation, warns for
+quarantined or restricted peers, blocks outbound CLI sends when
+`allow_send=false`, rejects inbound frames when `allow_receive=false`, and
+prevents routes from targeting peers where forwarding is disabled. Optional
+expiry and transport-key age gates let operators force peer re-enrollment and
+key rotation on a schedule.
+
 ## Anti-Replay
 
 `zap-node` validates timestamp freshness before dispatching an action. By default, frames outside a five-minute clock-skew window are rejected. The node also keeps an in-memory BLAKE3 fingerprint cache of recently accepted frames per process and rejects exact frame replays.
@@ -58,9 +85,14 @@ node_id = "..."
 public_key = "..."
 ```
 
-`zap send --intent` refuses to emit critical intent steps unless a local
-`--poa-validator-key` is supplied or `--poa-network` can collect a configured
-validator quorum.
+`zap send --requires-consensus` refuses to emit consensus-protected frames
+unless a local `--poa-validator-key` is supplied or `--poa-network` can collect
+a configured validator quorum.
+
+Receiver-side `[message_policy]` rules can require PoA for matching typed
+messages. For example, a node can require every `action` with subject
+`safety.*` to carry `REQUIRES_CONSENSUS` and a valid certificate before routing
+or driver execution.
 
 `zap send --poa-network` can request attestations from configured validator
 peers. Responses are accepted only when the validator public key matches config,
@@ -87,9 +119,12 @@ actually advertise, and deployments can set
 grant coverage for every advertised capability.
 
 `zap capability query --cache` stores signed peer responses in a local
-hash-chained JSONL cache. Cache verification checks entry hashes, chain
-continuity, peer/ad node identity consistency, duplicate entry ids, and grants
-that reference missing advertised capabilities.
+hash-chained JSONL cache. `zap capability cache refresh --config zap.toml
+--strict` actively refreshes configured peers into `[capability_cache].path`
+and reports any skipped or failed peer before route gates depend on cached
+grants. Cache verification checks entry hashes, chain continuity, peer/ad node
+identity consistency, duplicate entry ids, and grants that reference missing
+advertised capabilities.
 
 Routes can declare `requires_peer_grant`. During config validation, `zap-node`
 verifies the capability cache and requires the target peer's latest cached
@@ -110,9 +145,9 @@ database and not a hidden model state channel.
 
 ## Runtime Isolation
 
-WASM drivers receive no host imports by default. Network, filesystem, clock, and environment capabilities are denied unless explicitly granted by future host APIs.
+WASM drivers receive no host imports by default. Network, filesystem, clock, and environment capabilities are still denied as broad ambient authority.
 
-Signed ZapStore manifests bind a driver action to a BLAKE3 artifact hash, ABI version, declared permissions, and author Ed25519 identity. `zap-node` verifies the manifest signature and hash before compiling the driver. Local registry indexes can also carry an operator signature; set `[registry] require_signature = true` to reject unsigned or tampered indexes during config validation and daemon startup. ABI v1 still rejects every requested host permission because the host capability APIs do not exist yet.
+Signed ZapStore manifests bind a driver action to a BLAKE3 artifact hash, ABI version, declared permissions, and author Ed25519 identity. `zap-node` verifies the manifest signature and hash before compiling the driver. Local registry indexes can also carry an operator signature; set `[registry] require_signature = true` to reject unsigned or tampered indexes during config validation and daemon startup. ABI v2 foundations expose only scoped `zap` imports for event emission, local memory interaction, and device-call requests. Those imports are inert unless explicitly granted, bounded by `max_host_call_bytes`, and still subject to node config gates such as `[memory] allow_driver_write = true`.
 
 Current enforced limits:
 
@@ -121,3 +156,4 @@ Current enforced limits:
 - fuel budget;
 - output byte limit;
 - wall-clock epoch interruption.
+- host call byte limit.

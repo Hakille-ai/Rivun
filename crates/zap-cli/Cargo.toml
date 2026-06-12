@@ -25,14 +25,16 @@ zap-capability.workspace = true
 zap-core = { path = "../zap-core" }
 zap-crypto = { path = "../zap-crypto" }
 zap-envelope = { path = "../zap-envelope" }
-zap-intent = { path = "../zap-intent" }
 zap-ledger = { path = "../zap-ledger" }
 zap-memory.workspace = true
 zap-net = { path = "../zap-net" }
 zap-node = { path = "../zap-node" }
+zap-policy.workspace = true
 zap-router.workspace = true
 zap-runtime = { path = "../zap-runtime" }
+zap-schema.workspace = true
 zap-store = { path = "../zap-store" }
+toml.workspace = true
 
 [dev-dependencies]
 base64.workspace = true

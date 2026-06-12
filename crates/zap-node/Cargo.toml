@@ -24,8 +24,10 @@ zap-envelope = { path = "../zap-envelope" }
 zap-ledger = { path = "../zap-ledger" }
 zap-memory.workspace = true
 zap-net = { path = "../zap-net" }
+zap-policy.workspace = true
 zap-router.workspace = true
 zap-runtime = { path = "../zap-runtime" }
+zap-schema.workspace = true
 zap-store = { path = "../zap-store" }
 
 [dev-dependencies]

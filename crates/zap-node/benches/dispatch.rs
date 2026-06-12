@@ -8,8 +8,8 @@ use zap_crypto::{Keypair, sign_frame};
 use zap_envelope::ZapEnvelope;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
-    DriverConfig, MemoryConfig, PeerConfig, PoaConfig, ReceiptsConfig, RegistryConfig,
-    RuntimeConfig, SecurityConfig, ZapNode, ZapNodeConfig,
+    DriverConfig, MemoryConfig, PeerConfig, PeerTrustConfig, PoaConfig, ReceiptsConfig,
+    RegistryConfig, RuntimeConfig, SecurityConfig, TrustConfig, ZapNode, ZapNodeConfig,
 };
 
 fn public_key_string(keypair: &Keypair) -> String {
@@ -80,6 +80,9 @@ impl NodeBench {
                     .iter()
                     .map(|byte| format!("{byte:02x}"))
                     .collect(),
+                transport_key_epoch: None,
+                transport_key_rotated_at_micros: None,
+                trust: PeerTrustConfig::default(),
             }],
             drivers: vec![DriverConfig {
                 action: "echo".to_string(),
@@ -88,12 +91,15 @@ impl NodeBench {
             }],
             runtime: RuntimeConfig::default(),
             security: SecurityConfig::default(),
+            trust: TrustConfig::default(),
             poa: PoaConfig::default(),
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
             memory: MemoryConfig::default(),
             capability_policy: zap_node::CapabilityPolicyConfig::default(),
             capability_cache: zap_node::CapabilityCacheConfig::default(),
+            message_policy: zap_node::MessagePolicyConfig::default(),
+            message_schema: zap_node::MessageSchemaConfig::default(),
             routes: Vec::new(),
         };
         let node = ZapNode::from_config(config).await.unwrap();

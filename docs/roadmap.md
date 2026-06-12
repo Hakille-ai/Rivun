@@ -14,17 +14,26 @@ Implemented in this repository:
 - sandboxed WASM execution;
 - CLI, docs, tests, benches.
 
-## Phase 2: Cognitive Interpreter
+## Phase 2: Typed Agent Gateway
 
 Foundation implemented:
 
-- `zap-intent` maps local text or structured JSON intent into typed ZAP action steps;
-- `zap compile-intent --explain` prints an auditable plan with rule metadata;
-- `zap send --intent` sends each compiled step as a signed universal envelope;
-- optional JSON intent policies can allow, deny, or require PoA for matching steps;
-- emergency-stop safety intents mark frames with `REQUIRES_CONSENSUS`.
+- external agents and models emit strict typed `ZENV` messages instead of relying on an in-protocol natural-language compiler;
+- `zap send --kind ... --subject ...` sends typed messages directly;
+- `[message_policy]` rules can allow, deny, or require PoA for matching `kind` and `subject`;
+- `zap send --requires-consensus` marks frames with `REQUIRES_CONSENSUS` and attaches PoA certificates through local validator keys or network validators;
+- receiver-side policy rejects critical messages that arrive without required Proof-of-Action.
 
-Next: expand the grammar and support local model backends behind the same policy gate.
+Next: publish SDK-friendly schemas for model gateways and richer policy authoring.
+
+Progress added:
+
+- `zap-schema` provides typed message contracts for agent gateways, machine
+  commands, JSON payload validation, and optional node-side allowlists.
+- `zap-policy` provides deterministic policy evaluation for `allow`, `deny`,
+  `require_poa`, `require_grant`, `human_approval`, and `simulate_first`.
+- `zap schema validate` and `zap policy evaluate` expose operator workflows for
+  preflight validation before messages are signed and sent.
 
 ## Phase 3: SDKs and Driver Registry
 
@@ -48,7 +57,7 @@ Foundation implemented:
 - `REQUIRES_CONSENSUS` frames can carry `ZPOA` trailers;
 - validators sign a domain-separated digest of the signed frame;
 - `zap-node` verifies configured validator public keys and threshold before dispatch;
-- `zap send --intent` requires `--poa-validator-key` for critical intent steps.
+- `zap send --requires-consensus` requires `--poa-validator-key` or `--poa-network` for consensus-protected frames.
 - `zap send --poa-network` can collect attestations from configured validator peers with an operator-controlled timeout;
 - portable PoA request/response JSON can be created with `zap poa request` and `zap poa attest`;
 - optional signed action receipts record processed actions for audit.
@@ -80,5 +89,22 @@ Foundation implemented:
 - peer routes can require a verified cached grant before forwarding messages to
   a remote node.
 
-Next: active cache refresh workflows, richer peer trust policy, and carefully
-scoped WASM host imports for memory access.
+Next: remote receipt replication, dynamic peer enrollment, distributed
+revocation, and package distribution.
+
+Progress added:
+
+- `DriverPermissions` now includes scoped host permissions for event emission,
+  local memory reads/writes, device-call requests, and per-call byte limits.
+- `zap-runtime` exposes deny-by-default `zap` WASM imports and captures host
+  calls as auditable runtime output.
+- `zap-node` commits permitted `memory_write` host calls to the hash-chained
+  memory store, preserving source node and frame hash.
+- peer trust contracts add local machine-communication permissions for send,
+  receive, route forwarding, PoA attestations, trust expiry, and transport-key
+  rotation age.
+- `zap trust enroll` and `zap trust inspect` provide operator workflows for
+  peer onboarding and trust posture review before nodes run.
+- `zap capability cache refresh` actively queries configured peers, appends
+  signed advertisements to the verified JSONL cache, and reports skipped or
+  failed peers for strict deployment gates.

@@ -1,6 +1,6 @@
 # Getting Started with ZAP
 
-This guide walks you through setting up ZAP, compiling the workspace, running a local two-node cluster, compiling natural language intents into messages, and executing a sandboxed WASM driver.
+This guide walks you through setting up ZAP, compiling the workspace, running a local two-node cluster, sending typed messages, and executing a sandboxed WASM driver.
 
 ---
 
@@ -131,22 +131,17 @@ You should see Node A receive the frame, decrypt it, verify the signature, log t
 
 ---
 
-## 6. Compiling Intents (Cognitive Gateway)
+## 6. Sending Typed Agent Actions
 
-ZAP includes a local, deterministic compiler (`zap-intent`) that compiles natural-language text or JSON requests into structured actions.
-
-Run the intent compiler locally to verify a request:
-
-```bash
-cargo run -p zap-cli -- compile-intent "Ajuster la temperature a 22" --explain
-```
-
-To execute an intent-based action across the network:
+ZAP expects agents, models, or operator tools to produce strict typed messages.
+For example, send a JSON action envelope directly:
 
 ```bash
 cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
   --target a0000000-0000-0000-0000-00000000000a \
-  --intent "Ajuster la temperature a 22"
+  --kind action --subject thermostat.setpoint \
+  --payload '{"temperature_c":22}' --content-type application/json
 ```
 
-The system parses the intent, checks policy constraints, builds a ZENV envelope, signs it, sends it over UDP, and triggers the target action.
+The system builds a ZENV envelope, signs it, sends it over UDP, verifies it on
+the receiver, checks message policy, and triggers the target action.

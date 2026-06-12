@@ -38,6 +38,8 @@ The validator and doctor checks cover:
 - peer address syntax and duplicates;
 - peer `public_key` derives the configured `node_id`;
 - transport key length and nonzero value;
+- peer trust status, send/receive/forward permissions, optional expiry, and
+  optional transport-key rotation age;
 - runtime/security limits are nonzero where required;
 - duplicate driver actions;
 - WASM/WAT driver files compile and expose ABI v1 before daemon startup;
@@ -59,6 +61,7 @@ Node configs are TOML files with:
 - local bind address;
 - local key file path;
 - static peer list;
+- optional peer trust policy;
 - optional registered WASM drivers;
 - runtime limits.
 - anti-replay policy.
@@ -82,12 +85,85 @@ path = "../wasm-drivers/echo/echo.wat"
 manifest = "../wasm-drivers/echo/echo.manifest.toml"
 ```
 
+## Peer Trust and Enrollment
+
+Static peers now carry an explicit local trust contract. Generate a verified
+TOML enrollment block before adding a new machine:
+
+```bash
+cargo run -p zap-cli -- trust enroll \
+  --node-id <peer-node-id> \
+  --addr 10.0.0.12:7777 \
+  --public-key <peer-public-key> \
+  --transport-key <64-hex-chars> \
+  --transport-key-epoch 1 \
+  --label production
+```
+
+Inspect an existing config:
+
+```bash
+cargo run -p zap-cli -- trust inspect --config zap.toml --json
+```
+
+Each peer can restrict machine communication:
+
+```toml
+[trust]
+require_peer_expiry = true
+max_transport_key_age_micros = 2592000000000
+
+[[peers]]
+node_id = "..."
+addr = "10.0.0.12:7777"
+public_key = "..."
+transport_key = "..."
+transport_key_epoch = 3
+transport_key_rotated_at_micros = 1760000000000000
+
+[peers.trust]
+status = "trusted"
+allow_send = true
+allow_receive = true
+allow_forward = false
+allow_poa_attestation = true
+expires_at_micros = 1765000000000000
+labels = ["production", "edge"]
+```
+
+`status = "revoked"` fails config validation. `status = "quarantined"` keeps
+the peer in the file for operator review but disables transport use. `allow_send
+= false` blocks `zap send` and node responses to that peer. `allow_receive =
+false` rejects authenticated inbound frames before dispatch. `allow_forward =
+false` prevents route targets and broadcasts from forwarding to that peer.
+
 Create and verify a signed manifest:
 
 ```bash
 cargo run -p zap-cli -- driver-manifest create --driver examples/wasm-drivers/echo/echo.wat --action echo --author-key .zap/node.key --out examples/wasm-drivers/echo/echo.manifest.toml
 cargo run -p zap-cli -- driver-manifest verify --driver examples/wasm-drivers/echo/echo.wat --manifest examples/wasm-drivers/echo/echo.manifest.toml
 ```
+
+Scoped host imports for machine-safe drivers can be declared in signed
+manifests:
+
+```bash
+cargo run -p zap-cli -- driver-manifest create \
+  --driver machine.wat --action machine.note \
+  --author-key .zap/node.key --out machine.manifest.toml \
+  --allow-emit-event --allow-memory-write --max-host-call-bytes 8192
+```
+
+For `memory_write`, the receiving node must also configure:
+
+```toml
+[memory]
+path = ".zap/memory.jsonl"
+allow_driver_write = true
+```
+
+General `network`, `filesystem`, `clock`, and `environment` permissions remain
+rejected by `check-config`.
 
 `check-config --json` includes `signed_driver_count` so deploy scripts can require signed driver provenance.
 It also includes `registry_enabled`, `registry_entry_count`, and
@@ -123,6 +199,7 @@ Capability discovery is explicit and signed:
 cargo run -p zap-cli -- capability list --config zap.toml --json
 cargo run -p zap-cli -- capability inspect-manifest --manifest examples/wasm-drivers/echo/echo.manifest.toml --json
 cargo run -p zap-cli -- capability query --config zap.toml --target <uuid> --cache .zap/capabilities.jsonl --json
+cargo run -p zap-cli -- capability cache refresh --config zap.toml --json --strict
 cargo run -p zap-cli -- capability cache verify --path .zap/capabilities.jsonl
 cargo run -p zap-cli -- capability cache list --path .zap/capabilities.jsonl --peer <uuid> --json
 ```
@@ -154,8 +231,12 @@ reason = "critical actions require validator quorum"
 those counts into readiness checks.
 
 Remote capability responses can be cached locally with `capability query
---cache`. The cache is append-only JSONL with entry hash chaining; verify it
-before using it for deployment review or routing decisions.
+--cache`. For normal operations, prefer `capability cache refresh --config
+zap.toml --strict` so every configured peer is refreshed into
+`[capability_cache].path` before deployment gates run. The refresh report
+includes per-peer `ok`, `skipped`, and `failed` status and respects local peer
+trust policy. The cache is append-only JSONL with entry hash chaining; verify
+it before using it for deployment review or routing decisions.
 
 Require cached peer grants before forwarding selected messages:
 
@@ -249,30 +330,36 @@ Inline metadata is accepted as bytes, so JSON and plain text are both valid:
 cargo run -p zap-cli -- send --config zap.toml --target <uuid> --kind event --subject sensor.temperature --payload '{"c":21.5}' --content-type application/json --metadata '{"source":"sim"}'
 ```
 
-For PDF Phase 2-style intent compilation, inspect the plan first, then send:
+Agents, models, and operator tools should send typed `ZENV` messages directly:
 
 ```bash
-cargo run -p zap-cli -- compile-intent "Ajuster la temperature a 20" --explain
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "Ajuster la temperature a 20"
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
+  --kind action --subject thermostat.setpoint \
+  --payload '{"temperature_c":20}' --content-type application/json
 ```
 
-Apply an optional JSON policy before sending:
+Critical actions, such as `safety.emergency_stop`, should be protected by
+receiver-side `[message_policy]` and sent with `REQUIRES_CONSENSUS` plus a PoA
+certificate:
 
 ```bash
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "Ajuster la temperature a 20" --policy policy.json
-```
-
-Critical intent steps, such as `safety.emergency_stop`, set `REQUIRES_CONSENSUS` and need a local PoA certificate:
-
-```bash
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-validator-key .zap/validator.key
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
+  --kind action --subject safety.emergency_stop \
+  --payload '{"reason":"operator_request"}' --content-type application/json \
+  --requires-consensus --poa-validator-key .zap/validator.key
 ```
 
 Or request attestations from configured validator peers:
 
 ```bash
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-network
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> --intent "declencher arret urgence robot" --poa-network --poa-timeout-ms 5000
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
+  --kind action --subject safety.emergency_stop \
+  --payload '{"reason":"operator_request"}' --content-type application/json \
+  --requires-consensus --poa-network
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
+  --kind action --subject safety.emergency_stop \
+  --payload '{"reason":"operator_request"}' --content-type application/json \
+  --requires-consensus --poa-network --poa-timeout-ms 5000
 ```
 
 Each `[poa]` validator used by `--poa-network` must also be configured as a

@@ -10,7 +10,6 @@ zap-envelope = { path = "../crates/zap-envelope" }
 zap-crypto = { path = "../crates/zap-crypto" }
 zap-net = { path = "../crates/zap-net" }
 zap-node = { path = "../crates/zap-node" }
-zap-intent = { path = "../crates/zap-intent" }
 zap-memory = { path = "../crates/zap-memory" }
 zap-store = { path = "../crates/zap-store" }
 zap-runtime = { path = "../crates/zap-runtime" }

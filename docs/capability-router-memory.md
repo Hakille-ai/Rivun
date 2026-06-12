@@ -19,6 +19,7 @@ Inspect local capabilities:
 cargo run -p zap-cli -- capability list --config zap.toml --json
 cargo run -p zap-cli -- capability inspect-manifest --manifest examples/wasm-drivers/echo/echo.manifest.toml --json
 cargo run -p zap-cli -- capability query --config zap.toml --target <uuid> --cache .zap/capabilities.jsonl --json
+cargo run -p zap-cli -- capability cache refresh --config zap.toml --json --strict
 cargo run -p zap-cli -- capability cache verify --path .zap/capabilities.jsonl
 cargo run -p zap-cli -- capability cache list --path .zap/capabilities.jsonl --peer <uuid> --json
 ```
@@ -50,10 +51,14 @@ external prerequisites. When `require_grants_for_advertised = true`,
 `zap check-config` rejects any advertised capability without an explicit grant.
 
 Remote query responses can be appended to a local capability cache with
-`capability query --cache`. The cache is JSONL with `previous_entry_hash` and
-`entry_hash`, so `capability cache verify` detects tampering, removed middle
-entries, duplicate ids, peer/ad node mismatches, and grants that reference
-capabilities not present in the advertisement.
+`capability query --cache`. Operators can refresh every configured peer in one
+run with `capability cache refresh --config zap.toml`; it uses
+`[capability_cache].path` unless `--path` overrides it, respects local
+`[peers.trust]` send permissions, and reports per-peer `ok`, `skipped`, or
+`failed` status. The cache is JSONL with `previous_entry_hash` and `entry_hash`,
+so `capability cache verify` detects tampering, removed middle entries,
+duplicate ids, peer/ad node mismatches, and grants that reference capabilities
+not present in the advertisement.
 
 Node configs can require peer routes to be backed by a cached grant:
 
@@ -106,7 +111,10 @@ cargo run -p zap-cli -- route explain --config zap.toml --kind action --subject 
 
 Route targets can be `local_driver`, `peer`, `capability`, `broadcast`, or
 `drop`. Peer and broadcast routes create new signed frames from the routing
-node. Consensus-protected frames are not forwarded in v1.
+node. Consensus-protected frames are not forwarded in v1. Peer routes also
+respect `[peers.trust]`: `allow_forward=false`, `allow_send=false`,
+`status="quarantined"`, or `status="revoked"` prevent forwarding to that
+machine during config validation or dispatch.
 
 ## Memory
 
@@ -130,8 +138,11 @@ allow_driver_read = false
 allow_driver_write = false
 ```
 
-Driver memory access remains denied unless future host imports are enabled by
-manifest, config, and explicit capability policy together.
+Driver memory access remains denied unless host imports are enabled by manifest
+or runtime config, the node config enables the corresponding `[memory]` gate,
+and explicit capability policy covers the advertised capability. In the ABI v2
+foundation, `zap.memory_write` host calls are appended as `driver` namespace
+records in the local JSONL memory store with the source node and frame hash.
 
 Newly appended memory entries include `previous_entry_hash` and `entry_hash`.
 `zap memory verify` recalculates body hashes, validates entry hashes, checks the

@@ -25,6 +25,7 @@ pub const CAPABILITY_CONTENT_TYPE: &str = "application/zap-capability+json";
 const DRIVER_EXECUTE_PREFIX: &str = "driver.execute:";
 const HASH_PREFIX: &str = "blake3:";
 pub const CAPABILITY_CACHE_SCHEMA_VERSION: u8 = 1;
+pub const DEFAULT_MAX_HOST_CALL_BYTES: u32 = 4096;
 
 #[derive(Debug, Error)]
 pub enum ZapCapabilityError {
@@ -114,10 +115,24 @@ impl<'de> Deserialize<'de> for CapabilityId {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DriverPermissions {
+    #[serde(default)]
     pub network: bool,
+    #[serde(default)]
     pub filesystem: bool,
+    #[serde(default)]
     pub clock: bool,
+    #[serde(default)]
     pub environment: bool,
+    #[serde(default)]
+    pub emit_event: bool,
+    #[serde(default)]
+    pub memory_read: bool,
+    #[serde(default)]
+    pub memory_write: bool,
+    #[serde(default)]
+    pub device_call: bool,
+    #[serde(default = "default_max_host_call_bytes")]
+    pub max_host_call_bytes: u32,
 }
 
 impl DriverPermissions {
@@ -127,6 +142,11 @@ impl DriverPermissions {
             filesystem: false,
             clock: false,
             environment: false,
+            emit_event: false,
+            memory_read: false,
+            memory_write: false,
+            device_call: false,
+            max_host_call_bytes: DEFAULT_MAX_HOST_CALL_BYTES,
         }
     }
 
@@ -136,6 +156,15 @@ impl DriverPermissions {
             filesystem: self.filesystem || other.filesystem,
             clock: self.clock || other.clock,
             environment: self.environment || other.environment,
+            emit_event: self.emit_event || other.emit_event,
+            memory_read: self.memory_read || other.memory_read,
+            memory_write: self.memory_write || other.memory_write,
+            device_call: self.device_call || other.device_call,
+            max_host_call_bytes: if self.max_host_call_bytes > other.max_host_call_bytes {
+                self.max_host_call_bytes
+            } else {
+                other.max_host_call_bytes
+            },
         }
     }
 }
@@ -144,6 +173,10 @@ impl Default for DriverPermissions {
     fn default() -> Self {
         Self::none()
     }
+}
+
+const fn default_max_host_call_bytes() -> u32 {
+    DEFAULT_MAX_HOST_CALL_BYTES
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -396,6 +429,18 @@ pub fn capabilities_for_driver(
     if permissions.environment {
         set.insert(CapabilityId::new("host.environment")?);
     }
+    if permissions.emit_event {
+        set.insert(CapabilityId::new("host.emit_event")?);
+    }
+    if permissions.memory_read {
+        set.insert(CapabilityId::new("host.memory.read")?);
+    }
+    if permissions.memory_write {
+        set.insert(CapabilityId::new("host.memory.write")?);
+    }
+    if permissions.device_call {
+        set.insert(CapabilityId::new("host.device.call")?);
+    }
     Ok(set)
 }
 
@@ -535,9 +580,22 @@ mod tests {
     fn maps_driver_permissions_to_capabilities() {
         let mut permissions = DriverPermissions::none();
         permissions.clock = true;
+        permissions.emit_event = true;
+        permissions.memory_write = true;
         let set = capabilities_for_driver("thermostat.setpoint", permissions).unwrap();
         assert!(set.contains(&CapabilityId::new("driver.execute:thermostat.setpoint").unwrap()));
         assert!(set.contains(&CapabilityId::new("host.clock").unwrap()));
+        assert!(set.contains(&CapabilityId::new("host.emit_event").unwrap()));
+        assert!(set.contains(&CapabilityId::new("host.memory.write").unwrap()));
+    }
+
+    #[test]
+    fn serde_defaults_permission_v2_fields_for_old_manifests() {
+        let permissions: DriverPermissions =
+            serde_json::from_str(r#"{"network":false,"filesystem":false}"#).unwrap();
+
+        assert_eq!(permissions, DriverPermissions::none());
+        assert_eq!(permissions.max_host_call_bytes, DEFAULT_MAX_HOST_CALL_BYTES);
     }
 
     #[test]

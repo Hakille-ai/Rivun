@@ -23,7 +23,7 @@ unified wire format.
 ## ❓ Why ZAP?
 
 1. **End-to-End Cryptographic Provenance**: Every message frame is signed by the sender node's identity and verified by the receiver, establishing full custody and identity tracking for distributed processes.
-2. **Deterministic & Local Action Planning**: Natural language intents are parsed, checked against safety rules, and compiled into concrete actions entirely on-device, without relying on central LLMs.
+2. **AI-Ready Typed Actions**: External agents or models can produce strict `ZENV` messages while ZAP stays deterministic, auditable, and independent from any model runtime.
 3. **Consensus-Gated Operations**: High-risk actions (e.g. hardware control or factory safety systems) can require multi-node Proof-of-Action consensus (ZPOA) before dispatch.
 4. **Sandboxed Edge Execution**: Execute untrusted custom device drivers inside a Wasmtime sandbox with strict instruction (fuel), memory, time, and permission boundaries.
 5. **Durable Auditable Ledgers**: Nodes maintain append-only, BLAKE3 hash-chained memory stores and signed receipt logs, providing verifiable, tamper-evident audit trails.
@@ -36,14 +36,16 @@ unified wire format.
 | **Universal Envelopes** | `ZENV` payload format with kind, subject, content type, metadata, and body |
 | **Ed25519 Signatures** | Every frame is cryptographically signed and verified end-to-end |
 | **Encrypted Transport** | ChaCha20-Poly1305 authenticated encryption over UDP with Noise helpers |
+| **Peer Trust Contracts** | Per-machine send, receive, forward, PoA, expiry, and key-rotation gates |
 | **Replay Protection** | Nonce tracking and frame-level replay checks enabled by default |
 | **WASM Sandboxing** | Wasmtime-based driver execution with fuel, memory, time, and output limits |
+| **Scoped Host ABI** | Deny-by-default `zap` WASM imports for auditable event, memory, and device requests |
 | **Signed Manifests** | Drivers are verified against SHA-256 hashes and Ed25519 author signatures |
 | **Capability System** | Explicit capability advertisements, queries, grants, and policy enforcement |
 | **Deterministic Routing** | Explainable route planning before local dispatch or peer forwarding |
 | **Auditable Memory** | Append-only JSONL memory with body hashes, hash chains, and tombstones |
 | **Proof-of-Action** | Multi-validator consensus for critical operations with configurable thresholds |
-| **Intent Compiler** | Deterministic local compilation of natural-language intents to typed actions |
+| **Message Policy** | Deterministic allow/deny/require-PoA rules for typed message subjects |
 | **Receipt Ledger** | Signed, verifiable, prunable receipt logs for full operational audit trails |
 | **Driver Registry** | Local ZapStore index with versioning, revocation, and operator signatures |
 
@@ -54,8 +56,8 @@ unified wire format.
 │                          ZAP Node                                   │
 │                                                                     │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────────────┐  │
-│  │  Intent   │  │ Capabil- │  │  Router   │  │     Memory        │  │
-│  │ Compiler  │  │   ity    │  │           │  │  (JSONL + Hash)   │  │
+│  │ Message   │  │ Capabil- │  │  Router   │  │     Memory        │  │
+│  │  Policy   │  │   ity    │  │           │  │  (JSONL + Hash)   │  │
 │  └─────┬─────┘  └────┬─────┘  └─────┬─────┘  └───────────────────┘  │
 │        │              │              │                                │
 │  ┌─────▼──────────────▼──────────────▼──────┐                        │
@@ -87,7 +89,7 @@ unified wire format.
 
 ## 📦 Workspace Crates
 
-ZAP is organized as a Rust workspace of 14 focused crates (~15,600 lines of Rust):
+ZAP is organized as a Rust workspace of focused crates:
 
 ### Core Protocol
 
@@ -105,14 +107,15 @@ ZAP is organized as a Rust workspace of 14 focused crates (~15,600 lines of Rust
 | `zap-node` | Daemon core: TOML config, peer verification, replay protection, receipts, capability-aware dispatch, routing |
 | `zap-runtime` | Wasmtime sandboxed execution: ABI verification, fuel metering, memory limits, time bounds, output caps |
 | `zap-driver-sdk` | Minimal ABI helpers for WASM driver authors |
-| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `compile-intent`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa` |
+| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `trust`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa` |
 
 ### Intelligence & Policy
 
 | Crate | Description |
 |---|---|
-| `zap-intent` | Deterministic local intent compiler — maps natural language to typed ZAP action steps with policy gates |
 | `zap-capability` | Capability identifiers, driver permission contracts, local advertisements, signed query/response |
+| `zap-schema` | Typed message contracts for agent gateways, machine commands, and payload validation |
+| `zap-policy` | Deterministic policy decisions for allow/deny/PoA/grant/human/simulation gates |
 | `zap-router` | Deterministic route tables, explainable route decisions, peer grant requirements |
 
 ### Audit & Storage
@@ -139,8 +142,8 @@ cargo test --workspace --all-targets
 # Generate a node identity key
 cargo run -p zap-cli -- keygen --out .zap/node.key
 
-# Compile a natural-language intent into typed actions
-cargo run -p zap-cli -- compile-intent "Ajuster la température à 20" --explain
+# Send a typed action envelope
+cargo run -p zap-cli -- send --config zap.toml --target <uuid> --action echo --payload hello
 
 # Run a quick parse benchmark (100k iterations)
 cargo run -p zap-cli -- bench parse --iterations 100000
@@ -191,9 +194,6 @@ cargo run -p zap-examples --bin frame_basics
 # Run ZENV Universal Payload Envelope construction and causal linking
 cargo run -p zap-examples --bin envelope_types
 
-# Run natural language intent parsing and rule-based safety policy checks
-cargo run -p zap-examples --bin intent_compiler
-
 # Run append-only JSONL memory store and BLAKE3 hash chain audits
 cargo run -p zap-examples --bin memory_store
 
@@ -233,6 +233,9 @@ See [Deployment](docs/deployment.md) for production hardening notes.
 zap doctor --config zap.toml                          # Readiness gate with scoring
 zap doctor --config zap.toml --json --strict          # Machine-readable strict mode
 zap check-config --strict --config zap.toml           # Validate config
+zap trust enroll --node-id <uuid> --addr <host:port> \
+  --public-key <base64> --transport-key <hex>          # Generate peer TOML
+zap trust inspect --config zap.toml --json             # Review peer trust posture
 ```
 
 ### Sending Messages
@@ -250,9 +253,11 @@ zap send --config zap.toml --target <uuid> --kind event \
   --subject sensor.temperature --payload '{"c":21.5}' \
   --content-type application/json --metadata '{"source":"sim"}'
 
-# Intent-based sending with policy
+# Consensus-protected typed action
 zap send --config zap.toml --target <uuid> \
-  --intent "Ajuster la température à 20" --policy policy.json
+  --kind action --subject safety.emergency_stop \
+  --payload '{"reason":"operator_request"}' --content-type application/json \
+  --requires-consensus --poa-network
 ```
 
 ### Driver Manifests & Registry
@@ -261,6 +266,9 @@ zap send --config zap.toml --target <uuid> \
 # Create and verify a signed manifest
 zap driver-manifest create --driver echo.wat --action echo \
   --author-key .zap/node.key --out echo.manifest.toml
+zap driver-manifest create --driver machine.wat --action machine.note \
+  --author-key .zap/node.key --out machine.manifest.toml \
+  --allow-emit-event --allow-memory-write --max-host-call-bytes 8192
 zap driver-manifest verify --driver echo.wat --manifest echo.manifest.toml
 
 # Manage a local registry
@@ -280,10 +288,16 @@ zap registry verify-signature --registry registry.index.toml
 zap capability list --config zap.toml --json
 zap capability query --config zap.toml --target <uuid> \
   --cache .zap/capabilities.jsonl --json
+zap capability cache refresh --config zap.toml --json --strict
 zap capability cache verify --path .zap/capabilities.jsonl
 
 # Route planning
 zap route explain --config zap.toml --kind action --subject echo --json
+
+# Typed message contracts and policy dry-runs
+zap schema validate --contract echo.contract.toml --envelope echo.zenv --json
+zap policy evaluate --policy policy.toml --kind action \
+  --subject safety.emergency_stop --requires-consensus --strict --json
 
 # Local memory store
 zap memory put --path .zap/memory.jsonl --subject note --payload hello
@@ -295,7 +309,9 @@ zap memory verify --path .zap/memory.jsonl
 ```bash
 # PoA workflow
 zap send --config zap.toml --target <uuid> \
-  --intent "déclencher arrêt urgence robot" --poa-network --poa-timeout-ms 5000
+  --kind action --subject safety.emergency_stop \
+  --payload '{"reason":"operator_request"}' --content-type application/json \
+  --requires-consensus --poa-network --poa-timeout-ms 5000
 zap poa request --frame critical-frame.bin \
   --requester-key .zap/node.key --threshold 1 > poa-request.json
 zap poa attest --request poa-request.json \
@@ -394,7 +410,7 @@ wire formats.
 | Phase | Status | Focus |
 |---|---|---|
 | **1 — Kernel Alpha** | ✅ Implemented | Wire protocol, crypto, transport, WASM, CLI |
-| **2 — Cognitive Interpreter** | ✅ Foundation | Intent compiler, policy gates, explain mode |
+| **2 — Typed Agent Gateway** | ✅ Foundation | Strict envelopes, message policy gates, external model boundary |
 | **3 — SDKs & Driver Registry** | ✅ Foundation | Signed manifests, ZapStore, revocation |
 | **4 — Proof-of-Action Network** | ✅ Foundation | Multi-validator PoA, receipts, audit |
 | **5 — Future Core Interfaces** | ✅ Foundation | Capabilities, routing, memory, doctor |
@@ -409,14 +425,14 @@ See the full [Roadmap](docs/roadmap.md) for detailed status and next steps.
 | [Security Model](docs/security.md) | Threat model, crypto choices, and defense-in-depth design |
 | [Use Cases](docs/use-cases.md) | Real-world application scenarios for the ZAP protocol |
 | [Getting Started](docs/getting-started.md) | Step-by-step developer onboarding and cluster setup |
-| [End-to-End Tutorial](docs/tutorial.md) | Full guide detailing WASM drivers, intents, policies, and Proof-of-Action |
+| [End-to-End Tutorial](docs/tutorial.md) | Full guide detailing WASM drivers, typed actions, policies, and Proof-of-Action |
 | [FAQ](docs/faq.md) | Frequently asked questions about design, security, and protocol comparisons |
 | [Deployment](docs/deployment.md) | Production configuration, Docker, and hardening guide |
 | [Operations](docs/operations.md) | Operator workflows: doctor, receipts, monitoring |
 | [Runtime](docs/runtime.md) | WASM sandboxing: fuel, memory, time, and output limits |
 | [ZapStore](docs/zapstore.md) | Signed manifests, registry, versioning, and revocation |
 | [Capability, Router & Memory](docs/capability-router-memory.md) | Discovery, routing, and auditable memory |
-| [Intent Compiler](docs/intent.md) | Natural-language intent to typed action compilation |
+| [Message Policy](docs/message-policy.md) | Deterministic allow/deny/require-PoA gates for typed messages |
 | [Signed Receipts](docs/receipts.md) | Receipt ledger, verification, pruning, and merging |
 | [Versioning](docs/versioning.md) | Semantic versioning and wire compatibility rules |
 | [Release Process](docs/release.md) | Release checklist and publishing workflow |

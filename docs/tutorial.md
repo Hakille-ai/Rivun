@@ -4,7 +4,7 @@ This tutorial guides you through a complete, production-style deployment of ZAP.
 
 We will build a smart factory telemetry system with two nodes:
 - **Node A** (Receiver / Gateway): Responsible for executing a sandboxed WASM driver to control a thermostat, logging signed execution receipts, and enforcing safety consensus.
-- **Node B** (Sender / Operator terminal): Responsible for compiling user intents and forwarding encrypted UDP frames to Node A.
+- **Node B** (Sender / Operator terminal): Responsible for emitting typed actions and forwarding encrypted UDP frames to Node A.
 
 ```
                   Encrypted UDP
@@ -228,27 +228,40 @@ Verification successful: verified 1 action receipt signatures.
 For critical factory operations, like emergency shutdowns, we do not want a compromised sender to trigger commands unilaterally. We enforce a Proof-of-Action (PoA) validation requiring validator attestations.
 
 ### Update Node A configuration
-Add validator settings to `examples/configs/node-a.toml` under the `[poa]` section to require 1 validator approval:
+Add validator settings and a message policy to `examples/configs/node-a.toml`
+to require 1 validator approval for safety actions:
 
 ```toml
 [poa]
-enforce_poa = true
-threshold = 1
-validators = [
-  { node_id = "<node-b-uuid>", public_key = "<node-b-public-key-base64>" }
-]
+required_threshold = 1
+
+[[poa.validators]]
+node_id = "<node-b-uuid>"
+public_key = "<node-b-public-key-base64>"
+
+[message_policy]
+
+[[message_policy.rules]]
+kind = "action"
+subject = "safety.*"
+decision = "require_poa"
+reason = "safety actions require validator quorum"
 ```
 
 Restart the Node A daemon.
 
-### Send a critical intent
-Try sending an emergency stop command from Node B:
+### Send a critical action
+Try sending an emergency stop action from Node B:
 
 ```bash
 cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> \
-  --intent "déclencher arrêt urgence robot" \
-  --poa-network
+  --kind action --subject safety.emergency_stop \
+  --payload '{"reason":"operator_request"}' --content-type application/json \
+  --requires-consensus --poa-network
 ```
 
-ZAP will compile the intent, recognize it requires consensus, broadcast a `poa.attestation_request` to validator Node B, assemble the response signatures into a `ZPOA` trailer, attach it to the `ZAP_` frame, and dispatch it to Node A. Node A verifies the threshold signatures and executes the safety procedure safely!
+ZAP will broadcast a `poa.attestation_request` to validator Node B, assemble the
+response signatures into a `ZPOA` trailer, attach it to the `ZAP_` frame, and
+dispatch it to Node A. Node A verifies the threshold signatures, enforces
+`message_policy`, and executes the safety procedure safely.
