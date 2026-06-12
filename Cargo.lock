@@ -2623,6 +2623,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-examples"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "zap-capability",
+ "zap-core",
+ "zap-crypto",
+ "zap-driver-sdk",
+ "zap-envelope",
+ "zap-intent",
+ "zap-memory",
+ "zap-net",
+ "zap-node",
+ "zap-runtime",
+ "zap-store",
+]
+
+[[package]]
 name = "zap-intent"
 version = "0.1.0"
 dependencies = [

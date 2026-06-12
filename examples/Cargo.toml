@@ -1,0 +1,25 @@
+[package]
+name = "zap-examples"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zap-core = { path = "../crates/zap-core" }
+zap-envelope = { path = "../crates/zap-envelope" }
+zap-crypto = { path = "../crates/zap-crypto" }
+zap-net = { path = "../crates/zap-net" }
+zap-node = { path = "../crates/zap-node" }
+zap-intent = { path = "../crates/zap-intent" }
+zap-memory = { path = "../crates/zap-memory" }
+zap-store = { path = "../crates/zap-store" }
+zap-runtime = { path = "../crates/zap-runtime" }
+zap-driver-sdk = { path = "../crates/zap-driver-sdk" }
+zap-capability = { path = "../crates/zap-capability" }
+tokio = { workspace = true }
+bytes = { workspace = true }
+uuid = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tempfile = { workspace = true }

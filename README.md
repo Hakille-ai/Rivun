@@ -23,6 +23,14 @@ ZAP is **protocol infrastructure**. It is independent of AI models, LLM
 providers, and application runtimes. Receipts and Proof-of-Action support
 auditability; they are not billing, settlement, rewards, or financial rails.
 
+## ❓ Why ZAP?
+
+1. **End-to-End Cryptographic Provenance**: Every message frame is signed by the sender node's identity and verified by the receiver, establishing full custody and identity tracking for distributed processes.
+2. **Deterministic & Local Action Planning**: Natural language intents are parsed, checked against safety rules, and compiled into concrete actions entirely on-device, without relying on central LLMs.
+3. **Consensus-Gated Operations**: High-risk actions (e.g. hardware control or factory safety systems) can require multi-node Proof-of-Action consensus (ZPOA) before dispatch.
+4. **Sandboxed Edge Execution**: Execute untrusted custom device drivers inside a Wasmtime sandbox with strict instruction (fuel), memory, time, and permission boundaries.
+5. **Durable Auditable Ledgers**: Nodes maintain append-only, BLAKE3 hash-chained memory stores and signed receipt logs, providing verifiable, tamper-evident audit trails.
+
 ## ✨ Key Features
 
 | Feature | Description |
@@ -174,6 +182,29 @@ cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
 > `zap send` binds to the `bind` address in its config so the receiver can
 > enforce static peer addresses. Do not run `zap run` and `zap send` from the
 > same config simultaneously.
+
+## 💡 Programmatic Examples
+
+ZAP provides compile-ready Rust code examples under the `examples/` directory. You can build and run them via cargo:
+
+```bash
+# Run ZAP binary frame creation, signing, and verification example
+cargo run -p zap-examples --bin frame_basics
+
+# Run ZENV Universal Payload Envelope construction and causal linking
+cargo run -p zap-examples --bin envelope_types
+
+# Run natural language intent parsing and rule-based safety policy checks
+cargo run -p zap-examples --bin intent_compiler
+
+# Run append-only JSONL memory store and BLAKE3 hash chain audits
+cargo run -p zap-examples --bin memory_store
+
+# Run driver manifest creation, signing, and local registry revocation
+cargo run -p zap-examples --bin driver_manifest
+```
+
+Refer to the source files in `examples/src/bin/` to see how to import and use the APIs in your own projects.
 
 ## 🐳 Docker Deployment
 
@@ -379,6 +410,10 @@ See the full [Roadmap](docs/roadmap.md) for detailed status and next steps.
 |---|---|
 | [Protocol](docs/protocol.md) | ZAP-Wire v1 frame format and ZENV envelope specification |
 | [Security Model](docs/security.md) | Threat model, crypto choices, and defense-in-depth design |
+| [Use Cases](docs/use-cases.md) | Real-world application scenarios for the ZAP protocol |
+| [Getting Started](docs/getting-started.md) | Step-by-step developer onboarding and cluster setup |
+| [End-to-End Tutorial](docs/tutorial.md) | Full guide detailing WASM drivers, intents, policies, and Proof-of-Action |
+| [FAQ](docs/faq.md) | Frequently asked questions about design, security, and protocol comparisons |
 | [Deployment](docs/deployment.md) | Production configuration, Docker, and hardening guide |
 | [Operations](docs/operations.md) | Operator workflows: doctor, receipts, monitoring |
 | [Runtime](docs/runtime.md) | WASM sandboxing: fuel, memory, time, and output limits |
