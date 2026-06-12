@@ -20,13 +20,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // allowed permissions, ABI version, name, and version.
     let permissions = DriverPermissions::none(); // Sandbox mode: no filesystem, no network, etc.
     let manifest = DriverManifest::new(
-        "thermostat-driver",             // Driver Name
-        "0.1.0",                         // Version
-        "thermostat.setpoint",           // Target ZAP action to handle
-        wasm_bytes,                      // WASM binary data
-        permissions,                     // Sandboxed permissions requested
+        "thermostat-driver",                                    // Driver Name
+        "0.1.0",                                                // Version
+        "thermostat.setpoint",                                  // Target ZAP action to handle
+        wasm_bytes,                                             // WASM binary data
+        permissions,                                            // Sandboxed permissions requested
         Some("Controls room temperature via GPIO".to_string()), // Description
-        &author_keys,                    // Author keypair for signing
+        &author_keys,                                           // Author keypair for signing
     )?;
 
     println!("\n1. Driver Manifest Created and Signed:");
@@ -52,16 +52,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The registry lists all permitted drivers and is signed by the network/system operator.
     println!("\n3. Managing the Driver Registry:");
     let mut registry = DriverRegistry::empty(Some("zap-store-cli-v1".to_string()));
-    
+
     // Add our manifest to the registry index
-    registry.add_manifest(&manifest, Some("drivers/thermostat.manifest.toml".to_string()))?;
-    println!("  Manifest added to registry. Entries count: {}", registry.entries.len());
+    registry.add_manifest(
+        &manifest,
+        Some("drivers/thermostat.manifest.toml".to_string()),
+    )?;
+    println!(
+        "  Manifest added to registry. Entries count: {}",
+        registry.entries.len()
+    );
 
     // Sign the registry index using the operator keys
     registry.sign(&operator_keys)?;
     println!("  Registry index signed by Operator.");
-    println!("  Registry Operator Key ID: {:?}", registry.operator_node_id);
-    println!("  Registry Signature: {:?}", registry.signature.as_ref().map(|s| &s[..30]));
+    println!(
+        "  Registry Operator Key ID: {:?}",
+        registry.operator_node_id
+    );
+    println!(
+        "  Registry Signature: {:?}",
+        registry.signature.as_ref().map(|s| &s[..30])
+    );
 
     // Verify registry signature
     match registry.verify_signature() {
@@ -72,14 +84,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 6. Demonstrate Driver Revocation
     // If a driver is found to be buggy or vulnerable, the operator can revoke it in the index.
     println!("\n4. Revoking a Driver Version:");
-    registry.revoke("thermostat.setpoint", "0.1.0", "CVE-2026-XXXX: buffer overflow in driver parsing")?;
-    println!("  Status of 'thermostat.setpoint' v0.1.0 in registry: {:?}", registry.entries[0].status);
-    println!("  Reason for revocation: {:?}", registry.entries[0].revoked_reason);
+    registry.revoke(
+        "thermostat.setpoint",
+        "0.1.0",
+        "CVE-2026-XXXX: buffer overflow in driver parsing",
+    )?;
+    println!(
+        "  Status of 'thermostat.setpoint' v0.1.0 in registry: {:?}",
+        registry.entries[0].status
+    );
+    println!(
+        "  Reason for revocation: {:?}",
+        registry.entries[0].revoked_reason
+    );
 
     // Verify manifest against the updated registry (should fail now since it's revoked)
     match registry.verify_manifest(&manifest) {
         Ok(()) => println!("  CRITICAL: Manifest still considered active!"),
-        Err(e) => println!("  Security check working: Manifest verification failed as expected: {}", e),
+        Err(e) => println!(
+            "  Security check working: Manifest verification failed as expected: {}",
+            e
+        ),
     }
 
     Ok(())

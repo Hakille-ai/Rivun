@@ -1,5 +1,7 @@
 use serde_json::json;
-use zap_intent::{compile_intent, explain_intent, IntentPolicy, IntentPolicyDecision, IntentPolicyRule};
+use zap_intent::{
+    IntentPolicy, IntentPolicyDecision, IntentPolicyRule, compile_intent, explain_intent,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== ZAP Deterministic Intent Compiler & Policy Engine ===");
@@ -12,7 +14,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Steps Generated: {}", plan_a.steps.len());
     println!("  Step 1 Action: {}", plan_a.steps[0].action);
     println!("  Step 1 Payload: '{}'", plan_a.steps[0].payload);
-    println!("  Requires Consensus (PoA)? {}", plan_a.steps[0].requires_consensus);
+    println!(
+        "  Requires Consensus (PoA)? {}",
+        plan_a.steps[0].requires_consensus
+    );
 
     // 2. Compile an intent that resolves to multiple actions (multi-step planning)
     // ZAP can extract multiple actions from a single compound sentence.
@@ -50,7 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 subject: Some("thermostat.setpoint".to_string()),
                 action: None,
                 decision: IntentPolicyDecision::RequirePoa,
-                reason: Some("temperature modifications must be verified by validators".to_string()),
+                reason: Some(
+                    "temperature modifications must be verified by validators".to_string(),
+                ),
             },
             // Rule 2: Deny any 'echo' actions in production environment
             IntentPolicyRule {
@@ -67,10 +74,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test Case A: Thermostat Setpoint (Should be upgraded to require PoA)
     let mut plan_thermostat = compile_intent("Ajuster la temperature a 20")?;
-    println!("  Thermostat Plan before policy: requires_consensus = {}", plan_thermostat.steps[0].requires_consensus);
+    println!(
+        "  Thermostat Plan before policy: requires_consensus = {}",
+        plan_thermostat.steps[0].requires_consensus
+    );
     let report_thermostat = plan_thermostat.apply_policy(&policy)?;
-    println!("  Thermostat Plan after policy:  requires_consensus = {}", plan_thermostat.steps[0].requires_consensus);
-    println!("  Policy Report Decision: {:?}", report_thermostat.decisions[0].decision);
+    println!(
+        "  Thermostat Plan after policy:  requires_consensus = {}",
+        plan_thermostat.steps[0].requires_consensus
+    );
+    println!(
+        "  Policy Report Decision: {:?}",
+        report_thermostat.decisions[0].decision
+    );
     println!("  Reason: {}", report_thermostat.decisions[0].reason);
 
     // Test Case B: Echo (Should be rejected/denied)

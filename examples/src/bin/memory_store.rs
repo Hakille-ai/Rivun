@@ -23,7 +23,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         body: serde_json::to_vec(&json!({ "temperature_c": 21.5 }))?,
         metadata: json!({ "sensor_id": "sensor-west-1", "accuracy": "high" }),
         source_node: Some(Uuid::new_v4()),
-        frame_hash: Some("blake3:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20".to_string()),
+        frame_hash: Some(
+            "blake3:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20".to_string(),
+        ),
     })?;
 
     println!("\n1. First Record Saved:");
