@@ -7,6 +7,7 @@ WORKDIR /workspace
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY examples ./examples
+COPY tools ./tools
 
 RUN cargo build --locked --release -p zap-cli
 
