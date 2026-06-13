@@ -78,6 +78,15 @@ keys when peer membership changes.
   and key-rotation policy are explicit for each machine.
 - Set `[security]` replay and clock-skew limits intentionally.
 - Use signed driver manifests for all production WASM drivers.
+- Use `zap registry pull --operator-public-key <key>` when mirroring registry
+  indexes from peers, and keep `[registry] require_signature = true` for
+  deployment configs.
+- Use `zap registry mirror --operator-public-key <key>` to consolidate multiple
+  peer indexes, then review and re-sign the merged registry before deployment.
+- Create and archive `zap registry publication create` output for every
+  approved registry rollout so audits can verify the exact deployed index hash.
+- Use `zap registry bundle verify --require-drivers` before importing offline
+  ZapStore bundles into production or factory images.
 - Enable `[receipts].path` when audit trails are required.
 - Run `zap capability cache refresh --config <path> --strict` before strict
   validation when routes require peer grants.

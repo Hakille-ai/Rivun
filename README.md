@@ -287,6 +287,20 @@ zap registry revoke --registry registry.index.toml \
   --action echo --version 0.1.0 --reason "bad release"
 zap registry sign --registry registry.index.toml --operator-key .zap/node.key
 zap registry verify-signature --registry registry.index.toml
+zap registry pull --config zap.toml --target <uuid> \
+  --out registry.index.toml --operator-public-key <base64-public-key> --json
+zap registry mirror --config zap.toml --out mirrored-registry.index.toml \
+  --operator-public-key <base64-public-key> --json
+zap registry sign --registry mirrored-registry.index.toml --operator-key .zap/node.key
+zap registry publication create --registry mirrored-registry.index.toml \
+  --publisher-key .zap/node.key --out registry.publication.json --channel stable
+zap registry publication verify --registry mirrored-registry.index.toml \
+  --publication registry.publication.json
+zap registry bundle export --registry mirrored-registry.index.toml \
+  --publication registry.publication.json --out zapstore-bundle \
+  --driver echo@0.1.0=echo.wat --json
+zap registry bundle verify --bundle zapstore-bundle --require-drivers
+zap registry bundle import --bundle zapstore-bundle --out .zap/imported-zapstore
 ```
 
 ### Capabilities, Routing & Memory

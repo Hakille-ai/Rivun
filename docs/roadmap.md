@@ -45,10 +45,19 @@ Foundation implemented:
 - local `registry.index.toml` files track active or revoked manifest versions;
 - `zap registry revoke` marks unsafe manifest versions as revoked;
 - optional operator signatures can approve registry indexes for deployment gates;
+- `zap registry pull` fetches a peer registry index over signed control messages
+  and can require an expected operator public key;
+- `zap registry mirror` merges compatible signed peer indexes and preserves
+  revocation priority for unsafe driver versions;
+- `zap registry publication create/verify` records a signed publication
+  statement over the canonical registry hash for release audit trails;
+- `zap registry bundle export/verify/import` packages signed registries,
+  publication metadata, manifests, and optional drivers for offline deployment;
 - `zap-node` verifies configured manifests and registry entries before daemon startup;
 - `zap-driver-sdk` provides minimal ABI helpers for driver authors.
 
-Next: package distribution, registry compatibility policy, and remote index publishing.
+Next: registry compatibility policy, semantic package version ranges, and
+remote bundle distribution services.
 
 ## Phase 4: Proof-of-Action Network
 

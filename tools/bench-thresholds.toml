@@ -50,3 +50,69 @@ pattern = "node_dispatch"
 relative_regression = 0.15
 min_absolute_ns = 5000.0
 blocking = true
+
+[[benchmark]]
+pattern = "capability_cache"
+relative_regression = 0.20
+min_absolute_ns = 5000.0
+blocking = true
+
+[[benchmark]]
+pattern = "capability_"
+relative_regression = 0.10
+min_absolute_ns = 50.0
+blocking = true
+
+[[benchmark]]
+pattern = "driver_sdk_pack"
+relative_regression = 0.07
+min_absolute_ns = 1.0
+blocking = true
+
+[[benchmark]]
+pattern = "driver_sdk_packed"
+relative_regression = 0.07
+min_absolute_ns = 1.0
+blocking = true
+
+[[benchmark]]
+pattern = "driver_sdk_execute"
+relative_regression = 0.10
+min_absolute_ns = 10.0
+blocking = true
+
+[[benchmark]]
+pattern = "ledger_"
+relative_regression = 0.10
+min_absolute_ns = 100.0
+blocking = true
+
+[[benchmark]]
+pattern = "memory_"
+relative_regression = 0.20
+min_absolute_ns = 5000.0
+blocking = true
+
+[[benchmark]]
+pattern = "policy_"
+relative_regression = 0.10
+min_absolute_ns = 50.0
+blocking = true
+
+[[benchmark]]
+pattern = "router_"
+relative_regression = 0.10
+min_absolute_ns = 50.0
+blocking = true
+
+[[benchmark]]
+pattern = "schema_"
+relative_regression = 0.10
+min_absolute_ns = 50.0
+blocking = true
+
+[[benchmark]]
+pattern = "store_"
+relative_regression = 0.10
+min_absolute_ns = 100.0
+blocking = true

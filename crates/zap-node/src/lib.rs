@@ -48,7 +48,10 @@ use zap_policy::{PolicyInput, PolicyRule, PolicySet};
 use zap_router::{RouteDecision, RouteMessage, RouteRule, RouteTable};
 use zap_runtime::{ExecutionLimits, HostCallKind, HostCallRecord, WasmDriver, WasmExecutor};
 use zap_schema::{MessageContract, MessageContractSet, MessageParts};
-use zap_store::{DriverManifest, DriverRegistry};
+use zap_store::{
+    DriverManifest, DriverRegistry, REGISTRY_INDEX_CONTENT_TYPE, REGISTRY_INDEX_REQUEST_SUBJECT,
+    REGISTRY_INDEX_RESPONSE_SUBJECT, RegistryIndexRequest, RegistryIndexResponse,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ZapNodeConfig {
@@ -640,6 +643,8 @@ pub struct ZapNode {
     poa_validator_set_path: Option<PathBuf>,
     poa_validator_set_authority: Option<PublicKey>,
     receipt_log_path: Option<PathBuf>,
+    registry_path: Option<PathBuf>,
+    registry_require_signature: bool,
     memory: MemoryConfig,
     route_table: RouteTable,
     message_policy: MessagePolicyConfig,
@@ -700,6 +705,8 @@ impl ZapNode {
             .context("invalid poa.validator_set_authority")?;
 
         let runtime = WasmExecutor::new()?;
+        let registry_path = config.registry.path.clone();
+        let registry_require_signature = config.registry.require_signature;
         let registry = load_driver_registry_optional(&config.registry)?;
         let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
         let route_table = RouteTable::new(config.routes.clone())?;
@@ -723,6 +730,8 @@ impl ZapNode {
             poa_validator_set_path,
             poa_validator_set_authority,
             receipt_log_path: config.receipts.path,
+            registry_path,
+            registry_require_signature,
             memory: config.memory,
             route_table,
             message_policy: config.message_policy,
@@ -801,6 +810,12 @@ impl ZapNode {
             && message.subject == POA_VALIDATOR_SET_REQUEST_SUBJECT
         {
             self.respond_to_poa_validator_set_request(inbound.peer.node_id, &message.body)
+                .await?;
+            None
+        } else if message.kind == ZapMessageKind::Control
+            && message.subject == REGISTRY_INDEX_REQUEST_SUBJECT
+        {
+            self.respond_to_registry_index_request(inbound.peer.node_id, &message.body)
                 .await?;
             None
         } else {
@@ -957,6 +972,60 @@ impl ZapNode {
             ZapMessageKind::Control,
             POA_VALIDATOR_SET_RESPONSE_SUBJECT,
             POA_VALIDATOR_SET_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&response)?),
+        )?;
+        let frame = ZapFrame::new(
+            self.keypair.node_id(),
+            requester_node,
+            ZapFlags::ENCRYPTED,
+            envelope.encode(),
+        )?;
+        let frame = sign_frame(&self.keypair, &frame)?;
+        self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    async fn respond_to_registry_index_request(
+        &self,
+        requester_node: Uuid,
+        body: &[u8],
+    ) -> Result<()> {
+        self.ensure_peer_can_send(requester_node)?;
+        let request = if body.is_empty() {
+            RegistryIndexRequest::default()
+        } else {
+            serde_json::from_slice::<RegistryIndexRequest>(body)
+                .context("invalid registry index request")?
+        };
+        request.validate()?;
+        let (registry, unavailable_reason) = match &self.registry_path {
+            Some(path) => {
+                let require_signature =
+                    self.registry_require_signature || request.require_signature;
+                let registry_config = RegistryConfig {
+                    path: Some(path.clone()),
+                    require_signature,
+                };
+                match load_driver_registry_optional(&registry_config) {
+                    Ok(Some(registry)) => (Some(registry), None),
+                    Ok(None) => (
+                        None,
+                        Some("node has no configured registry.path".to_string()),
+                    ),
+                    Err(error) => (None, Some(format!("{error:#}"))),
+                }
+            }
+            None => (
+                None,
+                Some("node has no configured registry.path".to_string()),
+            ),
+        };
+        let response =
+            RegistryIndexResponse::new(self.keypair.node_id(), registry, unavailable_reason);
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            REGISTRY_INDEX_RESPONSE_SUBJECT,
+            REGISTRY_INDEX_CONTENT_TYPE,
             Bytes::from(serde_json::to_vec(&response)?),
         )?;
         let frame = ZapFrame::new(

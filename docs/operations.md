@@ -218,6 +218,14 @@ cargo run -p zap-cli -- registry add --registry registry.index.toml --manifest e
 cargo run -p zap-cli -- registry revoke --registry registry.index.toml --action echo --version 0.1.0 --reason "bad release"
 cargo run -p zap-cli -- registry sign --registry registry.index.toml --operator-key .zap/node.key
 cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
+cargo run -p zap-cli -- registry pull --config zap.toml --target <uuid> --out registry.index.toml --operator-public-key <base64-public-key> --json
+cargo run -p zap-cli -- registry mirror --config zap.toml --out mirrored-registry.index.toml --operator-public-key <base64-public-key> --json
+cargo run -p zap-cli -- registry sign --registry mirrored-registry.index.toml --operator-key .zap/node.key
+cargo run -p zap-cli -- registry publication create --registry mirrored-registry.index.toml --publisher-key .zap/node.key --out registry.publication.json --channel stable --json
+cargo run -p zap-cli -- registry publication verify --registry mirrored-registry.index.toml --publication registry.publication.json --json
+cargo run -p zap-cli -- registry bundle export --registry mirrored-registry.index.toml --publication registry.publication.json --out zapstore-bundle --driver echo@0.1.0=examples/wasm-drivers/echo/echo.wat --json
+cargo run -p zap-cli -- registry bundle verify --bundle zapstore-bundle --require-drivers --json
+cargo run -p zap-cli -- registry bundle import --bundle zapstore-bundle --out .zap/imported-zapstore --require-drivers --json
 ```
 
 Configure a node to enforce that index:
@@ -231,6 +239,20 @@ require_signature = true
 Set `require_signature = true` for production gates that should fail when the
 local registry was not approved by an operator key. Registry mutations clear the
 operator signature, so review and re-sign after every `add` or `revoke`.
+Remote registry pulls use signed control frames plus the nested registry
+operator signature. Treat pulled indexes as deployment input: verify the
+operator key, then run `check-config --strict` before starting a daemon.
+Remote registry mirrors fetch multiple peers and merge compatible entries.
+Revoked entries win over active entries for the same driver version; conflicting
+hashes, authors, names, or ABI versions fail the merge. Mirrored indexes are
+unsigned until reviewed and re-signed.
+Registry publication metadata signs the canonical hash of the approved registry
+index. Archive `registry.publication.json` with the deployed index so later
+audits can prove the exact registry bytes used by a rollout.
+Registry bundles package the signed registry, publication metadata, copied
+manifests, and optional driver artifacts into a safe directory layout.
+Verification recomputes every listed hash before import; use `--require-drivers`
+for air-gapped or factory deployments that must carry executable artifacts.
 
 Capability discovery is explicit and signed:
 

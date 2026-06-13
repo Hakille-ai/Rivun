@@ -13,6 +13,11 @@ const DEFAULT_CRITERION_DIR: &str = "target/criterion";
 const NEW_BASELINE_DIR: &str = "new";
 const BENCH_TARGETS: &[BenchTarget] = &[
     BenchTarget {
+        package: "zap-capability",
+        bench: "capability",
+        path: "crates/zap-capability/benches/capability.rs",
+    },
+    BenchTarget {
         package: "zap-core",
         bench: "protocol",
         path: "crates/zap-core/benches/protocol.rs",
@@ -23,9 +28,24 @@ const BENCH_TARGETS: &[BenchTarget] = &[
         path: "crates/zap-crypto/benches/signature.rs",
     },
     BenchTarget {
+        package: "zap-driver-sdk",
+        bench: "sdk",
+        path: "crates/zap-driver-sdk/benches/sdk.rs",
+    },
+    BenchTarget {
         package: "zap-envelope",
         bench: "envelope",
         path: "crates/zap-envelope/benches/envelope.rs",
+    },
+    BenchTarget {
+        package: "zap-ledger",
+        bench: "receipt",
+        path: "crates/zap-ledger/benches/receipt.rs",
+    },
+    BenchTarget {
+        package: "zap-memory",
+        bench: "memory",
+        path: "crates/zap-memory/benches/memory.rs",
     },
     BenchTarget {
         package: "zap-net",
@@ -38,9 +58,29 @@ const BENCH_TARGETS: &[BenchTarget] = &[
         path: "crates/zap-node/benches/dispatch.rs",
     },
     BenchTarget {
+        package: "zap-policy",
+        bench: "policy",
+        path: "crates/zap-policy/benches/policy.rs",
+    },
+    BenchTarget {
+        package: "zap-router",
+        bench: "router",
+        path: "crates/zap-router/benches/router.rs",
+    },
+    BenchTarget {
         package: "zap-runtime",
         bench: "runtime",
         path: "crates/zap-runtime/benches/runtime.rs",
+    },
+    BenchTarget {
+        package: "zap-schema",
+        bench: "schema",
+        path: "crates/zap-schema/benches/schema.rs",
+    },
+    BenchTarget {
+        package: "zap-store",
+        bench: "store",
+        path: "crates/zap-store/benches/store.rs",
     },
 ];
 

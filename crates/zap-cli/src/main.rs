@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
     net::SocketAddr,
@@ -47,7 +47,12 @@ use zap_node::{
 use zap_policy::{PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
 use zap_schema::{MessageContract, MessageParts};
-use zap_store::{DriverManifest, DriverRegistry};
+use zap_store::{
+    DriverManifest, DriverRegistry, DriverRegistryMergeReport, REGISTRY_INDEX_CONTENT_TYPE,
+    REGISTRY_INDEX_REQUEST_SUBJECT, REGISTRY_INDEX_RESPONSE_SUBJECT, RegistryBundleEntry,
+    RegistryBundleManifest, RegistryIndexRequest, RegistryIndexResponse, RegistryPublication,
+    artifact_hash,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -655,6 +660,62 @@ enum RegistryCommand {
         #[arg(long, default_value = "registry.index.toml")]
         registry: PathBuf,
     },
+    /// Pull a remote peer's ZapStore registry index over ZAP control messages.
+    Pull {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        #[arg(long)]
+        out: PathBuf,
+        /// Require the remote registry index to carry a valid operator signature.
+        #[arg(long)]
+        require_signature: bool,
+        /// Require the remote registry index to be signed by this operator public key.
+        #[arg(long)]
+        operator_public_key: Option<String>,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Mirror registry indexes from multiple configured peers into one local index.
+    Mirror {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        /// Peer to mirror. Repeat to select specific peers; omit to use all send-allowed peers.
+        #[arg(long = "peer")]
+        peers: Vec<Uuid>,
+        #[arg(long)]
+        out: PathBuf,
+        /// Require every remote registry index to carry a valid operator signature.
+        #[arg(long)]
+        require_signature: bool,
+        /// Require every remote registry index to be signed by this operator public key.
+        #[arg(long)]
+        operator_public_key: Option<String>,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
+        /// Write a merged index from successful peers even if some peers fail.
+        #[arg(long)]
+        allow_partial: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create or verify signed registry publication metadata.
+    Publication {
+        #[command(subcommand)]
+        command: RegistryPublicationCommand,
+    },
+    /// Export, verify, or import filesystem ZapStore bundles.
+    Bundle {
+        #[command(subcommand)]
+        command: RegistryBundleCommand,
+    },
     /// Revoke one manifest version in a registry index.
     Revoke {
         #[arg(long, default_value = "registry.index.toml")]
@@ -673,6 +734,89 @@ enum RegistryCommand {
     List {
         #[arg(long, default_value = "registry.index.toml")]
         registry: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryBundleCommand {
+    /// Export a signed registry, publication metadata, manifests, and optional drivers.
+    Export {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        publication: Option<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+        /// Base directory for resolving registry manifest_path values.
+        #[arg(long)]
+        base_dir: Option<PathBuf>,
+        /// Include a driver artifact as action@version=path. Repeat for multiple entries.
+        #[arg(long = "driver")]
+        drivers: Vec<String>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a ZapStore bundle directory.
+    Verify {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        publisher_public_key: Option<String>,
+        #[arg(long)]
+        require_drivers: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Import a verified ZapStore bundle into a local directory.
+    Import {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        publisher_public_key: Option<String>,
+        #[arg(long)]
+        require_drivers: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryPublicationCommand {
+    /// Create signed publication metadata for an approved registry index.
+    Create {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        publisher_key: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        published_at_micros: Option<u64>,
+        #[arg(long)]
+        channel: Option<String>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify signed publication metadata against a registry index.
+    Verify {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        publication: PathBuf,
+        #[arg(long)]
+        publisher_public_key: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -926,7 +1070,7 @@ async fn main() -> Result<()> {
         Commands::Schema { command } => schema(command),
         Commands::Policy { command } => policy(command),
         Commands::DriverManifest { command } => driver_manifest(command),
-        Commands::Registry { command } => registry(command),
+        Commands::Registry { command } => registry(command).await,
         Commands::Receipts { command } => receipts(command).await,
         Commands::Poa { command } => poa(command).await,
         Commands::Bench { command } => bench(command),
@@ -4453,7 +4597,7 @@ fn verify_driver_manifest(
     Ok(())
 }
 
-fn registry(command: RegistryCommand) -> Result<()> {
+async fn registry(command: RegistryCommand) -> Result<()> {
     match command {
         RegistryCommand::Init { out, force } => create_registry(&out, force),
         RegistryCommand::Add {
@@ -4471,6 +4615,54 @@ fn registry(command: RegistryCommand) -> Result<()> {
             out,
         } => sign_registry(&registry, &operator_key, out.as_deref()),
         RegistryCommand::VerifySignature { registry } => verify_registry_signature(&registry),
+        RegistryCommand::Pull {
+            config,
+            target,
+            out,
+            require_signature,
+            operator_public_key,
+            timeout_ms,
+            force,
+            json,
+        } => {
+            pull_registry(RegistryPullOptions {
+                config_path: &config,
+                target,
+                out: &out,
+                require_signature,
+                operator_public_key,
+                timeout_ms,
+                force,
+                json,
+            })
+            .await
+        }
+        RegistryCommand::Mirror {
+            config,
+            peers,
+            out,
+            require_signature,
+            operator_public_key,
+            timeout_ms,
+            allow_partial,
+            force,
+            json,
+        } => {
+            mirror_registry(RegistryMirrorOptions {
+                config_path: &config,
+                peers,
+                out: &out,
+                require_signature,
+                operator_public_key,
+                timeout_ms,
+                allow_partial,
+                force,
+                json,
+            })
+            .await
+        }
+        RegistryCommand::Publication { command } => registry_publication(command),
+        RegistryCommand::Bundle { command } => registry_bundle(command),
         RegistryCommand::Revoke {
             registry,
             action,
@@ -4480,6 +4672,952 @@ fn registry(command: RegistryCommand) -> Result<()> {
         } => revoke_registry_entry(&registry, &action, &version, reason, out.as_deref()),
         RegistryCommand::List { registry, json } => list_registry(&registry, json),
     }
+}
+
+struct RegistryPullOptions<'a> {
+    config_path: &'a Path,
+    target: Uuid,
+    out: &'a Path,
+    require_signature: bool,
+    operator_public_key: Option<String>,
+    timeout_ms: u64,
+    force: bool,
+    json: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryPullReport {
+    peer: Uuid,
+    out: String,
+    entries: usize,
+    signed: bool,
+    operator_node_id: Option<Uuid>,
+}
+
+struct RegistryMirrorOptions<'a> {
+    config_path: &'a Path,
+    peers: Vec<Uuid>,
+    out: &'a Path,
+    require_signature: bool,
+    operator_public_key: Option<String>,
+    timeout_ms: u64,
+    allow_partial: bool,
+    force: bool,
+    json: bool,
+}
+
+struct RegistryFetchOptions<'a> {
+    target: Uuid,
+    require_signature: bool,
+    operator_public_key: Option<&'a str>,
+    timeout_ms: u64,
+    operation: &'a str,
+}
+
+struct RegistryPublicationCreateOptions<'a> {
+    registry_path: &'a Path,
+    publisher_key_path: &'a Path,
+    out: &'a Path,
+    published_at_micros: Option<u64>,
+    channel: Option<String>,
+    labels: Vec<String>,
+    force: bool,
+    json: bool,
+}
+
+struct RegistryBundleExportOptions<'a> {
+    registry_path: &'a Path,
+    publication_path: Option<&'a Path>,
+    out: &'a Path,
+    base_dir: Option<&'a Path>,
+    drivers: Vec<String>,
+    force: bool,
+    json: bool,
+}
+
+struct RegistryBundleVerifyOptions<'a> {
+    bundle: &'a Path,
+    publisher_public_key: Option<&'a str>,
+    require_drivers: bool,
+}
+
+struct RegistryBundleImportOptions<'a> {
+    bundle: &'a Path,
+    out: &'a Path,
+    publisher_public_key: Option<&'a str>,
+    require_drivers: bool,
+    force: bool,
+    json: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryMirrorReport {
+    out: String,
+    requested_peers: usize,
+    mirrored_peers: usize,
+    failed_peers: usize,
+    entries: usize,
+    added: usize,
+    unchanged: usize,
+    revoked_overrides: usize,
+    requires_resign: bool,
+    results: Vec<RegistryMirrorPeerReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryMirrorPeerReport {
+    peer: Uuid,
+    status: String,
+    entries: Option<usize>,
+    added: Option<usize>,
+    unchanged: Option<usize>,
+    revoked_overrides: Option<usize>,
+    signed: Option<bool>,
+    operator_node_id: Option<Uuid>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryPublicationReport {
+    registry: String,
+    publication: String,
+    verified: bool,
+    registry_hash: String,
+    registry_entries: usize,
+    registry_operator_node_id: Option<Uuid>,
+    publisher_node_id: Uuid,
+    published_at_micros: u64,
+    channel: Option<String>,
+    labels: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryBundleReport {
+    bundle: String,
+    verified: bool,
+    registry_hash: String,
+    publication_hash: Option<String>,
+    entries: usize,
+    manifests: usize,
+    drivers: usize,
+    imported_to: Option<String>,
+}
+
+async fn pull_registry(options: RegistryPullOptions<'_>) -> Result<()> {
+    let RegistryPullOptions {
+        config_path,
+        target,
+        out,
+        require_signature,
+        operator_public_key,
+        timeout_ms,
+        force,
+        json,
+    } = options;
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let registry = fetch_registry_index_from_peer(
+        &config,
+        &endpoint,
+        &keypair,
+        RegistryFetchOptions {
+            target,
+            require_signature,
+            operator_public_key: operator_public_key.as_deref(),
+            timeout_ms,
+            operation: "registry pull",
+        },
+    )
+    .await?;
+    let output = registry.to_toml_string()?;
+    write_text_file(out, &output, force)?;
+    let report = RegistryPullReport {
+        peer: target,
+        out: out.display().to_string(),
+        entries: registry.entries.len(),
+        signed: registry.signature.is_some(),
+        operator_node_id: registry.operator_node_id,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("peer={}", report.peer);
+        println!("out={}", report.out);
+        println!("entries={}", report.entries);
+        println!("signed={}", report.signed);
+        println!(
+            "operator_node_id={}",
+            report
+                .operator_node_id
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+    }
+    Ok(())
+}
+
+async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
+    let RegistryMirrorOptions {
+        config_path,
+        peers,
+        out,
+        require_signature,
+        operator_public_key,
+        timeout_ms,
+        allow_partial,
+        force,
+        json,
+    } = options;
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let targets = registry_mirror_targets(&config, &peers)?;
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let mut merged = DriverRegistry::empty(Some(format!(
+        "zap-cli {} registry mirror",
+        env!("CARGO_PKG_VERSION")
+    )));
+    let mut total = DriverRegistryMergeReport::default();
+    let mut results = Vec::with_capacity(targets.len());
+    for target in &targets {
+        let fetch_result = fetch_registry_index_from_peer(
+            &config,
+            &endpoint,
+            &keypair,
+            RegistryFetchOptions {
+                target: *target,
+                require_signature,
+                operator_public_key: operator_public_key.as_deref(),
+                timeout_ms,
+                operation: "registry mirror",
+            },
+        )
+        .await;
+        match fetch_result {
+            Ok(registry) => {
+                let entries = registry.entries.len();
+                let signed = registry.signature.is_some();
+                let operator_node_id = registry.operator_node_id;
+                match merged.merge_from(&registry) {
+                    Ok(report) => {
+                        total.added += report.added;
+                        total.unchanged += report.unchanged;
+                        total.revoked_overrides += report.revoked_overrides;
+                        results.push(RegistryMirrorPeerReport {
+                            peer: *target,
+                            status: "ok".to_string(),
+                            entries: Some(entries),
+                            added: Some(report.added),
+                            unchanged: Some(report.unchanged),
+                            revoked_overrides: Some(report.revoked_overrides),
+                            signed: Some(signed),
+                            operator_node_id,
+                            error: None,
+                        });
+                    }
+                    Err(error) if allow_partial => {
+                        results.push(RegistryMirrorPeerReport {
+                            peer: *target,
+                            status: "failed".to_string(),
+                            entries: Some(entries),
+                            added: None,
+                            unchanged: None,
+                            revoked_overrides: None,
+                            signed: Some(signed),
+                            operator_node_id,
+                            error: Some(format!("failed to merge registry: {error:#}")),
+                        });
+                    }
+                    Err(error) => {
+                        return Err(error)
+                            .with_context(|| format!("failed to merge registry from {}", target));
+                    }
+                }
+            }
+            Err(error) if allow_partial => {
+                results.push(RegistryMirrorPeerReport {
+                    peer: *target,
+                    status: "failed".to_string(),
+                    entries: None,
+                    added: None,
+                    unchanged: None,
+                    revoked_overrides: None,
+                    signed: None,
+                    operator_node_id: None,
+                    error: Some(format!("{error:#}")),
+                });
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to mirror registry from {}", target));
+            }
+        }
+    }
+    let mirrored_peers = results
+        .iter()
+        .filter(|result| result.status == "ok")
+        .count();
+    if mirrored_peers == 0 {
+        bail!("no registry indexes mirrored successfully");
+    }
+    let output = merged.to_toml_string()?;
+    write_text_file(out, &output, force)?;
+    let report = RegistryMirrorReport {
+        out: out.display().to_string(),
+        requested_peers: targets.len(),
+        mirrored_peers,
+        failed_peers: results.len() - mirrored_peers,
+        entries: merged.entries.len(),
+        added: total.added,
+        unchanged: total.unchanged,
+        revoked_overrides: total.revoked_overrides,
+        requires_resign: true,
+        results,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("out={}", report.out);
+        println!("requested_peers={}", report.requested_peers);
+        println!("mirrored_peers={}", report.mirrored_peers);
+        println!("failed_peers={}", report.failed_peers);
+        println!("entries={}", report.entries);
+        println!("added={}", report.added);
+        println!("unchanged={}", report.unchanged);
+        println!("revoked_overrides={}", report.revoked_overrides);
+        println!("requires_resign={}", report.requires_resign);
+        for result in &report.results {
+            println!("peer={} status={}", result.peer, result.status);
+        }
+    }
+    Ok(())
+}
+
+async fn fetch_registry_index_from_peer(
+    config: &ZapNodeConfig,
+    endpoint: &ZapEndpoint,
+    keypair: &Keypair,
+    options: RegistryFetchOptions<'_>,
+) -> Result<DriverRegistry> {
+    let RegistryFetchOptions {
+        target,
+        require_signature,
+        operator_public_key,
+        timeout_ms,
+        operation,
+    } = options;
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| format!("target {} not found in node config", target))?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for {}",
+            target,
+            operation
+        );
+    }
+    let request = RegistryIndexRequest {
+        schema_version: zap_store::REGISTRY_INDEX_SYNC_SCHEMA_VERSION,
+        require_signature: require_signature || operator_public_key.is_some(),
+    };
+    request.validate()?;
+
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        REGISTRY_INDEX_REQUEST_SUBJECT,
+        REGISTRY_INDEX_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(&request)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let public_key = decode_public_key(&target_peer.public_key)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let response = loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!(
+                "timed out waiting for registry index response from {}",
+                target
+            );
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let inbound = tokio::time::timeout(remaining, endpoint.recv()).await??;
+        if inbound.peer.node_id != target {
+            continue;
+        }
+        if config.require_signed {
+            verify_frame(&public_key, &inbound.frame)?;
+        }
+        let envelope = ZapEnvelopeRef::parse(&inbound.frame.payload)
+            .context("invalid registry index response envelope")?;
+        if envelope.kind() != ZapMessageKind::Control
+            || envelope.subject() != REGISTRY_INDEX_RESPONSE_SUBJECT
+        {
+            continue;
+        }
+        let response: RegistryIndexResponse = serde_json::from_slice(envelope.body())
+            .context("invalid registry index response body")?;
+        if response.node_id != target {
+            bail!(
+                "registry index response from {} advertised node_id {}",
+                target,
+                response.node_id
+            );
+        }
+        response
+            .verify(request.require_signature, operator_public_key)
+            .context("invalid registry index response")?;
+        break response;
+    };
+    let RegistryIndexResponse {
+        registry,
+        unavailable_reason,
+        ..
+    } = response;
+    registry.with_context(|| {
+        format!(
+            "peer {} did not return a registry index: {}",
+            target,
+            unavailable_reason.unwrap_or_else(|| "unavailable".to_string())
+        )
+    })
+}
+
+fn registry_mirror_targets(config: &ZapNodeConfig, requested: &[Uuid]) -> Result<Vec<Uuid>> {
+    if requested.is_empty() {
+        let peers: Vec<Uuid> = config
+            .peers
+            .iter()
+            .filter(|peer| peer.trust.allows_send())
+            .map(|peer| peer.node_id)
+            .collect();
+        if peers.is_empty() {
+            bail!("node config has no send-allowed peers for registry mirror");
+        }
+        return Ok(peers);
+    }
+    let mut targets = Vec::with_capacity(requested.len());
+    let mut seen = BTreeSet::new();
+    for target in requested {
+        if !seen.insert(*target) {
+            bail!("duplicate registry mirror peer {}", target);
+        }
+        let peer = config
+            .peers
+            .iter()
+            .find(|peer| peer.node_id == *target)
+            .with_context(|| format!("target {} not found in node config", target))?;
+        if !peer.trust.allows_send() {
+            bail!(
+                "target {} is not permitted by local peer trust policy for registry mirror",
+                target
+            );
+        }
+        targets.push(*target);
+    }
+    Ok(targets)
+}
+
+fn registry_publication(command: RegistryPublicationCommand) -> Result<()> {
+    match command {
+        RegistryPublicationCommand::Create {
+            registry,
+            publisher_key,
+            out,
+            published_at_micros,
+            channel,
+            labels,
+            force,
+            json,
+        } => create_registry_publication(RegistryPublicationCreateOptions {
+            registry_path: &registry,
+            publisher_key_path: &publisher_key,
+            out: &out,
+            published_at_micros,
+            channel,
+            labels,
+            force,
+            json,
+        }),
+        RegistryPublicationCommand::Verify {
+            registry,
+            publication,
+            publisher_public_key,
+            json,
+        } => verify_registry_publication(
+            &registry,
+            &publication,
+            publisher_public_key.as_deref(),
+            json,
+        ),
+    }
+}
+
+fn create_registry_publication(options: RegistryPublicationCreateOptions<'_>) -> Result<()> {
+    let RegistryPublicationCreateOptions {
+        registry_path,
+        publisher_key_path,
+        out,
+        published_at_micros,
+        channel,
+        labels,
+        force,
+        json,
+    } = options;
+    let registry = load_driver_registry(registry_path)?;
+    let publisher = load_keypair(publisher_key_path)?;
+    let published_at_micros = match published_at_micros {
+        Some(value) => value,
+        None => now_micros()?,
+    };
+    let publication =
+        RegistryPublication::new(&registry, &publisher, published_at_micros, channel, labels)?;
+    publication.verify_for_registry(&registry, None)?;
+    write_text_file(out, &format!("{}\n", publication.to_json_string()?), force)?;
+    let report = registry_publication_report(registry_path, out, true, &publication);
+    print_registry_publication_report(&report, json)
+}
+
+fn verify_registry_publication(
+    registry_path: &Path,
+    publication_path: &Path,
+    publisher_public_key: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let registry = load_driver_registry(registry_path)?;
+    let publication = load_registry_publication(publication_path)?;
+    publication.verify_for_registry(&registry, publisher_public_key)?;
+    let report = registry_publication_report(registry_path, publication_path, true, &publication);
+    print_registry_publication_report(&report, json)
+}
+
+fn registry_publication_report(
+    registry_path: &Path,
+    publication_path: &Path,
+    verified: bool,
+    publication: &RegistryPublication,
+) -> RegistryPublicationReport {
+    RegistryPublicationReport {
+        registry: registry_path.display().to_string(),
+        publication: publication_path.display().to_string(),
+        verified,
+        registry_hash: publication.registry_hash.clone(),
+        registry_entries: publication.registry_entries,
+        registry_operator_node_id: publication.registry_operator_node_id,
+        publisher_node_id: publication.publisher_node_id,
+        published_at_micros: publication.published_at_micros,
+        channel: publication.channel.clone(),
+        labels: publication.labels.clone(),
+    }
+}
+
+fn print_registry_publication_report(report: &RegistryPublicationReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!("registry={}", report.registry);
+        println!("publication={}", report.publication);
+        println!("verified={}", report.verified);
+        println!("registry_hash={}", report.registry_hash);
+        println!("registry_entries={}", report.registry_entries);
+        println!(
+            "registry_operator_node_id={}",
+            report
+                .registry_operator_node_id
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+        println!("publisher_node_id={}", report.publisher_node_id);
+        println!("published_at_micros={}", report.published_at_micros);
+        println!("channel={}", report.channel.as_deref().unwrap_or("none"));
+        println!(
+            "labels={}",
+            if report.labels.is_empty() {
+                "none".to_string()
+            } else {
+                report.labels.join(",")
+            }
+        );
+    }
+    Ok(())
+}
+
+fn registry_bundle(command: RegistryBundleCommand) -> Result<()> {
+    match command {
+        RegistryBundleCommand::Export {
+            registry,
+            publication,
+            out,
+            base_dir,
+            drivers,
+            force,
+            json,
+        } => export_registry_bundle(RegistryBundleExportOptions {
+            registry_path: &registry,
+            publication_path: publication.as_deref(),
+            out: &out,
+            base_dir: base_dir.as_deref(),
+            drivers,
+            force,
+            json,
+        }),
+        RegistryBundleCommand::Verify {
+            bundle,
+            publisher_public_key,
+            require_drivers,
+            json,
+        } => {
+            let report = verify_registry_bundle(RegistryBundleVerifyOptions {
+                bundle: &bundle,
+                publisher_public_key: publisher_public_key.as_deref(),
+                require_drivers,
+            })?;
+            print_registry_bundle_report(&report, json)
+        }
+        RegistryBundleCommand::Import {
+            bundle,
+            out,
+            publisher_public_key,
+            require_drivers,
+            force,
+            json,
+        } => import_registry_bundle(RegistryBundleImportOptions {
+            bundle: &bundle,
+            out: &out,
+            publisher_public_key: publisher_public_key.as_deref(),
+            require_drivers,
+            force,
+            json,
+        }),
+    }
+}
+
+fn export_registry_bundle(options: RegistryBundleExportOptions<'_>) -> Result<()> {
+    let RegistryBundleExportOptions {
+        registry_path,
+        publication_path,
+        out,
+        base_dir,
+        drivers,
+        force,
+        json,
+    } = options;
+    let registry = load_driver_registry(registry_path)?;
+    registry.verify_signature()?;
+    let registry_hash = zap_store::registry_hash(&registry)?;
+    let registry_bytes = fs::read(registry_path)
+        .with_context(|| format!("failed to read registry {}", registry_path.display()))?;
+    let base_dir = base_dir.map(Path::to_path_buf).unwrap_or_else(|| {
+        registry_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    });
+    let mut driver_map = parse_bundle_driver_specs(drivers)?;
+    fs::create_dir_all(out)
+        .with_context(|| format!("failed to create bundle directory {}", out.display()))?;
+
+    let registry_rel = "registry.index.toml".to_string();
+    write_bytes_file(&out.join(&registry_rel), &registry_bytes, force)?;
+
+    let (publication_rel, publication_hash) = if let Some(path) = publication_path {
+        let publication = load_registry_publication(path)?;
+        publication.verify_for_registry(&registry, None)?;
+        let bytes = fs::read(path)
+            .with_context(|| format!("failed to read registry publication {}", path.display()))?;
+        let rel = "registry.publication.json".to_string();
+        write_bytes_file(&out.join(&rel), &bytes, force)?;
+        (Some(rel), Some(artifact_hash(&bytes)))
+    } else {
+        (None, None)
+    };
+
+    let mut entries = Vec::with_capacity(registry.entries.len());
+    for registry_entry in &registry.entries {
+        let key = bundle_entry_key(&registry_entry.action, &registry_entry.version);
+        let mut bundle_entry = RegistryBundleEntry::from_registry_entry(registry_entry);
+        if let Some(manifest_path) = registry_entry.manifest_path.as_deref() {
+            let manifest_source = resolve_source_path(&base_dir, Path::new(manifest_path));
+            let manifest_bytes = fs::read(&manifest_source).with_context(|| {
+                format!("failed to read manifest {}", manifest_source.display())
+            })?;
+            let manifest = DriverManifest::from_toml_str(
+                std::str::from_utf8(&manifest_bytes).with_context(|| {
+                    format!("manifest {} is not UTF-8", manifest_source.display())
+                })?,
+            )
+            .with_context(|| format!("failed to parse manifest {}", manifest_source.display()))?;
+            manifest.verify_static_and_signature().with_context(|| {
+                format!(
+                    "invalid signed driver manifest {}",
+                    manifest_source.display()
+                )
+            })?;
+            verify_manifest_matches_registry_entry(registry_entry, &manifest)?;
+            let rel = format!(
+                "manifests/{}-{}.manifest.toml",
+                safe_bundle_component(&key),
+                short_hash(&artifact_hash(&manifest_bytes))
+            );
+            write_bytes_file(&out.join(&rel), &manifest_bytes, force)?;
+            bundle_entry.manifest_path = Some(rel);
+            bundle_entry.manifest_hash = Some(artifact_hash(&manifest_bytes));
+        }
+        if let Some(driver_path) = driver_map.remove(&key) {
+            let driver_bytes = fs::read(&driver_path)
+                .with_context(|| format!("failed to read driver {}", driver_path.display()))?;
+            let driver_hash = artifact_hash(&driver_bytes);
+            if driver_hash != registry_entry.wasm_hash {
+                bail!(
+                    "driver {} hash {} does not match registry hash {} for {}",
+                    driver_path.display(),
+                    driver_hash,
+                    registry_entry.wasm_hash,
+                    key
+                );
+            }
+            let extension = driver_path
+                .extension()
+                .and_then(|value| value.to_str())
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("wasm");
+            let rel = format!(
+                "drivers/{}-{}.{}",
+                safe_bundle_component(&key),
+                short_hash(&driver_hash),
+                safe_bundle_component(extension)
+            );
+            write_bytes_file(&out.join(&rel), &driver_bytes, force)?;
+            bundle_entry.driver_path = Some(rel);
+            bundle_entry.driver_hash = Some(driver_hash);
+        }
+        bundle_entry.validate()?;
+        entries.push(bundle_entry);
+    }
+    if !driver_map.is_empty() {
+        let extras = driver_map.keys().cloned().collect::<Vec<_>>().join(",");
+        bail!("driver specs did not match registry entries: {extras}");
+    }
+    let manifest = RegistryBundleManifest::new(
+        Some(format!("zap-cli {}", env!("CARGO_PKG_VERSION"))),
+        registry_rel,
+        registry_hash,
+        publication_rel,
+        publication_hash,
+        entries,
+    );
+    manifest.validate()?;
+    let manifest_rel = "zapstore.bundle.json";
+    write_text_file(
+        &out.join(manifest_rel),
+        &format!("{}\n", manifest.to_json_string()?),
+        force,
+    )?;
+    let report = verify_registry_bundle(RegistryBundleVerifyOptions {
+        bundle: out,
+        publisher_public_key: None,
+        require_drivers: false,
+    })?;
+    print_registry_bundle_report(&report, json)
+}
+
+fn verify_registry_bundle(
+    options: RegistryBundleVerifyOptions<'_>,
+) -> Result<RegistryBundleReport> {
+    let RegistryBundleVerifyOptions {
+        bundle,
+        publisher_public_key,
+        require_drivers,
+    } = options;
+    let manifest = load_registry_bundle_manifest(bundle)?;
+    let registry_path = resolve_bundle_path(bundle, &manifest.registry_path)?;
+    let registry = load_driver_registry(&registry_path)?;
+    registry.verify_signature()?;
+    let actual_registry_hash = zap_store::registry_hash(&registry)?;
+    if actual_registry_hash != manifest.registry_hash {
+        bail!(
+            "bundle registry hash mismatch: manifest {}, actual {}",
+            manifest.registry_hash,
+            actual_registry_hash
+        );
+    }
+    if let Some(publication_rel) = manifest.publication_path.as_deref() {
+        let publication_path = resolve_bundle_path(bundle, publication_rel)?;
+        let publication_bytes = fs::read(&publication_path).with_context(|| {
+            format!(
+                "failed to read registry publication {}",
+                publication_path.display()
+            )
+        })?;
+        if let Some(expected_hash) = manifest.publication_hash.as_deref() {
+            let actual_hash = artifact_hash(&publication_bytes);
+            if actual_hash != expected_hash {
+                bail!(
+                    "bundle publication hash mismatch: manifest {}, actual {}",
+                    expected_hash,
+                    actual_hash
+                );
+            }
+        }
+        let publication = RegistryPublication::from_json_str(
+            std::str::from_utf8(&publication_bytes).with_context(|| {
+                format!("publication {} is not UTF-8", publication_path.display())
+            })?,
+        )
+        .with_context(|| {
+            format!(
+                "failed to parse registry publication {}",
+                publication_path.display()
+            )
+        })?;
+        publication.verify_for_registry(&registry, publisher_public_key)?;
+    }
+    let mut manifest_count = 0;
+    let mut driver_count = 0;
+    for bundle_entry in &manifest.entries {
+        bundle_entry.validate()?;
+        let registry_entry = registry
+            .entries
+            .iter()
+            .find(|entry| {
+                entry.action == bundle_entry.action && entry.version == bundle_entry.version
+            })
+            .with_context(|| {
+                format!(
+                    "bundle entry {}@{} is missing from registry",
+                    bundle_entry.action, bundle_entry.version
+                )
+            })?;
+        verify_bundle_entry_matches_registry(bundle_entry, registry_entry)?;
+        if let Some(manifest_rel) = bundle_entry.manifest_path.as_deref() {
+            let path = resolve_bundle_path(bundle, manifest_rel)?;
+            let bytes = fs::read(&path)
+                .with_context(|| format!("failed to read manifest {}", path.display()))?;
+            if let Some(expected_hash) = bundle_entry.manifest_hash.as_deref() {
+                let actual_hash = artifact_hash(&bytes);
+                if actual_hash != expected_hash {
+                    bail!(
+                        "bundle manifest hash mismatch for {}@{}: manifest {}, actual {}",
+                        bundle_entry.action,
+                        bundle_entry.version,
+                        expected_hash,
+                        actual_hash
+                    );
+                }
+            }
+            let driver_manifest = DriverManifest::from_toml_str(
+                std::str::from_utf8(&bytes)
+                    .with_context(|| format!("manifest {} is not UTF-8", path.display()))?,
+            )
+            .with_context(|| format!("failed to parse manifest {}", path.display()))?;
+            driver_manifest
+                .verify_static_and_signature()
+                .with_context(|| format!("invalid signed driver manifest {}", path.display()))?;
+            verify_manifest_matches_registry_entry(registry_entry, &driver_manifest)?;
+            manifest_count += 1;
+        }
+        if let Some(driver_rel) = bundle_entry.driver_path.as_deref() {
+            let path = resolve_bundle_path(bundle, driver_rel)?;
+            let bytes = fs::read(&path)
+                .with_context(|| format!("failed to read driver {}", path.display()))?;
+            let actual_hash = artifact_hash(&bytes);
+            if Some(actual_hash.as_str()) != bundle_entry.driver_hash.as_deref() {
+                bail!(
+                    "bundle driver hash mismatch for {}@{}",
+                    bundle_entry.action,
+                    bundle_entry.version
+                );
+            }
+            if actual_hash != registry_entry.wasm_hash {
+                bail!(
+                    "bundle driver hash does not match registry for {}@{}",
+                    bundle_entry.action,
+                    bundle_entry.version
+                );
+            }
+            driver_count += 1;
+        } else if require_drivers {
+            bail!(
+                "bundle entry {}@{} has no driver artifact",
+                bundle_entry.action,
+                bundle_entry.version
+            );
+        }
+    }
+    Ok(RegistryBundleReport {
+        bundle: bundle.display().to_string(),
+        verified: true,
+        registry_hash: manifest.registry_hash,
+        publication_hash: manifest.publication_hash,
+        entries: manifest.entries.len(),
+        manifests: manifest_count,
+        drivers: driver_count,
+        imported_to: None,
+    })
+}
+
+fn import_registry_bundle(options: RegistryBundleImportOptions<'_>) -> Result<()> {
+    let RegistryBundleImportOptions {
+        bundle,
+        out,
+        publisher_public_key,
+        require_drivers,
+        force,
+        json,
+    } = options;
+    let mut report = verify_registry_bundle(RegistryBundleVerifyOptions {
+        bundle,
+        publisher_public_key,
+        require_drivers,
+    })?;
+    let manifest = load_registry_bundle_manifest(bundle)?;
+    copy_bundle_file(bundle, &manifest.registry_path, out, force)?;
+    if let Some(publication_path) = manifest.publication_path.as_deref() {
+        copy_bundle_file(bundle, publication_path, out, force)?;
+    }
+    copy_bundle_file(bundle, "zapstore.bundle.json", out, force)?;
+    for entry in &manifest.entries {
+        if let Some(manifest_path) = entry.manifest_path.as_deref() {
+            copy_bundle_file(bundle, manifest_path, out, force)?;
+        }
+        if let Some(driver_path) = entry.driver_path.as_deref() {
+            copy_bundle_file(bundle, driver_path, out, force)?;
+        }
+    }
+    report.imported_to = Some(out.display().to_string());
+    print_registry_bundle_report(&report, json)
+}
+
+fn print_registry_bundle_report(report: &RegistryBundleReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!("bundle={}", report.bundle);
+        println!("verified={}", report.verified);
+        println!("registry_hash={}", report.registry_hash);
+        println!(
+            "publication_hash={}",
+            report.publication_hash.as_deref().unwrap_or("none")
+        );
+        println!("entries={}", report.entries);
+        println!("manifests={}", report.manifests);
+        println!("drivers={}", report.drivers);
+        if let Some(imported_to) = &report.imported_to {
+            println!("imported_to={imported_to}");
+        }
+    }
+    Ok(())
 }
 
 fn create_registry(out: &Path, force: bool) -> Result<()> {
@@ -4591,6 +5729,140 @@ fn list_registry(registry_path: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
+fn load_registry_bundle_manifest(bundle: &Path) -> Result<RegistryBundleManifest> {
+    let path = bundle.join("zapstore.bundle.json");
+    let manifest = RegistryBundleManifest::from_json_str(
+        &fs::read_to_string(&path)
+            .with_context(|| format!("failed to read bundle manifest {}", path.display()))?,
+    )
+    .with_context(|| format!("failed to parse bundle manifest {}", path.display()))?;
+    manifest
+        .validate()
+        .with_context(|| format!("invalid bundle manifest {}", path.display()))?;
+    Ok(manifest)
+}
+
+fn parse_bundle_driver_specs(specs: Vec<String>) -> Result<BTreeMap<String, PathBuf>> {
+    let mut drivers = BTreeMap::new();
+    for spec in specs {
+        let (key, path) = spec
+            .split_once('=')
+            .with_context(|| format!("invalid --driver `{spec}`; expected action@version=path"))?;
+        let (action, version) = key
+            .split_once('@')
+            .with_context(|| format!("invalid --driver `{spec}`; expected action@version=path"))?;
+        if action.trim().is_empty() || version.trim().is_empty() || path.trim().is_empty() {
+            bail!("invalid --driver `{spec}`; action, version, and path are required");
+        }
+        let key = bundle_entry_key(action, version);
+        if drivers.insert(key.clone(), PathBuf::from(path)).is_some() {
+            bail!("duplicate --driver for {key}");
+        }
+    }
+    Ok(drivers)
+}
+
+fn bundle_entry_key(action: &str, version: &str) -> String {
+    format!("{action}@{version}")
+}
+
+fn safe_bundle_component(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_') {
+            output.push(byte as char);
+        } else {
+            output.push('_');
+        }
+    }
+    if output.is_empty() {
+        "artifact".to_string()
+    } else {
+        output
+    }
+}
+
+fn short_hash(hash: &str) -> String {
+    hash.strip_prefix("blake3:")
+        .unwrap_or(hash)
+        .chars()
+        .take(12)
+        .collect()
+}
+
+fn resolve_source_path(base_dir: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    }
+}
+
+fn resolve_bundle_path(bundle: &Path, rel: &str) -> Result<PathBuf> {
+    ensure_safe_relative_path(rel)?;
+    Ok(bundle.join(rel))
+}
+
+fn ensure_safe_relative_path(rel: &str) -> Result<()> {
+    let path = Path::new(rel);
+    if path.is_absolute() || path.as_os_str().is_empty() {
+        bail!("bundle path `{rel}` is not a safe relative path");
+    }
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(_) => {}
+            _ => bail!("bundle path `{rel}` is not a safe relative path"),
+        }
+    }
+    Ok(())
+}
+
+fn copy_bundle_file(bundle: &Path, rel: &str, out: &Path, force: bool) -> Result<()> {
+    let source = resolve_bundle_path(bundle, rel)?;
+    let bytes =
+        fs::read(&source).with_context(|| format!("failed to read {}", source.display()))?;
+    write_bytes_file(&out.join(rel), &bytes, force)
+}
+
+fn verify_manifest_matches_registry_entry(
+    entry: &zap_store::DriverRegistryEntry,
+    manifest: &DriverManifest,
+) -> Result<()> {
+    if entry.action != manifest.action
+        || entry.version != manifest.version
+        || entry.name != manifest.name
+        || entry.abi_version != manifest.abi_version
+        || entry.wasm_hash != manifest.wasm_hash
+        || entry.author_node_id != manifest.author_node_id
+    {
+        bail!(
+            "manifest for {}@{} does not match registry entry",
+            entry.action,
+            entry.version
+        );
+    }
+    Ok(())
+}
+
+fn verify_bundle_entry_matches_registry(
+    bundle_entry: &RegistryBundleEntry,
+    registry_entry: &zap_store::DriverRegistryEntry,
+) -> Result<()> {
+    if bundle_entry.name != registry_entry.name
+        || bundle_entry.abi_version != registry_entry.abi_version
+        || bundle_entry.wasm_hash != registry_entry.wasm_hash
+        || bundle_entry.author_node_id != registry_entry.author_node_id
+        || bundle_entry.status != registry_entry.status
+    {
+        bail!(
+            "bundle entry {}@{} does not match registry metadata",
+            bundle_entry.action,
+            bundle_entry.version
+        );
+    }
+    Ok(())
+}
+
 fn load_driver_registry(path: &Path) -> Result<DriverRegistry> {
     let registry = DriverRegistry::from_toml_str(
         &fs::read_to_string(path)
@@ -4601,6 +5873,14 @@ fn load_driver_registry(path: &Path) -> Result<DriverRegistry> {
         .validate()
         .with_context(|| format!("invalid registry {}", path.display()))?;
     Ok(registry)
+}
+
+fn load_registry_publication(path: &Path) -> Result<RegistryPublication> {
+    RegistryPublication::from_json_str(
+        &fs::read_to_string(path)
+            .with_context(|| format!("failed to read registry publication {}", path.display()))?,
+    )
+    .with_context(|| format!("failed to parse registry publication {}", path.display()))
 }
 
 fn load_driver_manifest(path: &Path) -> Result<DriverManifest> {
@@ -4624,6 +5904,10 @@ fn load_keypair(path: &Path) -> Result<Keypair> {
 }
 
 fn write_text_file(out: &Path, contents: &str, force: bool) -> Result<()> {
+    write_bytes_file(out, contents.as_bytes(), force)
+}
+
+fn write_bytes_file(out: &Path, contents: &[u8], force: bool) -> Result<()> {
     if let Some(parent) = out.parent().filter(|parent| !parent.as_os_str().is_empty()) {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory {}", parent.display()))?;
@@ -4647,7 +5931,7 @@ fn write_text_file(out: &Path, contents: &str, force: bool) -> Result<()> {
             return Err(error).with_context(|| format!("failed to write {}", out.display()));
         }
     };
-    file.write_all(contents.as_bytes())
+    file.write_all(contents)
         .with_context(|| format!("failed to write {}", out.display()))?;
     file.sync_all()
         .with_context(|| format!("failed to flush {}", out.display()))

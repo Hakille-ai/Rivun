@@ -19,3 +19,8 @@ zap-crypto = { path = "../zap-crypto" }
 
 [dev-dependencies]
 bytes.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "receipt"
+harness = false

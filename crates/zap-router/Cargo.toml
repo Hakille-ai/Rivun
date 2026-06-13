@@ -11,3 +11,10 @@ serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 zap-capability.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "router"
+harness = false

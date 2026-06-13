@@ -17,3 +17,10 @@ toml.workspace = true
 uuid.workspace = true
 zap-crypto = { path = "../zap-crypto" }
 zap-capability.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "store"
+harness = false

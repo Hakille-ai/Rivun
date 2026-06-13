@@ -103,6 +103,40 @@ cargo run -p zap-cli -- registry sign \
 cargo run -p zap-cli -- registry verify-signature \
   --registry registry.index.toml
 cargo run -p zap-cli -- registry list --registry registry.index.toml --json
+cargo run -p zap-cli -- registry pull \
+  --config zap.toml \
+  --target <peer-node-id> \
+  --out registry.index.toml \
+  --operator-public-key <base64-public-key> \
+  --json
+cargo run -p zap-cli -- registry mirror \
+  --config zap.toml \
+  --out mirrored-registry.index.toml \
+  --operator-public-key <base64-public-key> \
+  --json
+cargo run -p zap-cli -- registry sign \
+  --registry mirrored-registry.index.toml \
+  --operator-key .zap/node.key
+cargo run -p zap-cli -- registry publication create \
+  --registry mirrored-registry.index.toml \
+  --publisher-key .zap/node.key \
+  --out registry.publication.json \
+  --channel stable
+cargo run -p zap-cli -- registry publication verify \
+  --registry mirrored-registry.index.toml \
+  --publication registry.publication.json
+cargo run -p zap-cli -- registry bundle export \
+  --registry mirrored-registry.index.toml \
+  --publication registry.publication.json \
+  --out zapstore-bundle \
+  --driver echo@0.1.0=examples/wasm-drivers/echo/echo.wat \
+  --json
+cargo run -p zap-cli -- registry bundle verify \
+  --bundle zapstore-bundle \
+  --require-drivers
+cargo run -p zap-cli -- registry bundle import \
+  --bundle zapstore-bundle \
+  --out .zap/imported-zapstore
 ```
 
 When configured, `zap-node` validates signed driver manifests against the local
@@ -123,6 +157,36 @@ require_signature = true
 
 Any registry mutation, including `add` and `revoke`, clears the operator
 signature. Re-run `registry sign` after reviewing the changed index.
+
+Nodes with `[registry].path` respond to `zap.registry.index.request` control
+messages with their current registry index. Use `zap registry pull` from another
+configured peer to fetch that index over the signed ZAP transport. Passing
+`--operator-public-key` implies `--require-signature` and rejects indexes that
+were not approved by the expected operator key.
+
+Use `zap registry mirror` to fetch every send-allowed peer, or repeat `--peer`
+to select specific peers, and merge the returned indexes into one local file.
+The merge is intentionally strict: matching action/version entries must agree
+on name, ABI, artifact hash, and author; revoked entries override active
+entries for the same driver version. The merged file is unsigned, so review it
+and run `registry sign` before using it in production configs.
+
+Publication metadata is a signed JSON statement over the canonical BLAKE3 hash
+of a signed registry index. `registry publication create` refuses unsigned
+registry indexes, records the registry operator node, entry count, publication
+timestamp, channel, and labels, then signs that statement with the publisher key.
+`registry publication verify` recomputes the registry hash and verifies the
+publisher signature, giving release pipelines an immutable approval artifact to
+archive next to the registry file.
+
+Registry bundles are filesystem directories with `zapstore.bundle.json`,
+`registry.index.toml`, optional `registry.publication.json`, copied driver
+manifests, and optional driver artifacts. `registry bundle export` verifies the
+signed registry, publication metadata, manifest signatures, and supplied driver
+hashes before writing the bundle. `registry bundle verify` repeats those checks
+offline and can require that every entry carries a driver artifact. `registry
+bundle import` verifies first, then copies only the listed safe relative bundle
+paths into the destination directory.
 
 ## Driver SDK
 
