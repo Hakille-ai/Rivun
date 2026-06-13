@@ -60,12 +60,19 @@ Foundation implemented:
 - `zap send --requires-consensus` requires `--poa-validator-key` or `--poa-network` for consensus-protected frames.
 - `zap send --poa-network` can collect attestations from configured validator peers with an operator-controlled timeout;
 - portable PoA request/response JSON can be created with `zap poa request` and `zap poa attest`;
+- signed versioned validator sets can be created, verified, applied to config,
+  and loaded by `zap-node` through `[poa].validator_set`;
+- `zap poa validator-set pull` requests signed validator sets from configured
+  peers over `ZENV` control messages and verifies the nested authority
+  signature before writing JSON.
 - optional signed action receipts record processed actions for audit.
 - `zap receipts verify` checks signed receipt JSONL logs offline.
 - `zap receipts prune` applies verified timestamp-based retention to receipt logs.
 - `zap receipts merge` builds deduplicated verified receipt archives from multiple logs.
+- `zap receipts pull` requests signed receipts from configured peers over
+  `ZENV` control messages, verifies the response, and writes mergeable JSONL.
 
-Next: dynamic validator discovery, quorum policy hardening, and remote receipt replication.
+Next: dynamic validator discovery, quorum policy hardening, and automated validator-set rollout.
 
 ## Phase 5: Future Core Interfaces
 
@@ -89,8 +96,8 @@ Foundation implemented:
 - peer routes can require a verified cached grant before forwarding messages to
   a remote node.
 
-Next: remote receipt replication, dynamic peer enrollment, distributed
-revocation, and package distribution.
+Next: live peer enrollment handshakes, distributed revocation propagation,
+package distribution, fleet ops, and stream/mesh transport.
 
 Progress added:
 
@@ -105,6 +112,9 @@ Progress added:
   rotation age.
 - `zap trust enroll` and `zap trust inspect` provide operator workflows for
   peer onboarding and trust posture review before nodes run.
+- `zap peer invite`, `zap peer accept`, `zap peer rotate`, and
+  `zap peer revoke` provide signed offline machine enrollment, transport-key
+  rotation, and local revocation workflows.
 - `zap capability cache refresh` actively queries configured peers, appends
   signed advertisements to the verified JSONL cache, and reports skipped or
   failed peers for strict deployment gates.

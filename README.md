@@ -107,7 +107,7 @@ ZAP is organized as a Rust workspace of focused crates:
 | `zap-node` | Daemon core: TOML config, peer verification, replay protection, receipts, capability-aware dispatch, routing |
 | `zap-runtime` | Wasmtime sandboxed execution: ABI verification, fuel metering, memory limits, time bounds, output caps |
 | `zap-driver-sdk` | Minimal ABI helpers for WASM driver authors |
-| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `trust`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa` |
+| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `trust`, `peer`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa` |
 
 ### Intelligence & Policy
 
@@ -236,6 +236,14 @@ zap check-config --strict --config zap.toml           # Validate config
 zap trust enroll --node-id <uuid> --addr <host:port> \
   --public-key <base64> --transport-key <hex>          # Generate peer TOML
 zap trust inspect --config zap.toml --json             # Review peer trust posture
+zap peer invite --config zap.toml --addr <host:port> \
+  --out node.invite.json                               # Signed peer invitation
+zap peer accept --invite node.invite.json --config zap.toml \
+  --out zap.with-node.toml --json                      # Verify and add peer
+zap peer rotate --config zap.toml --node-id <uuid> \
+  --out zap.rotated.toml --json                        # Rotate transport key
+zap peer revoke --config zap.toml --node-id <uuid> \
+  --out zap.revoked.toml --json                        # Disable peer trust
 ```
 
 ### Sending Messages
@@ -316,9 +324,24 @@ zap poa request --frame critical-frame.bin \
   --requester-key .zap/node.key --threshold 1 > poa-request.json
 zap poa attest --request poa-request.json \
   --validator-key .zap/validator.key > poa-response.json
+zap poa validator-set create --authority-key .zap/operator.key \
+  --epoch 4 --threshold 2 \
+  --validator <validator-a-node-id>=<validator-a-public-key> \
+  --validator <validator-b-node-id>=<validator-b-public-key> \
+  --out poa-validators.v4.json
+zap poa validator-set pull --config zap.toml --target <peer-node-id> \
+  --authority-public-key <operator-public-key> --min-epoch 4 \
+  --out poa-validators.v4.json --json
+zap poa validator-set apply --config zap.toml \
+  --set poa-validators.v4.json \
+  --authority-public-key <operator-public-key> \
+  --out zap.with-poa-set.toml --json
 
 # Receipt audit
 zap receipts verify --path logs/actions.jsonl
+zap receipts pull --config zap.toml --target <peer-node-id> \
+  --after-processed-at-micros 1735689600000000 \
+  --limit 100 --out logs/peer-actions.jsonl --json
 zap receipts prune --path logs/actions.jsonl \
   --before-processed-at-micros 1735689600000000 --out logs/retained.jsonl
 zap receipts merge logs/node-a.jsonl logs/node-b.jsonl \
@@ -433,7 +456,7 @@ See the full [Roadmap](docs/roadmap.md) for detailed status and next steps.
 | [ZapStore](docs/zapstore.md) | Signed manifests, registry, versioning, and revocation |
 | [Capability, Router & Memory](docs/capability-router-memory.md) | Discovery, routing, and auditable memory |
 | [Message Policy](docs/message-policy.md) | Deterministic allow/deny/require-PoA gates for typed messages |
-| [Signed Receipts](docs/receipts.md) | Receipt ledger, verification, pruning, and merging |
+| [Signed Receipts](docs/receipts.md) | Receipt ledger, peer pull, verification, pruning, and merging |
 | [Versioning](docs/versioning.md) | Semantic versioning and wire compatibility rules |
 | [Release Process](docs/release.md) | Release checklist and publishing workflow |
 | [Roadmap](docs/roadmap.md) | Phased development plan and current status |

@@ -27,15 +27,21 @@ use zap_capability::{
 use zap_core::{ZapFlags, ZapFrame, now_micros};
 use zap_crypto::{
     Keypair, POA_ATTESTATION_CONTENT_TYPE, POA_ATTESTATION_REQUEST_SUBJECT,
-    POA_ATTESTATION_RESPONSE_SUBJECT, PublicKey, sign_frame, sign_poa_attestation_request,
-    verify_frame, verify_poa_certificate,
+    POA_ATTESTATION_RESPONSE_SUBJECT, POA_VALIDATOR_SET_CONTENT_TYPE,
+    POA_VALIDATOR_SET_REQUEST_SUBJECT, POA_VALIDATOR_SET_RESPONSE_SUBJECT, PoaValidatorSetRequest,
+    PoaValidatorSetResponse, PublicKey, SignedPoaValidatorSet, sign_frame,
+    sign_poa_attestation_request, verify_frame, verify_poa_certificate,
 };
 use zap_envelope::{
     MAGIC_BYTES as ZENV_MAGIC_BYTES, MAX_CONTENT_TYPE_LEN as ZENV_MAX_CONTENT_TYPE_LEN,
     MAX_METADATA_LEN as ZENV_MAX_METADATA_LEN, MAX_SUBJECT_LEN as ZENV_MAX_SUBJECT_LEN,
     ZapEnvelope, ZapEnvelopeRef, ZapMessageKind,
 };
-use zap_ledger::SignedActionReceipt;
+use zap_ledger::{
+    RECEIPT_REPLICATION_CONTENT_TYPE, RECEIPT_REPLICATION_REQUEST_SUBJECT,
+    RECEIPT_REPLICATION_RESPONSE_SUBJECT, ReceiptReplicationRequest, ReceiptReplicationResponse,
+    SignedActionReceipt,
+};
 use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_policy::{PolicyInput, PolicyRule, PolicySet};
@@ -121,6 +127,9 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
     }
     if let Some(path) = config.registry.path.take() {
         config.registry.path = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(path) = config.poa.validator_set.take() {
+        config.poa.validator_set = Some(resolve_relative_path(base_dir, &path));
     }
     if let Some(path) = config.memory.path.take() {
         config.memory.path = Some(resolve_relative_path(base_dir, &path));
@@ -247,6 +256,10 @@ pub struct PoaConfig {
     pub required_threshold: u16,
     #[serde(default)]
     pub validators: Vec<PoaValidatorConfig>,
+    #[serde(default)]
+    pub validator_set: Option<PathBuf>,
+    #[serde(default)]
+    pub validator_set_authority: Option<String>,
 }
 
 impl Default for PoaConfig {
@@ -254,6 +267,8 @@ impl Default for PoaConfig {
         Self {
             required_threshold: default_poa_required_threshold(),
             validators: Vec::new(),
+            validator_set: None,
+            validator_set_authority: None,
         }
     }
 }
@@ -452,6 +467,8 @@ pub struct ConfigValidationReport {
     pub require_signed: bool,
     pub poa_validator_count: usize,
     pub poa_required_threshold: u16,
+    pub poa_validator_set_enabled: bool,
+    pub poa_validator_set_epoch: Option<u64>,
     pub memory_enabled: bool,
     pub route_count: usize,
     pub capability_count: usize,
@@ -620,6 +637,8 @@ pub struct ZapNode {
     security: SecurityConfig,
     poa_validators: Vec<(Uuid, PublicKey)>,
     poa_required_threshold: u16,
+    poa_validator_set_path: Option<PathBuf>,
+    poa_validator_set_authority: Option<PublicKey>,
     receipt_log_path: Option<PathBuf>,
     memory: MemoryConfig,
     route_table: RouteTable,
@@ -670,7 +689,15 @@ impl ZapNode {
             peer_trust.insert(peer.node_id, peer.trust.clone());
             peer_ids.push(peer.node_id);
         }
-        let poa_validators = load_poa_validators(&config.poa)?;
+        let poa_verifier = load_poa_verifier(&config.poa)?;
+        let poa_validator_set_path = config.poa.validator_set.clone();
+        let poa_validator_set_authority = config
+            .poa
+            .validator_set_authority
+            .as_deref()
+            .map(decode_public_key)
+            .transpose()
+            .context("invalid poa.validator_set_authority")?;
 
         let runtime = WasmExecutor::new()?;
         let registry = load_driver_registry_optional(&config.registry)?;
@@ -691,8 +718,10 @@ impl ZapNode {
             require_signed: config.require_signed,
             replay_guard: Mutex::new(ReplayGuard::new(config.security.replay_cache_capacity)),
             security: config.security,
-            poa_validators,
-            poa_required_threshold: config.poa.required_threshold,
+            poa_validators: poa_verifier.validators,
+            poa_required_threshold: poa_verifier.required_threshold,
+            poa_validator_set_path,
+            poa_validator_set_authority,
             receipt_log_path: config.receipts.path,
             memory: config.memory,
             route_table,
@@ -762,6 +791,18 @@ impl ZapNode {
             self.respond_to_capability_query(inbound.peer.node_id, &message.body)
                 .await?;
             None
+        } else if message.kind == ZapMessageKind::Control
+            && message.subject == RECEIPT_REPLICATION_REQUEST_SUBJECT
+        {
+            self.respond_to_receipt_replication_request(inbound.peer.node_id, &message.body)
+                .await?;
+            None
+        } else if message.kind == ZapMessageKind::Control
+            && message.subject == POA_VALIDATOR_SET_REQUEST_SUBJECT
+        {
+            self.respond_to_poa_validator_set_request(inbound.peer.node_id, &message.body)
+                .await?;
+            None
         } else {
             self.route_message(&inbound, &message).await?
         };
@@ -821,6 +862,101 @@ impl ZapNode {
             ZapMessageKind::Control,
             CAPABILITY_RESPONSE_SUBJECT,
             CAPABILITY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&response)?),
+        )?;
+        let frame = ZapFrame::new(
+            self.keypair.node_id(),
+            requester_node,
+            ZapFlags::ENCRYPTED,
+            envelope.encode(),
+        )?;
+        let frame = sign_frame(&self.keypair, &frame)?;
+        self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    async fn respond_to_receipt_replication_request(
+        &self,
+        requester_node: Uuid,
+        body: &[u8],
+    ) -> Result<()> {
+        self.ensure_peer_can_send(requester_node)?;
+        let request = if body.is_empty() {
+            ReceiptReplicationRequest::default()
+        } else {
+            serde_json::from_slice::<ReceiptReplicationRequest>(body)
+                .context("invalid receipt replication request")?
+        };
+        request.validate()?;
+        let limit = request.effective_limit()?;
+        let mut receipts = match &self.receipt_log_path {
+            Some(path) => load_verified_receipt_log(path)?,
+            None => Vec::new(),
+        };
+        receipts.retain(|receipt| request.matches(receipt));
+        let truncated = receipts.len() > limit;
+        receipts.truncate(limit);
+        let response = ReceiptReplicationResponse::new(self.keypair.node_id(), receipts, truncated);
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+            RECEIPT_REPLICATION_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&response)?),
+        )?;
+        let frame = ZapFrame::new(
+            self.keypair.node_id(),
+            requester_node,
+            ZapFlags::ENCRYPTED,
+            envelope.encode(),
+        )?;
+        let frame = sign_frame(&self.keypair, &frame)?;
+        self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    async fn respond_to_poa_validator_set_request(
+        &self,
+        requester_node: Uuid,
+        body: &[u8],
+    ) -> Result<()> {
+        self.ensure_peer_can_send(requester_node)?;
+        let request = if body.is_empty() {
+            PoaValidatorSetRequest::default()
+        } else {
+            serde_json::from_slice::<PoaValidatorSetRequest>(body)
+                .context("invalid PoA validator-set request")?
+        };
+        request.validate()?;
+        let (validator_set, unavailable_reason) = match &self.poa_validator_set_path {
+            Some(path) => {
+                let signed = load_signed_poa_validator_set(path)?;
+                signed.verify(self.poa_validator_set_authority.as_ref())?;
+                validate_poa_validator_set_time(&signed)?;
+                if let Some(min_epoch) = request.min_epoch
+                    && signed.set.epoch < min_epoch
+                {
+                    (
+                        None,
+                        Some(format!(
+                            "validator set epoch {} is below requested minimum {}",
+                            signed.set.epoch, min_epoch
+                        )),
+                    )
+                } else {
+                    (Some(signed), None)
+                }
+            }
+            None => (
+                None,
+                Some("node has no configured poa.validator_set".to_string()),
+            ),
+        };
+        let response =
+            PoaValidatorSetResponse::new(self.keypair.node_id(), validator_set, unavailable_reason);
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            POA_VALIDATOR_SET_RESPONSE_SUBJECT,
+            POA_VALIDATOR_SET_CONTENT_TYPE,
             Bytes::from(serde_json::to_vec(&response)?),
         )?;
         let frame = ZapFrame::new(
@@ -1284,7 +1420,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
     let message_contracts = load_message_contract_set(&config.message_schema)?;
     validate_runtime(config.runtime)?;
     let peer_trust_summary = validate_peers(config, bind, node_id, &mut warnings)?;
-    validate_poa(config, &mut warnings)?;
+    let poa_summary = validate_poa(config, &mut warnings)?;
     let registry = load_driver_registry_optional(&config.registry)?;
     let registry_entry_count = registry
         .as_ref()
@@ -1319,8 +1455,10 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         registry_entry_count,
         registry_signature_required: config.registry.require_signature,
         require_signed: config.require_signed,
-        poa_validator_count: config.poa.validators.len(),
-        poa_required_threshold: config.poa.required_threshold,
+        poa_validator_count: poa_summary.validator_count,
+        poa_required_threshold: poa_summary.required_threshold,
+        poa_validator_set_enabled: poa_summary.validator_set_enabled,
+        poa_validator_set_epoch: poa_summary.validator_set_epoch,
         memory_enabled: config.memory.path.is_some(),
         route_count: config.routes.len(),
         capability_count,
@@ -1996,27 +2134,116 @@ fn validate_peer_trust(
     Ok(())
 }
 
-fn validate_poa(config: &ZapNodeConfig, warnings: &mut Vec<String>) -> Result<()> {
-    if config.poa.required_threshold == 0 {
-        bail!("poa.required_threshold must be greater than zero");
+struct PoaVerifierConfig {
+    validators: Vec<(Uuid, PublicKey)>,
+    required_threshold: u16,
+    validator_set_epoch: Option<u64>,
+}
+
+struct PoaValidationSummary {
+    validator_count: usize,
+    required_threshold: u16,
+    validator_set_enabled: bool,
+    validator_set_epoch: Option<u64>,
+}
+
+fn validate_poa(
+    config: &ZapNodeConfig,
+    warnings: &mut Vec<String>,
+) -> Result<PoaValidationSummary> {
+    if config.poa.validator_set.is_some() && !config.poa.validators.is_empty() {
+        warnings.push(
+            "poa.validator_set is configured; inline poa.validators are ignored for verification"
+                .to_string(),
+        );
     }
-    if config.poa.validators.is_empty() {
+    if config.poa.validator_set.is_none() && config.poa.validator_set_authority.is_some() {
+        warnings.push(
+            "poa.validator_set_authority is configured without poa.validator_set".to_string(),
+        );
+    }
+    let verifier = load_poa_verifier(&config.poa)?;
+    if verifier.validators.is_empty() {
         warnings.push(
             "no PoA validators configured; frames marked REQUIRES_CONSENSUS will be rejected"
                 .to_string(),
         );
-        return Ok(());
     }
-    if config.poa.required_threshold as usize > config.poa.validators.len() {
+    Ok(PoaValidationSummary {
+        validator_count: verifier.validators.len(),
+        required_threshold: verifier.required_threshold,
+        validator_set_enabled: config.poa.validator_set.is_some(),
+        validator_set_epoch: verifier.validator_set_epoch,
+    })
+}
+
+fn load_poa_verifier(config: &PoaConfig) -> Result<PoaVerifierConfig> {
+    if config.required_threshold == 0 {
+        bail!("poa.required_threshold must be greater than zero");
+    }
+    if let Some(path) = &config.validator_set {
+        let signed = load_signed_poa_validator_set(path)?;
+        let authority = config
+            .validator_set_authority
+            .as_deref()
+            .map(decode_public_key)
+            .transpose()
+            .context("invalid poa.validator_set_authority")?;
+        signed.verify(authority.as_ref())?;
+        validate_poa_validator_set_time(&signed)?;
+        let validators = signed
+            .set
+            .validators
+            .iter()
+            .map(|validator| {
+                Ok((
+                    validator.node_id,
+                    decode_public_key(&validator.public_key).with_context(|| {
+                        format!("invalid PoA validator public key {}", validator.node_id)
+                    })?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let required_threshold = config.required_threshold.max(signed.set.required_threshold);
+        if required_threshold as usize > validators.len() {
+            bail!(
+                "effective PoA required_threshold {} exceeds validator-set count {}",
+                required_threshold,
+                validators.len()
+            );
+        }
+        return Ok(PoaVerifierConfig {
+            validators,
+            required_threshold,
+            validator_set_epoch: Some(signed.set.epoch),
+        });
+    }
+    let validators = load_static_poa_validators(config)?;
+    if validators.is_empty() {
+        return Ok(PoaVerifierConfig {
+            validators,
+            required_threshold: config.required_threshold,
+            validator_set_epoch: None,
+        });
+    }
+    if config.required_threshold as usize > validators.len() {
         bail!(
             "poa.required_threshold {} exceeds configured validator count {}",
-            config.poa.required_threshold,
-            config.poa.validators.len()
+            config.required_threshold,
+            validators.len()
         );
     }
+    Ok(PoaVerifierConfig {
+        validators,
+        required_threshold: config.required_threshold,
+        validator_set_epoch: None,
+    })
+}
 
+fn load_static_poa_validators(config: &PoaConfig) -> Result<Vec<(Uuid, PublicKey)>> {
     let mut validator_ids = HashSet::new();
-    for validator in &config.poa.validators {
+    let mut validators = Vec::with_capacity(config.validators.len());
+    for validator in &config.validators {
         if !validator_ids.insert(validator.node_id) {
             bail!("duplicate PoA validator node_id {}", validator.node_id);
         }
@@ -2029,23 +2256,41 @@ fn validate_poa(config: &ZapNodeConfig, warnings: &mut Vec<String>) -> Result<()
                 validator.node_id
             );
         }
+        validators.push((validator.node_id, public_key));
     }
-    Ok(())
+    Ok(validators)
 }
 
-fn load_poa_validators(config: &PoaConfig) -> Result<Vec<(Uuid, PublicKey)>> {
-    config
-        .validators
-        .iter()
-        .map(|validator| {
-            Ok((
-                validator.node_id,
-                decode_public_key(&validator.public_key).with_context(|| {
-                    format!("invalid PoA validator public key {}", validator.node_id)
-                })?,
-            ))
-        })
-        .collect()
+fn load_signed_poa_validator_set(path: &Path) -> Result<SignedPoaValidatorSet> {
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read PoA validator set {}", path.display()))?;
+    serde_json::from_str(&input)
+        .with_context(|| format!("failed to parse PoA validator set {}", path.display()))
+}
+
+fn validate_poa_validator_set_time(signed: &SignedPoaValidatorSet) -> Result<()> {
+    let now = now_micros()?;
+    if let Some(valid_from) = signed.set.valid_from_micros
+        && valid_from > now
+    {
+        bail!(
+            "PoA validator set {} epoch {} is not valid until {}",
+            signed.set.set_id,
+            signed.set.epoch,
+            valid_from
+        );
+    }
+    if let Some(expires_at) = signed.set.expires_at_micros
+        && expires_at <= now
+    {
+        bail!(
+            "PoA validator set {} epoch {} expired at {}",
+            signed.set.set_id,
+            signed.set.epoch,
+            expires_at
+        );
+    }
+    Ok(())
 }
 
 pub fn describe_capabilities(config: &ZapNodeConfig) -> Result<CapabilityAdvertisement> {
@@ -2214,6 +2459,38 @@ fn hash_frame(frame: &ZapFrame) -> String {
     format!("blake3:{}", blake3::hash(&frame.encode()).to_hex())
 }
 
+fn load_verified_receipt_log(path: &Path) -> Result<Vec<SignedActionReceipt>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read receipt log {}", path.display()))?;
+    let mut receipts = Vec::new();
+    for (index, line) in input.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let receipt = SignedActionReceipt::from_json_str(line).with_context(|| {
+            format!(
+                "failed to parse receipt at {} line {}",
+                path.display(),
+                line_number
+            )
+        })?;
+        receipt.verify().with_context(|| {
+            format!(
+                "invalid receipt signature at {} line {}",
+                path.display(),
+                line_number
+            )
+        })?;
+        receipts.push(receipt);
+    }
+    Ok(receipts)
+}
+
 fn validate_effective_driver_permissions(
     driver: &DriverConfig,
     runtime: RuntimeConfig,
@@ -2345,7 +2622,10 @@ mod tests {
     use bytes::Bytes;
     use tokio::time::{Duration, timeout};
     use zap_core::{ZapFlags, ZapFrame, now_micros};
-    use zap_crypto::{certify_frame, sign_frame, verify_frame};
+    use zap_crypto::{
+        POA_VALIDATOR_SET_SCHEMA_VERSION, PoaValidatorDescriptor, PoaValidatorSet, certify_frame,
+        sign_frame, sign_poa_validator_set, verify_frame,
+    };
     use zap_envelope::{ZapEnvelope, ZapMessageKind};
     use zap_ledger::SignedActionReceipt;
     use zap_memory::MemoryQuery;
@@ -3451,10 +3731,59 @@ path = "logs/receipts.jsonl"
                 node_id: validator.node_id(),
                 public_key: public_key_string(&validator),
             }],
+            ..PoaConfig::default()
         };
 
         let error = config.validate().unwrap_err();
         assert!(format!("{error:#}").contains("poa.required_threshold 2 exceeds"));
+    }
+
+    #[test]
+    fn config_validation_accepts_signed_poa_validator_set() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let authority = Keypair::generate();
+        let validator = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        let validator_set_path = temp.path().join("poa-validators.json");
+        let signed = sign_poa_validator_set(
+            &authority,
+            PoaValidatorSet {
+                schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+                set_id: Uuid::from_bytes([7_u8; 16]),
+                epoch: 5,
+                required_threshold: 1,
+                validators: vec![PoaValidatorDescriptor {
+                    node_id: validator.node_id(),
+                    public_key: public_key_string(&validator),
+                }],
+                valid_from_micros: None,
+                expires_at_micros: None,
+                labels: vec!["factory".to_string()],
+            },
+        )
+        .unwrap();
+        std::fs::write(
+            &validator_set_path,
+            serde_json::to_string_pretty(&signed).unwrap(),
+        )
+        .unwrap();
+        config.poa.validator_set = Some(validator_set_path);
+        config.poa.validator_set_authority = Some(public_key_string(&authority));
+
+        let report = config.validate().unwrap();
+
+        assert_eq!(report.poa_validator_count, 1);
+        assert_eq!(report.poa_required_threshold, 1);
+        assert!(report.poa_validator_set_enabled);
+        assert_eq!(report.poa_validator_set_epoch, Some(5));
     }
 
     #[test]
@@ -4182,6 +4511,7 @@ required_json_fields = ["message"]
                     node_id: validator.node_id(),
                     public_key: public_key_string(&validator),
                 }],
+                ..PoaConfig::default()
             },
             MessagePolicyConfig {
                 rules: vec![MessagePolicyRule {
@@ -4225,6 +4555,7 @@ required_json_fields = ["message"]
                     node_id: validator.node_id(),
                     public_key: public_key_string(&validator),
                 }],
+                ..PoaConfig::default()
             },
         )
         .await;
@@ -4251,6 +4582,7 @@ required_json_fields = ["message"]
                     node_id: validator.node_id(),
                     public_key: public_key_string(&validator),
                 }],
+                ..PoaConfig::default()
             },
         )
         .await;
@@ -4268,6 +4600,59 @@ required_json_fields = ["message"]
             .unwrap();
         assert_eq!(event.action, "echo");
         assert_eq!(event.output.as_deref(), Some(b"critical-node".as_slice()));
+    }
+
+    #[tokio::test]
+    async fn node_accepts_consensus_frame_with_signed_validator_set() {
+        let temp = tempfile::tempdir().unwrap();
+        let authority = Keypair::generate();
+        let validator = Keypair::generate();
+        let validator_set_path = temp.path().join("poa-validators.json");
+        let signed = sign_poa_validator_set(
+            &authority,
+            PoaValidatorSet {
+                schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+                set_id: Uuid::from_bytes([6_u8; 16]),
+                epoch: 2,
+                required_threshold: 1,
+                validators: vec![PoaValidatorDescriptor {
+                    node_id: validator.node_id(),
+                    public_key: public_key_string(&validator),
+                }],
+                valid_from_micros: None,
+                expires_at_micros: None,
+                labels: Vec::new(),
+            },
+        )
+        .unwrap();
+        std::fs::write(
+            &validator_set_path,
+            serde_json::to_string_pretty(&signed).unwrap(),
+        )
+        .unwrap();
+        let harness = node_harness_with_poa(
+            SecurityConfig::default(),
+            PoaConfig {
+                required_threshold: 1,
+                validator_set: Some(validator_set_path),
+                validator_set_authority: Some(public_key_string(&authority)),
+                ..PoaConfig::default()
+            },
+        )
+        .await;
+        let signed = signed_consensus_echo_frame(&harness, now_micros().unwrap());
+        let certified = certify_frame(&signed, 1, std::slice::from_ref(&validator)).unwrap();
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &certified)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.action, "echo");
     }
 
     #[tokio::test]

@@ -106,6 +106,45 @@ Inspect an existing config:
 cargo run -p zap-cli -- trust inspect --config zap.toml --json
 ```
 
+For machine-to-machine onboarding, create a signed invitation from the node
+that wants to be trusted, then accept it on the operator side:
+
+```bash
+cargo run -p zap-cli -- peer invite \
+  --config zap.toml \
+  --addr 10.0.0.12:7777 \
+  --label production \
+  --out node-a.invite.json
+
+cargo run -p zap-cli -- peer accept \
+  --invite node-a.invite.json \
+  --config zap.toml \
+  --out zap.with-node-a.toml \
+  --json
+```
+
+Rotate or revoke configured machine trust material without editing TOML by
+hand:
+
+```bash
+cargo run -p zap-cli -- peer rotate \
+  --config zap.toml \
+  --node-id <peer-node-id> \
+  --out zap.rotated.toml \
+  --json
+
+cargo run -p zap-cli -- peer revoke \
+  --config zap.toml \
+  --node-id <peer-node-id> \
+  --out zap.revoked.toml \
+  --json
+```
+
+Invitations are signed by the inviting node over a domain-separated payload.
+`peer accept` verifies the signature, node id, transport key, expiry, and trust
+labels before emitting a peer block or updated config. `peer revoke` marks the
+peer `revoked` and disables send, receive, forward, and PoA-attestation gates.
+
 Each peer can restrict machine communication:
 
 ```toml
@@ -376,6 +415,47 @@ cargo run -p zap-cli -- poa request --frame critical-frame.bin --requester-key .
 cargo run -p zap-cli -- poa attest --request poa-request.json --validator-key .zap/validator.key > poa-response.json
 ```
 
+For versioned validator-set distribution, sign the set with an authority key,
+verify it, then apply it to a node config:
+
+```bash
+cargo run -p zap-cli -- poa validator-set create \
+  --authority-key .zap/operator.key \
+  --epoch 4 \
+  --threshold 2 \
+  --validator <validator-a-node-id>=<validator-a-public-key> \
+  --validator <validator-b-node-id>=<validator-b-public-key> \
+  --label production \
+  --out poa-validators.v4.json
+
+cargo run -p zap-cli -- poa validator-set verify \
+  --path poa-validators.v4.json \
+  --authority-public-key <operator-public-key> \
+  --json
+
+cargo run -p zap-cli -- poa validator-set pull \
+  --config zap.toml \
+  --target <peer-node-id> \
+  --authority-public-key <operator-public-key> \
+  --min-epoch 4 \
+  --out poa-validators.v4.json \
+  --json
+
+cargo run -p zap-cli -- poa validator-set apply \
+  --config zap.toml \
+  --set poa-validators.v4.json \
+  --authority-public-key <operator-public-key> \
+  --out zap.with-poa-set.toml \
+  --json
+```
+
+Applied configs use `poa.validator_set` and `poa.validator_set_authority`.
+`zap-node` verifies the signed set at validation/startup, rejects invalid or
+expired sets, and uses `max(poa.required_threshold, set.required_threshold)` as
+the effective threshold. `validator-set pull` uses signed `ZENV` control
+messages, verifies the peer response, verifies the nested validator-set
+signature, and writes the received JSON unchanged.
+
 For binary action payloads, use a file and mark the payload as opaque:
 
 ```bash
@@ -411,6 +491,15 @@ node_id = "validator-node-id"
 public_key = "validator-public-key"
 ```
 
+Or with a signed validator set:
+
+```toml
+[poa]
+required_threshold = 2
+validator_set = "poa-validators.v4.json"
+validator_set_authority = "operator-public-key"
+```
+
 Signed receipts are optional and append-only JSONL:
 
 ```toml
@@ -420,10 +509,12 @@ path = "logs/actions.jsonl"
 
 Receipts are audit records signed by the processing node. They are not financial records.
 
-Verify a receipt log after a test run or before archiving it:
+Verify a receipt log after a test run, pull peer receipts for an audit window,
+or archive multiple logs:
 
 ```bash
 cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
+cargo run -p zap-cli -- receipts pull --config zap.toml --target <peer-node-id> --out logs/peer-actions.jsonl --json
 cargo run -p zap-cli -- receipts prune --path logs/actions.jsonl --before-processed-at-micros 1735689600000000 --out logs/actions.retained.jsonl
 cargo run -p zap-cli -- receipts merge logs/node-a.jsonl logs/node-b.jsonl --out logs/receipts.archive.jsonl
 ```

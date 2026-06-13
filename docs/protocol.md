@@ -96,6 +96,31 @@ Envelope kinds in v1 are encoded as `u16`:
 
 The `zap-envelope` API exposes owned constructors such as `ZapEnvelope::action(subject, body)`, `event`, `data`, `query`, and `response` using the default content type. Callers that need explicit media types can use `ZapEnvelope::new(kind, subject, content_type, body)` or `with_content_type(...)`. `ZapEnvelopeRef::parse(&[u8])` inspects encoded envelope bytes without copying the body.
 
+## Control Subjects
+
+Protocol extensions that do not require a new wire version use `ZENV` envelopes
+with `kind = control` and versioned JSON bodies. Current control subjects
+include:
+
+| Subject | Content type | Purpose |
+| --- | --- | --- |
+| `zap.capability.query` | `application/zap-capability+json` | Ask a peer for advertised capabilities and grants |
+| `zap.capability.response` | `application/zap-capability+json` | Return a signed peer capability advertisement |
+| `zap.poa.validator_set.request` | `application/zap-poa-validator-set+json` | Request a signed versioned PoA validator set from a peer |
+| `zap.poa.validator_set.response` | `application/zap-poa-validator-set+json` | Return a signed PoA validator set or an unavailable reason |
+| `zap.receipts.request` | `application/zap-receipts+json` | Request signed receipts from a peer receipt log |
+| `zap.receipts.response` | `application/zap-receipts+json` | Return verified signed receipts, with a truncation flag |
+
+PoA validator-set requests can include a minimum epoch. Responses are signed as
+normal frames and carry a nested signed validator-set document. Receivers should
+verify the response frame, the nested validator-set signature, the expected
+authority, and the epoch before applying it to config.
+
+Receipt replication requests can filter by `after_processed_at_micros`, `kind`,
+`subject`, `source_node`, and `target_node`, and include a bounded `limit`.
+Responses contain signed receipt objects. Receivers must verify the response
+frame signature and each nested receipt signature before archiving or merging.
+
 ## Encrypted UDP Datagram
 
 `zap-net` wraps encoded frames in an authenticated UDP datagram:

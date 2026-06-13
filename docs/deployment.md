@@ -71,6 +71,9 @@ keys when peer membership changes.
 - Store node private keys outside the repository.
 - Configure static peers with verified `node_id`, `public_key`, and
   `transport_key`.
+- Prefer `zap peer invite` and `zap peer accept` for signed peer enrollment
+  material, and use `zap peer rotate` / `zap peer revoke` for auditable
+  membership changes.
 - Set `[peers.trust]` so send, receive, forwarding, PoA-attestation, expiry,
   and key-rotation policy are explicit for each machine.
 - Set `[security]` replay and clock-skew limits intentionally.
@@ -78,6 +81,11 @@ keys when peer membership changes.
 - Enable `[receipts].path` when audit trails are required.
 - Run `zap capability cache refresh --config <path> --strict` before strict
   validation when routes require peer grants.
+- Use `zap poa validator-set verify` before deploying signed validator-set
+  files referenced by `[poa].validator_set`.
+- Use `zap poa validator-set pull --authority-public-key <key>` when fetching
+  validator sets from peers, then run strict config validation on the applied
+  config.
 - Run `zap check-config --strict --config <path>` before starting a daemon.
 - Pin container image digests in production orchestrators once images are
   published.

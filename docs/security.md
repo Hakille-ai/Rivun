@@ -45,6 +45,13 @@ prevents routes from targeting peers where forwarding is disabled. Optional
 expiry and transport-key age gates let operators force peer re-enrollment and
 key rotation on a schedule.
 
+`zap peer invite` creates a signed offline enrollment document for a node's
+advertised address, public key, transport key, key epoch, optional expiry, and
+labels. `zap peer accept` verifies the domain-separated Ed25519 signature and
+node id before emitting a peer block or updated config. `zap peer rotate` bumps
+a peer transport-key epoch, and `zap peer revoke` sets trust to `revoked` while
+disabling send, receive, forwarding, and PoA-attestation permissions.
+
 ## Anti-Replay
 
 `zap-node` validates timestamp freshness before dispatching an action. By default, frames outside a five-minute clock-skew window are rejected. The node also keeps an in-memory BLAKE3 fingerprint cache of recently accepted frames per process and rejects exact frame replays.
@@ -85,6 +92,25 @@ node_id = "..."
 public_key = "..."
 ```
 
+For distributed operations, `[poa]` can instead point at a signed, versioned
+validator-set JSON file:
+
+```toml
+[poa]
+required_threshold = 2
+validator_set = "poa-validators.v4.json"
+validator_set_authority = "operator-public-key"
+```
+
+`zap poa validator-set create` signs the set with an authority key, `verify`
+checks the domain-separated signature and validator identities, and `apply`
+writes the config fields above. At startup, `zap-node` verifies the set, rejects
+expired or not-yet-valid sets, and uses the stricter of the local threshold and
+the set threshold. `zap poa validator-set pull` can fetch this signed JSON from
+a configured peer over `ZENV` control messages; operators should still pin the
+expected authority public key so the nested set signature is checked against the
+intended authority, not just the responding peer.
+
 `zap send --requires-consensus` refuses to emit consensus-protected frames
 unless a local `--poa-validator-key` is supplied or `--poa-network` can collect
 a configured validator quorum.
@@ -103,6 +129,12 @@ threshold; the default is 2000 ms.
 ## Signed Receipts
 
 When `[receipts].path` is configured, `zap-node` appends one Ed25519-signed JSONL receipt after each processed action. Receipts contain hashes, action metadata, and optional PoA summaries. They are audit records only, not financial records.
+
+Operators can pull receipts from configured peers with signed `ZENV` control
+messages. `zap receipts pull` accepts bounded filters, verifies the peer's
+signed response frame, verifies every nested receipt signature, and writes a
+JSONL log that remains compatible with offline `verify`, `prune`, and `merge`
+workflows.
 
 ## Capability Discovery, Routing, and Memory
 

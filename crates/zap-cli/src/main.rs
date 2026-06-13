@@ -2,7 +2,8 @@ use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
-use serde::Serialize;
+use rand_core::{OsRng, RngCore};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
     fs::{self, OpenOptions},
@@ -18,21 +19,31 @@ use zap_capability::{
     CapabilityCacheEntry, CapabilityId, CapabilityQuery, CapabilityResponse, DriverPermissions,
     JsonlCapabilityCache, capabilities_for_driver,
 };
-use zap_core::{PoaAttestation, ZapFlags, ZapFrame, ZapHeader};
+use zap_core::{ED25519_SIGNATURE_LEN, PoaAttestation, ZapFlags, ZapFrame, ZapHeader, now_micros};
 use zap_crypto::{
     Keypair, POA_ATTESTATION_CONTENT_TYPE, POA_ATTESTATION_REQUEST_SUBJECT,
-    POA_ATTESTATION_RESPONSE_SUBJECT, PoaAttestationRequest, PoaAttestationResponse, PublicKey,
-    certify_frame, certify_frame_with_attestations, poa_attestation_request, poa_frame_digest,
-    sign_frame, sign_poa_attestation_request, verify_frame, verify_poa_attestation_response,
+    POA_ATTESTATION_RESPONSE_SUBJECT, POA_VALIDATOR_SET_CONTENT_TYPE,
+    POA_VALIDATOR_SET_REQUEST_SUBJECT, POA_VALIDATOR_SET_RESPONSE_SUBJECT,
+    POA_VALIDATOR_SET_SCHEMA_VERSION, PoaAttestationRequest, PoaAttestationResponse,
+    PoaValidatorDescriptor, PoaValidatorSet, PoaValidatorSetRequest, PoaValidatorSetResponse,
+    PublicKey, SignedPoaValidatorSet, certify_frame, certify_frame_with_attestations,
+    poa_attestation_request, poa_frame_digest, sign_frame, sign_poa_attestation_request,
+    sign_poa_validator_set, verify_frame, verify_poa_attestation_response,
 };
 use zap_envelope::{
     DEFAULT_CONTENT_TYPE as DEFAULT_ENVELOPE_CONTENT_TYPE, ZapEnvelope, ZapEnvelopeRef,
     ZapMessageKind,
 };
-use zap_ledger::SignedActionReceipt;
+use zap_ledger::{
+    DEFAULT_RECEIPT_REPLICATION_LIMIT, RECEIPT_REPLICATION_CONTENT_TYPE,
+    RECEIPT_REPLICATION_REQUEST_SUBJECT, RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+    ReceiptReplicationRequest, ReceiptReplicationResponse, SignedActionReceipt,
+};
 use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
-use zap_node::{PeerTrustConfig, PeerTrustStatus, ZapNode, ZapNodeConfig, describe_capabilities};
+use zap_node::{
+    PeerConfig, PeerTrustConfig, PeerTrustStatus, ZapNode, ZapNodeConfig, describe_capabilities,
+};
 use zap_policy::{PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
 use zap_schema::{MessageContract, MessageParts};
@@ -162,6 +173,11 @@ enum Commands {
     Trust {
         #[command(subcommand)]
         command: TrustCommand,
+    },
+    /// Create, accept, rotate, and revoke machine peer enrollment material.
+    Peer {
+        #[command(subcommand)]
+        command: PeerCommand,
     },
     /// Validate typed message contracts for agents and machines.
     Schema {
@@ -416,6 +432,83 @@ enum TrustCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PeerCommand {
+    /// Create a signed invitation describing this local node as a peer.
+    Invite {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        /// Advertised socket address for the invited remote to use.
+        #[arg(long)]
+        addr: Option<String>,
+        /// Hex-encoded 32-byte transport key. Generated when omitted.
+        #[arg(long)]
+        transport_key: Option<String>,
+        #[arg(long)]
+        transport_key_epoch: Option<u64>,
+        #[arg(long)]
+        transport_key_rotated_at_micros: Option<u64>,
+        #[arg(long)]
+        expires_at_micros: Option<u64>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Verify a signed peer invitation and emit a peer config block or config file.
+    Accept {
+        #[arg(long)]
+        invite: PathBuf,
+        /// Optional existing config used to reject duplicate peers and produce a full updated config.
+        #[arg(long)]
+        config: Option<PathBuf>,
+        /// Write a full updated config here when --config is supplied, or a peer block otherwise.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rotate a configured peer transport key and bump its epoch.
+    Rotate {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        node_id: Uuid,
+        /// Hex-encoded 32-byte transport key. Generated when omitted.
+        #[arg(long)]
+        transport_key: Option<String>,
+        #[arg(long)]
+        transport_key_epoch: Option<u64>,
+        #[arg(long)]
+        transport_key_rotated_at_micros: Option<u64>,
+        /// Write the updated config here. Prints the config when omitted.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revoke a configured peer by disabling machine permissions and marking trust revoked.
+    Revoke {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        node_id: Uuid,
+        /// Write the updated config here. Prints the config when omitted.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum SchemaCommand {
     /// Validate one encoded ZENV envelope against a TOML or JSON contract.
     Validate {
@@ -587,6 +680,33 @@ enum RegistryCommand {
 
 #[derive(Debug, Subcommand)]
 enum ReceiptsCommand {
+    /// Pull signed receipts from a configured peer over ZAP control messages.
+    Pull {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        after_processed_at_micros: Option<u64>,
+        #[arg(long, default_value_t = DEFAULT_RECEIPT_REPLICATION_LIMIT)]
+        limit: usize,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        source_node: Option<Uuid>,
+        #[arg(long)]
+        target_node: Option<Uuid>,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Verify every signed JSONL receipt in a log file.
     Verify {
         #[arg(long)]
@@ -641,6 +761,83 @@ enum PoaCommand {
         request: PathBuf,
         #[arg(long)]
         validator_key: PathBuf,
+    },
+    /// Create, verify, and apply signed versioned PoA validator sets.
+    #[command(name = "validator-set")]
+    ValidatorSet {
+        #[command(subcommand)]
+        command: PoaValidatorSetCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PoaValidatorSetCommand {
+    /// Create a signed versioned PoA validator-set JSON file.
+    Create {
+        #[arg(long)]
+        authority_key: PathBuf,
+        #[arg(long, default_value_t = Uuid::new_v4())]
+        set_id: Uuid,
+        #[arg(long, default_value_t = 1)]
+        epoch: u64,
+        #[arg(long)]
+        threshold: u16,
+        /// Validator as <node-id>=<base64-public-key>. Repeat for each validator.
+        #[arg(long = "validator")]
+        validators: Vec<String>,
+        #[arg(long)]
+        valid_from_micros: Option<u64>,
+        #[arg(long)]
+        expires_at_micros: Option<u64>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Verify a signed PoA validator-set JSON file.
+    Verify {
+        #[arg(long)]
+        path: PathBuf,
+        #[arg(long)]
+        authority_public_key: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pull a signed PoA validator-set JSON file from a configured peer.
+    Pull {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        authority_public_key: Option<String>,
+        #[arg(long)]
+        min_epoch: Option<u64>,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Apply a verified validator-set file to a node config.
+    Apply {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        set: PathBuf,
+        #[arg(long)]
+        authority_public_key: Option<String>,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -725,12 +922,13 @@ async fn main() -> Result<()> {
         Commands::Memory { command } => memory(command),
         Commands::Route { command } => route(command),
         Commands::Trust { command } => trust(command),
+        Commands::Peer { command } => peer(command),
         Commands::Schema { command } => schema(command),
         Commands::Policy { command } => policy(command),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command),
-        Commands::Receipts { command } => receipts(command),
-        Commands::Poa { command } => poa(command),
+        Commands::Receipts { command } => receipts(command).await,
+        Commands::Poa { command } => poa(command).await,
         Commands::Bench { command } => bench(command),
     }
 }
@@ -1403,7 +1601,7 @@ fn load_keypairs(paths: &[PathBuf]) -> Result<Vec<Keypair>> {
         .collect()
 }
 
-fn poa(command: PoaCommand) -> Result<()> {
+async fn poa(command: PoaCommand) -> Result<()> {
     match command {
         PoaCommand::Request {
             frame,
@@ -1414,6 +1612,7 @@ fn poa(command: PoaCommand) -> Result<()> {
             request,
             validator_key,
         } => sign_poa_request(&request, &validator_key),
+        PoaCommand::ValidatorSet { command } => poa_validator_set(command).await,
     }
 }
 
@@ -1454,8 +1653,481 @@ fn sign_poa_request(request_path: &Path, validator_key_path: &Path) -> Result<()
     Ok(())
 }
 
-fn receipts(command: ReceiptsCommand) -> Result<()> {
+async fn poa_validator_set(command: PoaValidatorSetCommand) -> Result<()> {
     match command {
+        PoaValidatorSetCommand::Create {
+            authority_key,
+            set_id,
+            epoch,
+            threshold,
+            validators,
+            valid_from_micros,
+            expires_at_micros,
+            labels,
+            out,
+            force,
+        } => create_poa_validator_set(PoaValidatorSetCreateOptions {
+            authority_key: &authority_key,
+            set_id,
+            epoch,
+            threshold,
+            validators,
+            valid_from_micros,
+            expires_at_micros,
+            labels,
+            out,
+            force,
+        }),
+        PoaValidatorSetCommand::Verify {
+            path,
+            authority_public_key,
+            json,
+        } => verify_poa_validator_set_file(&path, authority_public_key.as_deref(), json),
+        PoaValidatorSetCommand::Pull {
+            config,
+            target,
+            out,
+            authority_public_key,
+            min_epoch,
+            timeout_ms,
+            force,
+            json,
+        } => {
+            pull_poa_validator_set(PoaValidatorSetPullOptions {
+                config_path: &config,
+                target,
+                out: &out,
+                authority_public_key,
+                min_epoch,
+                timeout_ms,
+                force,
+                json,
+            })
+            .await
+        }
+        PoaValidatorSetCommand::Apply {
+            config,
+            set,
+            authority_public_key,
+            out,
+            force,
+            json,
+        } => apply_poa_validator_set(
+            &config,
+            &set,
+            authority_public_key.as_deref(),
+            &out,
+            force,
+            json,
+        ),
+    }
+}
+
+struct PoaValidatorSetCreateOptions<'a> {
+    authority_key: &'a Path,
+    set_id: Uuid,
+    epoch: u64,
+    threshold: u16,
+    validators: Vec<String>,
+    valid_from_micros: Option<u64>,
+    expires_at_micros: Option<u64>,
+    labels: Vec<String>,
+    out: Option<PathBuf>,
+    force: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct PoaValidatorSetReport {
+    path: Option<String>,
+    set_id: Uuid,
+    epoch: u64,
+    required_threshold: u16,
+    validators: usize,
+    authority_node: Uuid,
+    valid_from_micros: Option<u64>,
+    expires_at_micros: Option<u64>,
+    labels: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PoaValidatorSetApplyReport {
+    config: String,
+    out: String,
+    validator_set: String,
+    set_id: Uuid,
+    epoch: u64,
+    required_threshold: u16,
+    validators: usize,
+    authority_node: Uuid,
+}
+
+struct PoaValidatorSetPullOptions<'a> {
+    config_path: &'a Path,
+    target: Uuid,
+    out: &'a Path,
+    authority_public_key: Option<String>,
+    min_epoch: Option<u64>,
+    timeout_ms: u64,
+    force: bool,
+    json: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct PoaValidatorSetPullReport {
+    peer: Uuid,
+    out: String,
+    set_id: Uuid,
+    epoch: u64,
+    required_threshold: u16,
+    validators: usize,
+    authority_node: Uuid,
+}
+
+fn create_poa_validator_set(options: PoaValidatorSetCreateOptions<'_>) -> Result<()> {
+    let authority = load_keypair(options.authority_key)?;
+    let validators = parse_poa_validator_descriptors(&options.validators)?;
+    validate_trust_labels(&options.labels)?;
+    let set = PoaValidatorSet {
+        schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+        set_id: options.set_id,
+        epoch: options.epoch,
+        required_threshold: options.threshold,
+        validators,
+        valid_from_micros: options.valid_from_micros,
+        expires_at_micros: options.expires_at_micros,
+        labels: options.labels,
+    };
+    let signed = sign_poa_validator_set(&authority, set)?;
+    let output = format!("{}\n", serde_json::to_string_pretty(&signed)?);
+    if let Some(out) = options.out {
+        write_text_file(&out, &output, options.force)?;
+        println!("poa_validator_set={}", out.display());
+        println!("set_id={}", signed.set.set_id);
+        println!("epoch={}", signed.set.epoch);
+    } else {
+        print!("{output}");
+    }
+    Ok(())
+}
+
+async fn pull_poa_validator_set(options: PoaValidatorSetPullOptions<'_>) -> Result<()> {
+    let PoaValidatorSetPullOptions {
+        config_path,
+        target,
+        out,
+        authority_public_key,
+        min_epoch,
+        timeout_ms,
+        force,
+        json,
+    } = options;
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| format!("target {} not found in {}", target, config_path.display()))?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for validator-set pull",
+            target
+        );
+    }
+    let authority = authority_public_key
+        .as_deref()
+        .map(decode_public_key)
+        .transpose()
+        .context("invalid --authority-public-key")?;
+    let request = PoaValidatorSetRequest {
+        schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+        min_epoch,
+    };
+    request.validate()?;
+
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        POA_VALIDATOR_SET_REQUEST_SUBJECT,
+        POA_VALIDATOR_SET_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(&request)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(&keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let public_key = decode_public_key(&target_peer.public_key)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let response = loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!(
+                "timed out waiting for PoA validator-set response from {}",
+                target
+            );
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let inbound = tokio::time::timeout(remaining, endpoint.recv()).await??;
+        if inbound.peer.node_id != target {
+            continue;
+        }
+        if config.require_signed {
+            verify_frame(&public_key, &inbound.frame)?;
+        }
+        let envelope = ZapEnvelopeRef::parse(&inbound.frame.payload)
+            .context("invalid PoA validator-set response envelope")?;
+        if envelope.kind() != ZapMessageKind::Control
+            || envelope.subject() != POA_VALIDATOR_SET_RESPONSE_SUBJECT
+        {
+            continue;
+        }
+        let response: PoaValidatorSetResponse = serde_json::from_slice(envelope.body())
+            .context("invalid PoA validator-set response body")?;
+        if response.node_id != target {
+            bail!(
+                "PoA validator-set response from {} advertised node_id {}",
+                target,
+                response.node_id
+            );
+        }
+        response.verify(authority.as_ref())?;
+        break response;
+    };
+    let signed = response.validator_set.with_context(|| {
+        format!(
+            "peer {} did not return a PoA validator set: {}",
+            target,
+            response
+                .unavailable_reason
+                .unwrap_or_else(|| "unavailable".to_string())
+        )
+    })?;
+    let output = format!("{}\n", serde_json::to_string_pretty(&signed)?);
+    write_text_file(out, &output, force)?;
+    let report = PoaValidatorSetPullReport {
+        peer: target,
+        out: out.display().to_string(),
+        set_id: signed.set.set_id,
+        epoch: signed.set.epoch,
+        required_threshold: signed.set.required_threshold,
+        validators: signed.set.validators.len(),
+        authority_node: signed.authority_node,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("peer={}", report.peer);
+        println!("out={}", report.out);
+        println!("set_id={}", report.set_id);
+        println!("epoch={}", report.epoch);
+        println!("required_threshold={}", report.required_threshold);
+        println!("validators={}", report.validators);
+        println!("authority_node={}", report.authority_node);
+    }
+    Ok(())
+}
+
+fn verify_poa_validator_set_file(
+    path: &Path,
+    authority_public_key: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let signed = load_signed_poa_validator_set_file(path)?;
+    let authority = authority_public_key
+        .map(decode_public_key)
+        .transpose()
+        .context("invalid --authority-public-key")?;
+    signed.verify(authority.as_ref())?;
+    let report = poa_validator_set_report(Some(path), &signed);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_poa_validator_set_report(&report);
+    }
+    Ok(())
+}
+
+fn apply_poa_validator_set(
+    config_path: &Path,
+    set_path: &Path,
+    authority_public_key: Option<&str>,
+    out: &Path,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    let signed = load_signed_poa_validator_set_file(set_path)?;
+    let authority = authority_public_key
+        .map(decode_public_key)
+        .transpose()
+        .context("invalid --authority-public-key")?;
+    signed.verify(authority.as_ref())?;
+    let mut config = load_raw_node_config(config_path)?;
+    config.poa.validator_set = Some(set_path.to_path_buf());
+    config.poa.validator_set_authority = Some(
+        authority_public_key
+            .map(str::to_string)
+            .unwrap_or_else(|| signed.authority_public_key.clone()),
+    );
+    config.poa.required_threshold = config
+        .poa
+        .required_threshold
+        .max(signed.set.required_threshold);
+    config.poa.validators.clear();
+    let output = toml::to_string_pretty(&config)?;
+    write_text_file(out, &output, force)?;
+    let report = PoaValidatorSetApplyReport {
+        config: config_path.display().to_string(),
+        out: out.display().to_string(),
+        validator_set: set_path.display().to_string(),
+        set_id: signed.set.set_id,
+        epoch: signed.set.epoch,
+        required_threshold: config.poa.required_threshold,
+        validators: signed.set.validators.len(),
+        authority_node: signed.authority_node,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("config={}", report.config);
+        println!("out={}", report.out);
+        println!("validator_set={}", report.validator_set);
+        println!("set_id={}", report.set_id);
+        println!("epoch={}", report.epoch);
+        println!("required_threshold={}", report.required_threshold);
+        println!("validators={}", report.validators);
+        println!("authority_node={}", report.authority_node);
+    }
+    Ok(())
+}
+
+fn parse_poa_validator_descriptors(inputs: &[String]) -> Result<Vec<PoaValidatorDescriptor>> {
+    if inputs.is_empty() {
+        bail!("at least one --validator is required");
+    }
+    let mut validators = Vec::with_capacity(inputs.len());
+    let mut seen = BTreeSet::new();
+    for input in inputs {
+        let (node_id, public_key) = input.split_once('=').with_context(|| {
+            format!("invalid --validator `{input}`; expected <node-id>=<public-key>")
+        })?;
+        let node_id = node_id
+            .parse::<Uuid>()
+            .with_context(|| format!("invalid validator node id `{node_id}`"))?;
+        let decoded = decode_public_key(public_key)
+            .with_context(|| format!("invalid validator public key for {node_id}"))?;
+        if decoded.node_id() != node_id {
+            bail!(
+                "validator public_key derives node_id {}, but --validator declares {}",
+                decoded.node_id(),
+                node_id
+            );
+        }
+        if !seen.insert(node_id) {
+            bail!("duplicate validator {}", node_id);
+        }
+        validators.push(PoaValidatorDescriptor {
+            node_id,
+            public_key: public_key.to_string(),
+        });
+    }
+    Ok(validators)
+}
+
+fn load_signed_poa_validator_set_file(path: &Path) -> Result<SignedPoaValidatorSet> {
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read PoA validator set {}", path.display()))?;
+    serde_json::from_str(&input)
+        .with_context(|| format!("failed to parse PoA validator set {}", path.display()))
+}
+
+fn poa_validator_set_report(
+    path: Option<&Path>,
+    signed: &SignedPoaValidatorSet,
+) -> PoaValidatorSetReport {
+    PoaValidatorSetReport {
+        path: path.map(|path| path.display().to_string()),
+        set_id: signed.set.set_id,
+        epoch: signed.set.epoch,
+        required_threshold: signed.set.required_threshold,
+        validators: signed.set.validators.len(),
+        authority_node: signed.authority_node,
+        valid_from_micros: signed.set.valid_from_micros,
+        expires_at_micros: signed.set.expires_at_micros,
+        labels: signed.set.labels.clone(),
+    }
+}
+
+fn print_poa_validator_set_report(report: &PoaValidatorSetReport) {
+    if let Some(path) = &report.path {
+        println!("path={path}");
+    }
+    println!("set_id={}", report.set_id);
+    println!("epoch={}", report.epoch);
+    println!("required_threshold={}", report.required_threshold);
+    println!("validators={}", report.validators);
+    println!("authority_node={}", report.authority_node);
+    println!(
+        "valid_from_micros={}",
+        report
+            .valid_from_micros
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        "expires_at_micros={}",
+        report
+            .expires_at_micros
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    );
+    println!(
+        "labels={}",
+        if report.labels.is_empty() {
+            "none".to_string()
+        } else {
+            report.labels.join(",")
+        }
+    );
+}
+
+async fn receipts(command: ReceiptsCommand) -> Result<()> {
+    match command {
+        ReceiptsCommand::Pull {
+            config,
+            target,
+            out,
+            after_processed_at_micros,
+            limit,
+            kind,
+            subject,
+            source_node,
+            target_node,
+            timeout_ms,
+            force,
+            json,
+        } => {
+            pull_receipts(ReceiptPullOptions {
+                config_path: &config,
+                target,
+                out: &out,
+                after_processed_at_micros,
+                limit,
+                kind,
+                subject,
+                source_node,
+                target_node,
+                timeout_ms,
+                force,
+                json,
+            })
+            .await
+        }
         ReceiptsCommand::Verify { path, json } => verify_receipts(&path, json),
         ReceiptsCommand::Prune {
             path,
@@ -1471,6 +2143,174 @@ fn receipts(command: ReceiptsCommand) -> Result<()> {
             json,
         } => merge_receipts(&inputs, &out, force, json),
     }
+}
+
+struct ReceiptPullOptions<'a> {
+    config_path: &'a Path,
+    target: Uuid,
+    out: &'a Path,
+    after_processed_at_micros: Option<u64>,
+    limit: usize,
+    kind: Option<String>,
+    subject: Option<String>,
+    source_node: Option<Uuid>,
+    target_node: Option<Uuid>,
+    timeout_ms: u64,
+    force: bool,
+    json: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ReceiptPullReport {
+    peer: Uuid,
+    out: String,
+    receipts: usize,
+    truncated: bool,
+    earliest_processed_at_micros: Option<u64>,
+    latest_processed_at_micros: Option<u64>,
+}
+
+async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
+    let ReceiptPullOptions {
+        config_path,
+        target,
+        out,
+        after_processed_at_micros,
+        limit,
+        kind,
+        subject,
+        source_node,
+        target_node,
+        timeout_ms,
+        force,
+        json,
+    } = options;
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    ensure_receipt_output_is_separate(out, &[config.key_file.as_path()])?;
+    let keypair = load_keypair(&config.key_file)?;
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| format!("target {} not found in {}", target, config_path.display()))?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for receipt pull",
+            target
+        );
+    }
+    let request = ReceiptReplicationRequest {
+        schema_version: zap_ledger::RECEIPT_REPLICATION_SCHEMA_VERSION,
+        after_processed_at_micros,
+        limit: Some(limit),
+        kind,
+        subject,
+        source_node,
+        target_node,
+    };
+    request.validate()?;
+
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        RECEIPT_REPLICATION_REQUEST_SUBJECT,
+        RECEIPT_REPLICATION_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(&request)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(&keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let public_key = decode_public_key(&target_peer.public_key)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let response = loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!(
+                "timed out waiting for receipt replication response from {}",
+                target
+            );
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let inbound = tokio::time::timeout(remaining, endpoint.recv()).await??;
+        if inbound.peer.node_id != target {
+            continue;
+        }
+        if config.require_signed {
+            verify_frame(&public_key, &inbound.frame)?;
+        }
+        let envelope = ZapEnvelopeRef::parse(&inbound.frame.payload)
+            .context("invalid receipt replication response envelope")?;
+        if envelope.kind() != ZapMessageKind::Control
+            || envelope.subject() != RECEIPT_REPLICATION_RESPONSE_SUBJECT
+        {
+            continue;
+        }
+        let response: ReceiptReplicationResponse = serde_json::from_slice(envelope.body())
+            .context("invalid receipt replication response body")?;
+        if response.node_id != target {
+            bail!(
+                "receipt replication response from {} advertised node_id {}",
+                target,
+                response.node_id
+            );
+        }
+        response.verify()?;
+        break response;
+    };
+
+    let mut output = String::new();
+    for receipt in &response.receipts {
+        output.push_str(&receipt.to_json_line()?);
+    }
+    write_text_file(out, &output, force)?;
+    let earliest = response
+        .receipts
+        .iter()
+        .map(|receipt| receipt.receipt.processed_at_micros)
+        .min();
+    let latest = response
+        .receipts
+        .iter()
+        .map(|receipt| receipt.receipt.processed_at_micros)
+        .max();
+    let report = ReceiptPullReport {
+        peer: target,
+        out: out.display().to_string(),
+        receipts: response.receipts.len(),
+        truncated: response.truncated,
+        earliest_processed_at_micros: earliest,
+        latest_processed_at_micros: latest,
+    };
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("peer={}", report.peer);
+        println!("out={}", report.out);
+        println!("receipts={}", report.receipts);
+        println!("truncated={}", report.truncated);
+        println!(
+            "earliest_processed_at_micros={}",
+            report
+                .earliest_processed_at_micros
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+        println!(
+            "latest_processed_at_micros={}",
+            report
+                .latest_processed_at_micros
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+    }
+    Ok(())
 }
 
 fn verify_receipts(path: &Path, json: bool) -> Result<()> {
@@ -2856,6 +3696,470 @@ fn peer_trust_status_name(status: PeerTrustStatus) -> &'static str {
         PeerTrustStatus::Quarantined => "quarantined",
         PeerTrustStatus::Revoked => "revoked",
     }
+}
+
+const PEER_INVITE_SCHEMA_VERSION: u8 = 1;
+const PEER_INVITE_SIGNATURE_DOMAIN: &[u8] = b"ZAP-PEER-INVITE-v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PeerInvitePayload {
+    schema_version: u8,
+    node_id: Uuid,
+    addr: String,
+    public_key: String,
+    transport_key: String,
+    transport_key_epoch: u64,
+    transport_key_rotated_at_micros: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expires_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SignedPeerInvite {
+    schema_version: u8,
+    payload: PeerInvitePayload,
+    signature: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PeerAcceptReport {
+    peer: Uuid,
+    addr: String,
+    out: Option<String>,
+    config: Option<String>,
+    peer_block: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PeerMutationReport {
+    peer: Uuid,
+    out: Option<String>,
+    config: String,
+    transport_key_epoch: Option<u64>,
+    transport_key_rotated_at_micros: Option<u64>,
+    status: &'static str,
+    updated_config: Option<String>,
+}
+
+fn peer(command: PeerCommand) -> Result<()> {
+    match command {
+        PeerCommand::Invite {
+            config,
+            addr,
+            transport_key,
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            expires_at_micros,
+            labels,
+            out,
+            force,
+        } => peer_invite(PeerInviteOptions {
+            config_path: &config,
+            addr,
+            transport_key,
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            expires_at_micros,
+            labels,
+            out,
+            force,
+        }),
+        PeerCommand::Accept {
+            invite,
+            config,
+            out,
+            force,
+            json,
+        } => peer_accept(&invite, config.as_deref(), out.as_deref(), force, json),
+        PeerCommand::Rotate {
+            config,
+            node_id,
+            transport_key,
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            out,
+            force,
+            json,
+        } => peer_rotate(PeerRotateOptions {
+            config_path: &config,
+            node_id,
+            transport_key,
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            out,
+            force,
+            json,
+        }),
+        PeerCommand::Revoke {
+            config,
+            node_id,
+            out,
+            force,
+            json,
+        } => peer_revoke(&config, node_id, out.as_deref(), force, json),
+    }
+}
+
+struct PeerInviteOptions<'a> {
+    config_path: &'a Path,
+    addr: Option<String>,
+    transport_key: Option<String>,
+    transport_key_epoch: Option<u64>,
+    transport_key_rotated_at_micros: Option<u64>,
+    expires_at_micros: Option<u64>,
+    labels: Vec<String>,
+    out: Option<PathBuf>,
+    force: bool,
+}
+
+fn peer_invite(options: PeerInviteOptions<'_>) -> Result<()> {
+    let config = ZapNodeConfig::from_path(options.config_path)?;
+    let keypair = load_keypair(&config.key_file)?;
+    let public_key = STANDARD_NO_PAD.encode(keypair.verifying_key().to_bytes());
+    let node_id = keypair.node_id();
+    let addr = options.addr.unwrap_or(config.bind);
+    let transport_key = match options.transport_key {
+        Some(key) => {
+            validate_transport_key_hex(&key)?;
+            key
+        }
+        None => random_transport_key_hex(),
+    };
+    let transport_key_epoch = options.transport_key_epoch.unwrap_or(1);
+    if transport_key_epoch == 0 {
+        bail!("transport_key_epoch must be greater than zero");
+    }
+    let transport_key_rotated_at_micros = options
+        .transport_key_rotated_at_micros
+        .unwrap_or(now_micros()?);
+    validate_peer_expiry(options.expires_at_micros)?;
+    validate_trust_labels(&options.labels)?;
+
+    let payload = PeerInvitePayload {
+        schema_version: PEER_INVITE_SCHEMA_VERSION,
+        node_id,
+        addr,
+        public_key,
+        transport_key,
+        transport_key_epoch,
+        transport_key_rotated_at_micros,
+        expires_at_micros: options.expires_at_micros,
+        labels: options.labels,
+    };
+    let payload_bytes = canonical_peer_invite_payload(&payload)?;
+    let signature = keypair.sign_domain_message(PEER_INVITE_SIGNATURE_DOMAIN, &payload_bytes);
+    let invite = SignedPeerInvite {
+        schema_version: PEER_INVITE_SCHEMA_VERSION,
+        payload,
+        signature: STANDARD_NO_PAD.encode(signature),
+    };
+    let output = format!("{}\n", serde_json::to_string_pretty(&invite)?);
+    if let Some(out) = options.out {
+        write_text_file(&out, &output, options.force)?;
+        println!("peer_invite={}", out.display());
+    } else {
+        print!("{output}");
+    }
+    Ok(())
+}
+
+fn peer_accept(
+    invite_path: &Path,
+    config_path: Option<&Path>,
+    out: Option<&Path>,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    let invite = load_signed_peer_invite(invite_path)?;
+    let peer = peer_config_from_invite(&invite)?;
+    let mut peer_block = None;
+    let mut output_config = None;
+    let output = if let Some(config_path) = config_path {
+        let mut config = load_raw_node_config(config_path)?;
+        ensure_peer_absent(&config, peer.node_id)?;
+        config.peers.push(peer.clone());
+        let encoded = toml::to_string_pretty(&config)?;
+        output_config = Some(config_path.display().to_string());
+        encoded
+    } else {
+        let encoded = toml::to_string_pretty(&TrustEnrollDocument {
+            peers: vec![peer.clone()],
+        })?;
+        peer_block = Some(encoded.clone());
+        encoded
+    };
+
+    if let Some(out) = out {
+        write_text_file(out, &output, force)?;
+    } else if !json {
+        print!("{output}");
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&PeerAcceptReport {
+                peer: peer.node_id,
+                addr: peer.addr,
+                out: out.map(|path| path.display().to_string()),
+                config: output_config,
+                peer_block,
+            })?
+        );
+    } else if let Some(out) = out {
+        println!("peer={}", peer.node_id);
+        println!("out={}", out.display());
+    }
+    Ok(())
+}
+
+struct PeerRotateOptions<'a> {
+    config_path: &'a Path,
+    node_id: Uuid,
+    transport_key: Option<String>,
+    transport_key_epoch: Option<u64>,
+    transport_key_rotated_at_micros: Option<u64>,
+    out: Option<PathBuf>,
+    force: bool,
+    json: bool,
+}
+
+fn peer_rotate(options: PeerRotateOptions<'_>) -> Result<()> {
+    let mut config = load_raw_node_config(options.config_path)?;
+    let peer = config
+        .peers
+        .iter_mut()
+        .find(|peer| peer.node_id == options.node_id)
+        .with_context(|| format!("peer {} not found", options.node_id))?;
+    let transport_key = match options.transport_key {
+        Some(key) => {
+            validate_transport_key_hex(&key)?;
+            key
+        }
+        None => random_transport_key_hex(),
+    };
+    let transport_key_epoch = match options.transport_key_epoch {
+        Some(0) => bail!("transport_key_epoch must be greater than zero"),
+        Some(epoch) => epoch,
+        None => peer
+            .transport_key_epoch
+            .unwrap_or(0)
+            .saturating_add(1)
+            .max(1),
+    };
+    let rotated_at = options
+        .transport_key_rotated_at_micros
+        .unwrap_or(now_micros()?);
+    peer.transport_key = transport_key;
+    peer.transport_key_epoch = Some(transport_key_epoch);
+    peer.transport_key_rotated_at_micros = Some(rotated_at);
+    let output = toml::to_string_pretty(&config)?;
+    write_peer_config_mutation(
+        &output,
+        options.config_path,
+        options.out.as_deref(),
+        options.force,
+        options.json,
+        PeerMutationReport {
+            peer: options.node_id,
+            out: options.out.as_ref().map(|path| path.display().to_string()),
+            config: options.config_path.display().to_string(),
+            transport_key_epoch: Some(transport_key_epoch),
+            transport_key_rotated_at_micros: Some(rotated_at),
+            status: "trusted",
+            updated_config: None,
+        },
+    )
+}
+
+fn peer_revoke(
+    config_path: &Path,
+    node_id: Uuid,
+    out: Option<&Path>,
+    force: bool,
+    json: bool,
+) -> Result<()> {
+    let mut config = load_raw_node_config(config_path)?;
+    let peer = config
+        .peers
+        .iter_mut()
+        .find(|peer| peer.node_id == node_id)
+        .with_context(|| format!("peer {} not found", node_id))?;
+    peer.trust.status = PeerTrustStatus::Revoked;
+    peer.trust.allow_send = false;
+    peer.trust.allow_receive = false;
+    peer.trust.allow_forward = false;
+    peer.trust.allow_poa_attestation = false;
+    let transport_key_epoch = peer.transport_key_epoch;
+    let transport_key_rotated_at_micros = peer.transport_key_rotated_at_micros;
+    let status = peer_trust_status_name(peer.trust.status);
+    let output = toml::to_string_pretty(&config)?;
+    write_peer_config_mutation(
+        &output,
+        config_path,
+        out,
+        force,
+        json,
+        PeerMutationReport {
+            peer: node_id,
+            out: out.map(|path| path.display().to_string()),
+            config: config_path.display().to_string(),
+            transport_key_epoch,
+            transport_key_rotated_at_micros,
+            status,
+            updated_config: None,
+        },
+    )
+}
+
+fn write_peer_config_mutation(
+    output: &str,
+    config_path: &Path,
+    out: Option<&Path>,
+    force: bool,
+    json: bool,
+    mut report: PeerMutationReport,
+) -> Result<()> {
+    if let Some(out) = out {
+        write_text_file(out, output, force)?;
+    } else if json {
+        report.updated_config = Some(output.to_string());
+    } else {
+        print!("{output}");
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if let Some(out) = out {
+        println!("peer={}", report.peer);
+        println!("config={}", config_path.display());
+        println!("out={}", out.display());
+        println!("status={}", report.status);
+    }
+    Ok(())
+}
+
+fn load_signed_peer_invite(path: &Path) -> Result<SignedPeerInvite> {
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read peer invite {}", path.display()))?;
+    let invite: SignedPeerInvite = serde_json::from_str(&input)
+        .with_context(|| format!("failed to parse peer invite {}", path.display()))?;
+    verify_signed_peer_invite(&invite)?;
+    Ok(invite)
+}
+
+fn verify_signed_peer_invite(invite: &SignedPeerInvite) -> Result<()> {
+    if invite.schema_version != PEER_INVITE_SCHEMA_VERSION {
+        bail!(
+            "peer invite schema version {} is unsupported",
+            invite.schema_version
+        );
+    }
+    validate_peer_invite_payload(&invite.payload)?;
+    let public_key = decode_public_key(&invite.payload.public_key)?;
+    let signature = decode_signature(&invite.signature)?;
+    public_key.verify_domain_message(
+        PEER_INVITE_SIGNATURE_DOMAIN,
+        &canonical_peer_invite_payload(&invite.payload)?,
+        &signature,
+    )?;
+    Ok(())
+}
+
+fn validate_peer_invite_payload(payload: &PeerInvitePayload) -> Result<()> {
+    if payload.schema_version != PEER_INVITE_SCHEMA_VERSION {
+        bail!(
+            "peer invite payload schema version {} is unsupported",
+            payload.schema_version
+        );
+    }
+    let public_key = decode_public_key(&payload.public_key)?;
+    if public_key.node_id() != payload.node_id {
+        bail!(
+            "peer invite public_key derives node_id {}, but payload declares {}",
+            public_key.node_id(),
+            payload.node_id
+        );
+    }
+    validate_transport_key_hex(&payload.transport_key)?;
+    if payload.transport_key_epoch == 0 {
+        bail!("transport_key_epoch must be greater than zero");
+    }
+    validate_peer_expiry(payload.expires_at_micros)?;
+    validate_trust_labels(&payload.labels)?;
+    Ok(())
+}
+
+fn peer_config_from_invite(invite: &SignedPeerInvite) -> Result<PeerConfig> {
+    verify_signed_peer_invite(invite)?;
+    Ok(PeerConfig {
+        node_id: invite.payload.node_id,
+        addr: invite.payload.addr.clone(),
+        public_key: invite.payload.public_key.clone(),
+        transport_key: invite.payload.transport_key.clone(),
+        transport_key_epoch: Some(invite.payload.transport_key_epoch),
+        transport_key_rotated_at_micros: Some(invite.payload.transport_key_rotated_at_micros),
+        trust: PeerTrustConfig {
+            expires_at_micros: invite.payload.expires_at_micros,
+            labels: invite.payload.labels.clone(),
+            ..PeerTrustConfig::default()
+        },
+    })
+}
+
+fn canonical_peer_invite_payload(payload: &PeerInvitePayload) -> Result<Vec<u8>> {
+    Ok(serde_json::to_vec(payload)?)
+}
+
+fn validate_transport_key_hex(encoded: &str) -> Result<()> {
+    let transport_key = TransportKey::from_hex(encoded)?;
+    if transport_key.0 == [0_u8; 32] {
+        bail!("transport_key must not be all zeros");
+    }
+    Ok(())
+}
+
+fn random_transport_key_hex() -> String {
+    let mut key = [0_u8; 32];
+    OsRng.fill_bytes(&mut key);
+    hex::encode(key)
+}
+
+fn validate_peer_expiry(expires_at_micros: Option<u64>) -> Result<()> {
+    if let Some(expires_at_micros) = expires_at_micros
+        && expires_at_micros <= now_micros()?
+    {
+        bail!("peer invite expires_at_micros must be in the future");
+    }
+    Ok(())
+}
+
+fn load_raw_node_config(path: &Path) -> Result<ZapNodeConfig> {
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read node config {}", path.display()))?;
+    ZapNodeConfig::from_toml_str(&input)
+        .with_context(|| format!("failed to parse node config {}", path.display()))
+}
+
+fn ensure_peer_absent(config: &ZapNodeConfig, node_id: Uuid) -> Result<()> {
+    if config.peers.iter().any(|peer| peer.node_id == node_id) {
+        bail!("peer {} already exists in config", node_id);
+    }
+    Ok(())
+}
+
+fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
+    let bytes = STANDARD_NO_PAD.decode(encoded)?;
+    if bytes.len() != ED25519_SIGNATURE_LEN {
+        bail!(
+            "invalid signature length: expected {}, got {}",
+            ED25519_SIGNATURE_LEN,
+            bytes.len()
+        );
+    }
+    Ok(bytes.try_into().unwrap())
 }
 
 fn schema(command: SchemaCommand) -> Result<()> {

@@ -5,11 +5,15 @@ use tempfile::tempdir;
 use tokio::time::{Duration, timeout};
 use uuid::Uuid;
 use zap_core::{ZapFlags, ZapFrame};
-use zap_crypto::{Keypair, sign_frame, verify_frame, verify_poa_certificate};
+use zap_crypto::{
+    Keypair, POA_VALIDATOR_SET_SCHEMA_VERSION, PoaValidatorDescriptor, PoaValidatorSet,
+    SignedPoaValidatorSet, sign_frame, sign_poa_validator_set, verify_frame,
+    verify_poa_certificate,
+};
 use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
 use zap_ledger::SignedActionReceipt;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
-use zap_node::{ZapNode, ZapNodeConfig};
+use zap_node::{PeerTrustStatus, ZapNode, ZapNodeConfig};
 use zap_store::{DriverManifest, DriverRegistry, DriverRegistryStatus};
 
 #[cfg(unix)]
@@ -1193,6 +1197,120 @@ fn receipts_merge_deduplicates_verified_logs() {
     );
 }
 
+#[tokio::test]
+async fn receipts_pull_fetches_remote_signed_log() {
+    let dir = tempdir().unwrap();
+    let receiver = Keypair::generate();
+    let sender = Keypair::generate();
+    let transport_key = [0x72_u8; 32];
+    let sender_addr = free_udp_addr();
+    let receiver_key_path = dir.path().join("receiver.key");
+    let receipt_path = dir.path().join("receiver-receipts.jsonl");
+    let receiver_config_path = dir.path().join("receiver.toml");
+    std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
+
+    let frame = ZapFrame::with_timestamp(
+        sender.node_id(),
+        receiver.node_id(),
+        ZapFlags::ENCRYPTED,
+        123,
+        Bytes::from_static(b"payload"),
+    )
+    .unwrap();
+    let signed = sign_frame(&sender, &frame).unwrap();
+    let receipt =
+        SignedActionReceipt::new(&receiver, &signed, "echo", Some(b"ok"), 456, None).unwrap();
+    std::fs::write(&receipt_path, receipt.to_json_line().unwrap()).unwrap();
+
+    std::fs::write(
+        &receiver_config_path,
+        format!(
+            r#"
+bind = '127.0.0.1:0'
+key_file = '{}'
+require_signed = true
+
+[receipts]
+path = '{}'
+
+[[peers]]
+node_id = '{}'
+addr = '{}'
+public_key = '{}'
+transport_key = '{}'
+"#,
+            receiver_key_path.display(),
+            receipt_path.display(),
+            sender.node_id(),
+            sender_addr,
+            public_key_string(&sender),
+            hex_transport_key(transport_key),
+        ),
+    )
+    .unwrap();
+    let receiver_config = ZapNodeConfig::from_path(&receiver_config_path).unwrap();
+    let receiver_node = ZapNode::from_config(receiver_config).await.unwrap();
+    let sender_config = write_sender_config(
+        &dir,
+        &sender,
+        &receiver,
+        receiver_node.local_addr().unwrap(),
+        &sender_addr,
+        transport_key,
+    );
+    let pulled_path = dir.path().join("pulled-receipts.jsonl");
+    let target = receiver.node_id().to_string();
+    let config_arg = sender_config.clone();
+    let out_arg = pulled_path.clone();
+
+    let command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "receipts",
+                "pull",
+                "--config",
+                config_arg.to_str().unwrap(),
+                "--target",
+                &target,
+                "--out",
+                out_arg.to_str().unwrap(),
+                "--after-processed-at-micros",
+                "100",
+                "--limit",
+                "10",
+                "--json",
+            ])
+            .output()
+    });
+    let handled = receiver_node.handle_once();
+    let (event, output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled, command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let output = output.unwrap().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["peer"], receiver.node_id().to_string());
+    assert_eq!(report["receipts"], 1);
+    assert_eq!(report["truncated"], false);
+    assert_eq!(report["earliest_processed_at_micros"], 456);
+
+    let pulled = std::fs::read_to_string(&pulled_path).unwrap();
+    let lines = pulled.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 1);
+    let pulled_receipt = SignedActionReceipt::from_json_str(lines[0]).unwrap();
+    pulled_receipt.verify().unwrap();
+    assert_eq!(pulled_receipt.receipt.subject, "echo");
+    assert_eq!(pulled_receipt.receipt.processed_at_micros, 456);
+}
+
 #[test]
 fn poa_request_and_attest_commands_exchange_json() {
     let dir = tempdir().unwrap();
@@ -1262,6 +1380,273 @@ fn poa_request_and_attest_commands_exchange_json() {
         validator.node_id().to_string()
     );
     assert_eq!(response_json["frame_digest"], request_json["frame_digest"]);
+}
+
+#[test]
+fn poa_validator_set_create_verify_and_apply_config() {
+    let dir = tempdir().unwrap();
+    let authority = Keypair::generate();
+    let validator_a = Keypair::generate();
+    let validator_b = Keypair::generate();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let authority_key_path = dir.path().join("authority.key");
+    let set_path = dir.path().join("poa-validators.json");
+    let applied_config_path = dir.path().join("applied.toml");
+    std::fs::write(&authority_key_path, authority.to_key_file_toml().unwrap()).unwrap();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let validator_a_arg = format!(
+        "{}={}",
+        validator_a.node_id(),
+        public_key_string(&validator_a)
+    );
+    let validator_b_arg = format!(
+        "{}={}",
+        validator_b.node_id(),
+        public_key_string(&validator_b)
+    );
+    let set_id = Uuid::from_bytes([5_u8; 16]).to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "poa",
+            "validator-set",
+            "create",
+            "--authority-key",
+            authority_key_path.to_str().unwrap(),
+            "--set-id",
+            &set_id,
+            "--epoch",
+            "4",
+            "--threshold",
+            "2",
+            "--validator",
+            &validator_a_arg,
+            "--validator",
+            &validator_b_arg,
+            "--label",
+            "factory",
+            "--out",
+            set_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "poa",
+            "validator-set",
+            "verify",
+            "--path",
+            set_path.to_str().unwrap(),
+            "--authority-public-key",
+            &public_key_string(&authority),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["set_id"], set_id);
+    assert_eq!(report["epoch"], 4);
+    assert_eq!(report["required_threshold"], 2);
+    assert_eq!(report["validators"], 2);
+    assert_eq!(report["authority_node"], authority.node_id().to_string());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "poa",
+            "validator-set",
+            "apply",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--set",
+            set_path.to_str().unwrap(),
+            "--authority-public-key",
+            &public_key_string(&authority),
+            "--out",
+            applied_config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["epoch"], 4);
+    assert_eq!(report["required_threshold"], 2);
+    let applied =
+        ZapNodeConfig::from_toml_str(&std::fs::read_to_string(&applied_config_path).unwrap())
+            .unwrap();
+    assert_eq!(applied.poa.required_threshold, 2);
+    assert_eq!(applied.poa.validator_set.as_ref().unwrap(), &set_path);
+    assert_eq!(
+        applied.poa.validator_set_authority.as_deref(),
+        Some(public_key_string(&authority).as_str())
+    );
+    assert!(applied.poa.validators.is_empty());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "check-config",
+            "--config",
+            applied_config_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["poa_validator_count"], 2);
+    assert_eq!(report["poa_required_threshold"], 2);
+    assert_eq!(report["poa_validator_set_enabled"], true);
+    assert_eq!(report["poa_validator_set_epoch"], 4);
+}
+
+#[tokio::test]
+async fn poa_validator_set_pull_fetches_peer_set() {
+    let dir = tempdir().unwrap();
+    let receiver = Keypair::generate();
+    let sender = Keypair::generate();
+    let authority = Keypair::generate();
+    let validator = Keypair::generate();
+    let transport_key = [0x74_u8; 32];
+    let sender_addr = free_udp_addr();
+    let receiver_key_path = dir.path().join("receiver.key");
+    let validator_set_path = dir.path().join("receiver-poa-set.json");
+    let receiver_config_path = dir.path().join("receiver.toml");
+    std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
+    let signed = sign_poa_validator_set(
+        &authority,
+        PoaValidatorSet {
+            schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            set_id: Uuid::from_bytes([4_u8; 16]),
+            epoch: 9,
+            required_threshold: 1,
+            validators: vec![PoaValidatorDescriptor {
+                node_id: validator.node_id(),
+                public_key: public_key_string(&validator),
+            }],
+            valid_from_micros: None,
+            expires_at_micros: None,
+            labels: vec!["remote".to_string()],
+        },
+    )
+    .unwrap();
+    std::fs::write(
+        &validator_set_path,
+        serde_json::to_string_pretty(&signed).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        &receiver_config_path,
+        format!(
+            r#"
+bind = '127.0.0.1:0'
+key_file = '{}'
+require_signed = true
+
+[poa]
+required_threshold = 1
+validator_set = '{}'
+validator_set_authority = '{}'
+
+[[peers]]
+node_id = '{}'
+addr = '{}'
+public_key = '{}'
+transport_key = '{}'
+"#,
+            receiver_key_path.display(),
+            validator_set_path.display(),
+            public_key_string(&authority),
+            sender.node_id(),
+            sender_addr,
+            public_key_string(&sender),
+            hex_transport_key(transport_key),
+        ),
+    )
+    .unwrap();
+    let receiver_config = ZapNodeConfig::from_path(&receiver_config_path).unwrap();
+    let receiver_node = ZapNode::from_config(receiver_config).await.unwrap();
+    let sender_config = write_sender_config(
+        &dir,
+        &sender,
+        &receiver,
+        receiver_node.local_addr().unwrap(),
+        &sender_addr,
+        transport_key,
+    );
+    let pulled_path = dir.path().join("pulled-poa-set.json");
+    let target = receiver.node_id().to_string();
+    let config_arg = sender_config.clone();
+    let out_arg = pulled_path.clone();
+    let authority_public_key = public_key_string(&authority);
+
+    let command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "poa",
+                "validator-set",
+                "pull",
+                "--config",
+                config_arg.to_str().unwrap(),
+                "--target",
+                &target,
+                "--out",
+                out_arg.to_str().unwrap(),
+                "--authority-public-key",
+                &authority_public_key,
+                "--min-epoch",
+                "1",
+                "--json",
+            ])
+            .output()
+    });
+    let handled = receiver_node.handle_once();
+    let (event, output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled, command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let output = output.unwrap().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["peer"], receiver.node_id().to_string());
+    assert_eq!(report["epoch"], 9);
+    assert_eq!(report["validators"], 1);
+
+    let pulled: SignedPoaValidatorSet =
+        serde_json::from_str(&std::fs::read_to_string(pulled_path).unwrap()).unwrap();
+    pulled.verify(Some(&authority.verifying_key())).unwrap();
+    assert_eq!(pulled.set.epoch, 9);
+    assert_eq!(pulled.set.validators[0].node_id, validator.node_id());
 }
 
 #[tokio::test]
@@ -2033,6 +2418,162 @@ fn trust_enroll_outputs_verified_peer_toml() {
     assert!(stdout.contains(&format!("node_id = \"{}\"", peer.node_id())));
     assert!(stdout.contains("transport_key_epoch = 2"));
     assert!(stdout.contains("[[peers.trust.labels]]") || stdout.contains("labels = [\"edge\"]"));
+}
+
+#[test]
+fn peer_invite_accept_outputs_verified_peer_block() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let existing_peer = Keypair::generate();
+    let config_path = write_config(
+        &dir,
+        &local,
+        &existing_peer,
+        public_key_string(&existing_peer),
+    );
+    let invite_path = dir.path().join("peer-invite.json");
+    let peer_block_path = dir.path().join("peer-block.toml");
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "peer",
+            "invite",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--addr",
+            "127.0.0.1:9000",
+            "--transport-key",
+            "4343434343434343434343434343434343434343434343434343434343434343",
+            "--transport-key-epoch",
+            "7",
+            "--transport-key-rotated-at-micros",
+            "1234567890000",
+            "--label",
+            "edge",
+            "--out",
+            invite_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "peer",
+            "accept",
+            "--invite",
+            invite_path.to_str().unwrap(),
+            "--out",
+            peer_block_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["peer"], local.node_id().to_string());
+    assert_eq!(report["addr"], "127.0.0.1:9000");
+
+    let block = std::fs::read_to_string(peer_block_path).unwrap();
+    let value: toml::Value = toml::from_str(&block).unwrap();
+    let peer = &value["peers"].as_array().unwrap()[0];
+    assert_eq!(
+        peer["node_id"].as_str().unwrap(),
+        local.node_id().to_string()
+    );
+    assert_eq!(peer["addr"].as_str().unwrap(), "127.0.0.1:9000");
+    assert_eq!(peer["transport_key_epoch"].as_integer().unwrap(), 7);
+    assert_eq!(
+        peer["trust"]["labels"].as_array().unwrap()[0]
+            .as_str()
+            .unwrap(),
+        "edge"
+    );
+}
+
+#[test]
+fn peer_rotate_and_revoke_update_config() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let rotated_path = dir.path().join("rotated.toml");
+    let revoked_path = dir.path().join("revoked.toml");
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "peer",
+            "rotate",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--node-id",
+            &peer.node_id().to_string(),
+            "--transport-key",
+            "4545454545454545454545454545454545454545454545454545454545454545",
+            "--transport-key-epoch",
+            "3",
+            "--transport-key-rotated-at-micros",
+            "777",
+            "--out",
+            rotated_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["peer"], peer.node_id().to_string());
+    assert_eq!(report["transport_key_epoch"], 3);
+    let rotated =
+        ZapNodeConfig::from_toml_str(&std::fs::read_to_string(&rotated_path).unwrap()).unwrap();
+    assert_eq!(rotated.peers[0].transport_key_epoch, Some(3));
+    assert_eq!(
+        rotated.peers[0].transport_key,
+        "4545454545454545454545454545454545454545454545454545454545454545"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "peer",
+            "revoke",
+            "--config",
+            rotated_path.to_str().unwrap(),
+            "--node-id",
+            &peer.node_id().to_string(),
+            "--out",
+            revoked_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["status"], "revoked");
+    let revoked =
+        ZapNodeConfig::from_toml_str(&std::fs::read_to_string(&revoked_path).unwrap()).unwrap();
+    assert_eq!(revoked.peers[0].trust.status, PeerTrustStatus::Revoked);
+    assert!(!revoked.peers[0].trust.allow_send);
+    assert!(!revoked.peers[0].trust.allow_receive);
+    assert!(!revoked.peers[0].trust.allow_forward);
+    assert!(!revoked.peers[0].trust.allow_poa_attestation);
 }
 
 #[test]

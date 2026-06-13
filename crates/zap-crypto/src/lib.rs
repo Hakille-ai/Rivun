@@ -23,10 +23,15 @@ const NODE_ID_DOMAIN: &[u8] = b"ZAP-NODE-ID-v1";
 const SIGN_HINT_DOMAIN: &[u8] = b"ZAP-SIGN-HINT-v1";
 const POA_DIGEST_DOMAIN: &[u8] = b"ZAP-POA-DIGEST-v1";
 const POA_SIGNATURE_DOMAIN: &[u8] = b"ZAP-POA-SIGNATURE-v1";
+const POA_VALIDATOR_SET_SIGNATURE_DOMAIN: &[u8] = b"ZAP-POA-VALIDATOR-SET-v1";
 pub const POA_ATTESTATION_SCHEMA_VERSION: u8 = 1;
+pub const POA_VALIDATOR_SET_SCHEMA_VERSION: u8 = 1;
 pub const POA_ATTESTATION_CONTENT_TYPE: &str = "application/json";
 pub const POA_ATTESTATION_REQUEST_SUBJECT: &str = "poa.attestation_request";
 pub const POA_ATTESTATION_RESPONSE_SUBJECT: &str = "poa.attestation_response";
+pub const POA_VALIDATOR_SET_CONTENT_TYPE: &str = "application/zap-poa-validator-set+json";
+pub const POA_VALIDATOR_SET_REQUEST_SUBJECT: &str = "zap.poa.validator_set.request";
+pub const POA_VALIDATOR_SET_RESPONSE_SUBJECT: &str = "zap.poa.validator_set.response";
 
 #[derive(Debug, Error)]
 pub enum ZapCryptoError {
@@ -58,10 +63,37 @@ pub enum ZapCryptoError {
     InvalidPoaSignature(Uuid),
     #[error("Proof-of-Action attestation schema version {0} is unsupported")]
     UnsupportedPoaAttestationVersion(u8),
+    #[error("Proof-of-Action validator-set schema version {0} is unsupported")]
+    UnsupportedPoaValidatorSetVersion(u8),
     #[error("Proof-of-Action digest length is invalid: expected 32, got {0}")]
     InvalidPoaDigestLength(usize),
     #[error("Proof-of-Action response digest does not match requested digest")]
     PoaResponseDigestMismatch,
+    #[error("Proof-of-Action validator-set epoch must be greater than zero")]
+    InvalidPoaValidatorSetEpoch,
+    #[error("Proof-of-Action validator-set required_threshold must be greater than zero")]
+    InvalidPoaValidatorSetThreshold,
+    #[error(
+        "Proof-of-Action validator-set threshold {threshold} exceeds validator count {validator_count}"
+    )]
+    PoaValidatorSetThresholdTooHigh {
+        threshold: u16,
+        validator_count: usize,
+    },
+    #[error("duplicate Proof-of-Action validator-set validator {0}")]
+    DuplicatePoaValidatorSetValidator(Uuid),
+    #[error(
+        "Proof-of-Action validator-set public_key derives node_id {derived}, but validator declares {declared}"
+    )]
+    PoaValidatorSetNodeMismatch { declared: Uuid, derived: Uuid },
+    #[error(
+        "Proof-of-Action validator-set authority public_key derives node_id {derived}, but set declares {declared}"
+    )]
+    PoaValidatorSetAuthorityMismatch { declared: Uuid, derived: Uuid },
+    #[error("Proof-of-Action validator-set expected authority {expected}, got {actual}")]
+    PoaValidatorSetUnexpectedAuthority { expected: Uuid, actual: Uuid },
+    #[error("Proof-of-Action validator-set validity window is invalid")]
+    InvalidPoaValidatorSetValidityWindow,
     #[error("invalid key material length for {kind}: expected {expected}, got {actual}")]
     InvalidKeyLength {
         kind: &'static str,
@@ -82,6 +114,8 @@ pub enum ZapCryptoError {
     TomlDecode(#[from] toml::de::Error),
     #[error("failed to serialize TOML key file: {0}")]
     TomlEncode(#[from] toml::ser::Error),
+    #[error("failed to encode JSON: {0}")]
+    JsonEncode(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, ZapCryptoError>;
@@ -158,6 +192,15 @@ impl Keypair {
         let file: ZapKeyFile = toml::from_str(input)?;
         Self::from_key_file(&file)
     }
+
+    pub fn sign_domain_message(
+        &self,
+        domain: &[u8],
+        message: &[u8],
+    ) -> [u8; ED25519_SIGNATURE_LEN] {
+        let signature: Signature = self.signing_key.sign(&domain_message(domain, message));
+        signature.to_bytes()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -179,6 +222,26 @@ impl PublicKey {
     pub fn node_id(&self) -> Uuid {
         node_id_from_public_key(&self.to_bytes())
     }
+
+    pub fn verify_domain_message(
+        &self,
+        domain: &[u8],
+        message: &[u8],
+        signature: &[u8; ED25519_SIGNATURE_LEN],
+    ) -> Result<()> {
+        let signature = Signature::from_bytes(signature);
+        self.verifying_key
+            .verify(&domain_message(domain, message), &signature)
+            .map_err(|_| ZapCryptoError::InvalidSignature)
+    }
+}
+
+fn domain_message(domain: &[u8], message: &[u8]) -> Vec<u8> {
+    let mut transcript = Vec::with_capacity(domain.len() + 1 + message.len());
+    transcript.extend_from_slice(domain);
+    transcript.push(0);
+    transcript.extend_from_slice(message);
+    transcript
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -203,6 +266,183 @@ pub struct PoaAttestationResponse {
     pub validator_node: Uuid,
     pub frame_digest: String,
     pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PoaValidatorDescriptor {
+    pub node_id: Uuid,
+    pub public_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PoaValidatorSet {
+    pub schema_version: u8,
+    pub set_id: Uuid,
+    pub epoch: u64,
+    pub required_threshold: u16,
+    pub validators: Vec<PoaValidatorDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_from_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignedPoaValidatorSet {
+    pub schema_version: u8,
+    pub authority_node: Uuid,
+    pub authority_public_key: String,
+    pub set: PoaValidatorSet,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PoaValidatorSetRequest {
+    pub schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_epoch: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PoaValidatorSetResponse {
+    pub schema_version: u8,
+    pub node_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validator_set: Option<SignedPoaValidatorSet>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+}
+
+impl Default for PoaValidatorSetRequest {
+    fn default() -> Self {
+        Self {
+            schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            min_epoch: None,
+        }
+    }
+}
+
+impl PoaValidatorSetRequest {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != POA_VALIDATOR_SET_SCHEMA_VERSION {
+            return Err(ZapCryptoError::UnsupportedPoaValidatorSetVersion(
+                self.schema_version,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl PoaValidatorSetResponse {
+    pub fn new(
+        node_id: Uuid,
+        validator_set: Option<SignedPoaValidatorSet>,
+        unavailable_reason: Option<String>,
+    ) -> Self {
+        Self {
+            schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            node_id,
+            validator_set,
+            unavailable_reason,
+        }
+    }
+
+    pub fn verify(&self, expected_authority: Option<&PublicKey>) -> Result<()> {
+        if self.schema_version != POA_VALIDATOR_SET_SCHEMA_VERSION {
+            return Err(ZapCryptoError::UnsupportedPoaValidatorSetVersion(
+                self.schema_version,
+            ));
+        }
+        if let Some(validator_set) = &self.validator_set {
+            validator_set.verify(expected_authority)?;
+        }
+        Ok(())
+    }
+}
+
+impl PoaValidatorSet {
+    pub fn validate_static(&self) -> Result<()> {
+        if self.schema_version != POA_VALIDATOR_SET_SCHEMA_VERSION {
+            return Err(ZapCryptoError::UnsupportedPoaValidatorSetVersion(
+                self.schema_version,
+            ));
+        }
+        if self.epoch == 0 {
+            return Err(ZapCryptoError::InvalidPoaValidatorSetEpoch);
+        }
+        if self.required_threshold == 0 {
+            return Err(ZapCryptoError::InvalidPoaValidatorSetThreshold);
+        }
+        if self.required_threshold as usize > self.validators.len() {
+            return Err(ZapCryptoError::PoaValidatorSetThresholdTooHigh {
+                threshold: self.required_threshold,
+                validator_count: self.validators.len(),
+            });
+        }
+        if let (Some(valid_from), Some(expires_at)) =
+            (self.valid_from_micros, self.expires_at_micros)
+            && expires_at <= valid_from
+        {
+            return Err(ZapCryptoError::InvalidPoaValidatorSetValidityWindow);
+        }
+        let mut seen = HashSet::with_capacity(self.validators.len());
+        for validator in &self.validators {
+            if !seen.insert(validator.node_id) {
+                return Err(ZapCryptoError::DuplicatePoaValidatorSetValidator(
+                    validator.node_id,
+                ));
+            }
+            let public_key = decode_public_key(&validator.public_key)?;
+            let derived = public_key.node_id();
+            if derived != validator.node_id {
+                return Err(ZapCryptoError::PoaValidatorSetNodeMismatch {
+                    declared: validator.node_id,
+                    derived,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn signing_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(self)?)
+    }
+}
+
+impl SignedPoaValidatorSet {
+    pub fn verify(&self, expected_authority: Option<&PublicKey>) -> Result<()> {
+        if self.schema_version != POA_VALIDATOR_SET_SCHEMA_VERSION {
+            return Err(ZapCryptoError::UnsupportedPoaValidatorSetVersion(
+                self.schema_version,
+            ));
+        }
+        self.set.validate_static()?;
+        let authority = decode_public_key(&self.authority_public_key)?;
+        let derived = authority.node_id();
+        if derived != self.authority_node {
+            return Err(ZapCryptoError::PoaValidatorSetAuthorityMismatch {
+                declared: self.authority_node,
+                derived,
+            });
+        }
+        if let Some(expected_authority) = expected_authority {
+            let expected = expected_authority.node_id();
+            if expected != self.authority_node {
+                return Err(ZapCryptoError::PoaValidatorSetUnexpectedAuthority {
+                    expected,
+                    actual: self.authority_node,
+                });
+            }
+        }
+        let signature = decode_fixed::<ED25519_SIGNATURE_LEN>(&self.signature, "signature")?;
+        authority.verify_domain_message(
+            POA_VALIDATOR_SET_SIGNATURE_DOMAIN,
+            &self.set.signing_bytes()?,
+            &signature,
+        )
+    }
 }
 
 pub fn sign_frame(keypair: &Keypair, frame: &ZapFrame) -> Result<ZapFrame> {
@@ -327,6 +567,22 @@ pub fn sign_poa_attestation_request(
         validator_node: validator.node_id(),
         frame_digest: request.frame_digest.clone(),
         signature: STANDARD_NO_PAD.encode(signature.to_bytes()),
+    })
+}
+
+pub fn sign_poa_validator_set(
+    authority: &Keypair,
+    set: PoaValidatorSet,
+) -> Result<SignedPoaValidatorSet> {
+    set.validate_static()?;
+    let signature =
+        authority.sign_domain_message(POA_VALIDATOR_SET_SIGNATURE_DOMAIN, &set.signing_bytes()?);
+    Ok(SignedPoaValidatorSet {
+        schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+        authority_node: authority.node_id(),
+        authority_public_key: STANDARD_NO_PAD.encode(authority.verifying_key().to_bytes()),
+        set,
+        signature: STANDARD_NO_PAD.encode(signature),
     })
 }
 
@@ -485,6 +741,11 @@ fn decode_fixed<const N: usize>(encoded: &str, kind: &'static str) -> Result<[u8
     Ok(decoded.try_into().unwrap())
 }
 
+fn decode_public_key(encoded: &str) -> Result<PublicKey> {
+    let bytes = decode_fixed::<PUBLIC_KEY_LEN>(encoded, "public_key")?;
+    PublicKey::from_bytes(bytes)
+}
+
 fn decode_poa_digest(encoded: &str) -> Result<[u8; 32]> {
     let decoded = STANDARD_NO_PAD.decode(encoded)?;
     if decoded.len() != 32 {
@@ -551,6 +812,29 @@ mod tests {
         assert!(matches!(
             verify_frame(&keypair.verifying_key(), &frame),
             Err(ZapCryptoError::SignatureHintMismatch)
+        ));
+    }
+
+    #[test]
+    fn domain_messages_are_signed_and_verified() {
+        let keypair = Keypair::generate();
+        let signature = keypair.sign_domain_message(b"ZAP-TEST-v1", b"payload");
+
+        keypair
+            .verifying_key()
+            .verify_domain_message(b"ZAP-TEST-v1", b"payload", &signature)
+            .unwrap();
+        assert!(matches!(
+            keypair
+                .verifying_key()
+                .verify_domain_message(b"ZAP-OTHER-v1", b"payload", &signature),
+            Err(ZapCryptoError::InvalidSignature)
+        ));
+        assert!(matches!(
+            keypair
+                .verifying_key()
+                .verify_domain_message(b"ZAP-TEST-v1", b"tampered", &signature),
+            Err(ZapCryptoError::InvalidSignature)
         ));
     }
 
@@ -641,6 +925,104 @@ mod tests {
         assert!(matches!(
             verify_poa_attestation_response(&response, &validator.verifying_key(), &[0xAA; 32]),
             Err(ZapCryptoError::PoaResponseDigestMismatch)
+        ));
+    }
+
+    #[test]
+    fn poa_validator_set_signs_and_verifies() {
+        let authority = Keypair::generate();
+        let validator_a = Keypair::generate();
+        let validator_b = Keypair::generate();
+        let set = PoaValidatorSet {
+            schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            set_id: Uuid::from_bytes([9_u8; 16]),
+            epoch: 3,
+            required_threshold: 2,
+            validators: vec![
+                PoaValidatorDescriptor {
+                    node_id: validator_a.node_id(),
+                    public_key: STANDARD_NO_PAD.encode(validator_a.verifying_key().to_bytes()),
+                },
+                PoaValidatorDescriptor {
+                    node_id: validator_b.node_id(),
+                    public_key: STANDARD_NO_PAD.encode(validator_b.verifying_key().to_bytes()),
+                },
+            ],
+            valid_from_micros: Some(100),
+            expires_at_micros: Some(200),
+            labels: vec!["factory".to_string()],
+        };
+        let signed = sign_poa_validator_set(&authority, set).unwrap();
+
+        signed.verify(Some(&authority.verifying_key())).unwrap();
+
+        let wrong_authority = Keypair::generate();
+        assert!(matches!(
+            signed.verify(Some(&wrong_authority.verifying_key())),
+            Err(ZapCryptoError::PoaValidatorSetUnexpectedAuthority { .. })
+        ));
+    }
+
+    #[test]
+    fn poa_validator_set_detects_mutation() {
+        let authority = Keypair::generate();
+        let validator_a = Keypair::generate();
+        let validator_b = Keypair::generate();
+        let set = PoaValidatorSet {
+            schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            set_id: Uuid::from_bytes([8_u8; 16]),
+            epoch: 1,
+            required_threshold: 1,
+            validators: vec![
+                PoaValidatorDescriptor {
+                    node_id: validator_a.node_id(),
+                    public_key: STANDARD_NO_PAD.encode(validator_a.verifying_key().to_bytes()),
+                },
+                PoaValidatorDescriptor {
+                    node_id: validator_b.node_id(),
+                    public_key: STANDARD_NO_PAD.encode(validator_b.verifying_key().to_bytes()),
+                },
+            ],
+            valid_from_micros: None,
+            expires_at_micros: None,
+            labels: Vec::new(),
+        };
+        let mut signed = sign_poa_validator_set(&authority, set).unwrap();
+        signed.set.required_threshold = 2;
+
+        assert!(matches!(
+            signed.verify(Some(&authority.verifying_key())),
+            Err(ZapCryptoError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn poa_validator_set_response_verifies_nested_set() {
+        let authority = Keypair::generate();
+        let validator = Keypair::generate();
+        let set = PoaValidatorSet {
+            schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            set_id: Uuid::from_bytes([4_u8; 16]),
+            epoch: 1,
+            required_threshold: 1,
+            validators: vec![PoaValidatorDescriptor {
+                node_id: validator.node_id(),
+                public_key: STANDARD_NO_PAD.encode(validator.verifying_key().to_bytes()),
+            }],
+            valid_from_micros: None,
+            expires_at_micros: None,
+            labels: Vec::new(),
+        };
+        let signed = sign_poa_validator_set(&authority, set).unwrap();
+        let response =
+            PoaValidatorSetResponse::new(Uuid::from_bytes([3_u8; 16]), Some(signed), None);
+
+        response.verify(Some(&authority.verifying_key())).unwrap();
+
+        let wrong_authority = Keypair::generate();
+        assert!(matches!(
+            response.verify(Some(&wrong_authority.verifying_key())),
+            Err(ZapCryptoError::PoaValidatorSetUnexpectedAuthority { .. })
         ));
     }
 

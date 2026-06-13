@@ -11,6 +11,12 @@ use zap_core::{ZapFlags, ZapFrame};
 use zap_crypto::{Keypair, node_id_from_public_key};
 
 pub const RECEIPT_SCHEMA_VERSION: u8 = 1;
+pub const RECEIPT_REPLICATION_SCHEMA_VERSION: u8 = 1;
+pub const RECEIPT_REPLICATION_CONTENT_TYPE: &str = "application/zap-receipts+json";
+pub const RECEIPT_REPLICATION_REQUEST_SUBJECT: &str = "zap.receipts.request";
+pub const RECEIPT_REPLICATION_RESPONSE_SUBJECT: &str = "zap.receipts.response";
+pub const DEFAULT_RECEIPT_REPLICATION_LIMIT: usize = 50;
+pub const MAX_RECEIPT_REPLICATION_LIMIT: usize = 500;
 
 const RECEIPT_SIGNATURE_DOMAIN: &[u8] = b"ZAP-ACTION-RECEIPT-v1";
 const HASH_PREFIX: &str = "blake3:";
@@ -21,6 +27,10 @@ const SIGNATURE_LEN: usize = 64;
 pub enum ZapLedgerError {
     #[error("receipt schema version {0} is unsupported")]
     UnsupportedSchemaVersion(u8),
+    #[error("receipt replication schema version {0} is unsupported")]
+    UnsupportedReplicationSchemaVersion(u8),
+    #[error("receipt replication limit must be between 1 and {max}, got {actual}")]
+    InvalidReplicationLimit { actual: usize, max: usize },
     #[error("receipt signer public key derives node_id {derived}, but receipt declares {declared}")]
     SignerNodeMismatch { declared: Uuid, derived: Uuid },
     #[error("receipt node_id {receipt_node_id} does not match signer node_id {signer_node_id}")]
@@ -81,6 +91,126 @@ pub struct SignedActionReceipt {
     pub signer_node_id: Uuid,
     pub signer_public_key: String,
     pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceiptReplicationRequest {
+    pub schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_processed_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_node: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_node: Option<Uuid>,
+}
+
+impl Default for ReceiptReplicationRequest {
+    fn default() -> Self {
+        Self {
+            schema_version: RECEIPT_REPLICATION_SCHEMA_VERSION,
+            after_processed_at_micros: None,
+            limit: Some(DEFAULT_RECEIPT_REPLICATION_LIMIT),
+            kind: None,
+            subject: None,
+            source_node: None,
+            target_node: None,
+        }
+    }
+}
+
+impl ReceiptReplicationRequest {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != RECEIPT_REPLICATION_SCHEMA_VERSION {
+            return Err(ZapLedgerError::UnsupportedReplicationSchemaVersion(
+                self.schema_version,
+            ));
+        }
+        self.effective_limit()?;
+        Ok(())
+    }
+
+    pub fn effective_limit(&self) -> Result<usize> {
+        let limit = self.limit.unwrap_or(DEFAULT_RECEIPT_REPLICATION_LIMIT);
+        if limit == 0 || limit > MAX_RECEIPT_REPLICATION_LIMIT {
+            return Err(ZapLedgerError::InvalidReplicationLimit {
+                actual: limit,
+                max: MAX_RECEIPT_REPLICATION_LIMIT,
+            });
+        }
+        Ok(limit)
+    }
+
+    pub fn matches(&self, receipt: &SignedActionReceipt) -> bool {
+        if let Some(after) = self.after_processed_at_micros
+            && receipt.receipt.processed_at_micros <= after
+        {
+            return false;
+        }
+        if let Some(kind) = self.kind.as_deref()
+            && receipt.receipt.kind != kind
+        {
+            return false;
+        }
+        if let Some(subject) = self.subject.as_deref()
+            && receipt.receipt.subject != subject
+        {
+            return false;
+        }
+        if let Some(source_node) = self.source_node
+            && receipt.receipt.source_node != source_node
+        {
+            return false;
+        }
+        if let Some(target_node) = self.target_node
+            && receipt.receipt.target_node != target_node
+        {
+            return false;
+        }
+        true
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceiptReplicationResponse {
+    pub schema_version: u8,
+    pub node_id: Uuid,
+    pub receipts: Vec<SignedActionReceipt>,
+    pub truncated: bool,
+}
+
+impl ReceiptReplicationResponse {
+    pub fn new(node_id: Uuid, receipts: Vec<SignedActionReceipt>, truncated: bool) -> Self {
+        Self {
+            schema_version: RECEIPT_REPLICATION_SCHEMA_VERSION,
+            node_id,
+            receipts,
+            truncated,
+        }
+    }
+
+    pub fn verify(&self) -> Result<()> {
+        if self.schema_version != RECEIPT_REPLICATION_SCHEMA_VERSION {
+            return Err(ZapLedgerError::UnsupportedReplicationSchemaVersion(
+                self.schema_version,
+            ));
+        }
+        for receipt in &self.receipts {
+            receipt.verify()?;
+            if receipt.receipt.node_id != self.node_id {
+                return Err(ZapLedgerError::ReceiptNodeMismatch {
+                    receipt_node_id: receipt.receipt.node_id,
+                    signer_node_id: self.node_id,
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl SignedActionReceipt {
@@ -348,5 +478,63 @@ mod tests {
 
         receipt.verify().unwrap();
         assert_eq!(receipt.receipt.poa.unwrap().attestation_count, 1);
+    }
+
+    #[test]
+    fn receipt_replication_request_filters_receipts() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let frame = signed_frame(&source, node.node_id());
+        let receipt =
+            SignedActionReceipt::new_message(&node, &frame, "action", "echo", None, 456, None)
+                .unwrap();
+        let request = ReceiptReplicationRequest {
+            after_processed_at_micros: Some(455),
+            kind: Some("action".to_string()),
+            subject: Some("echo".to_string()),
+            source_node: Some(source.node_id()),
+            target_node: Some(node.node_id()),
+            ..ReceiptReplicationRequest::default()
+        };
+
+        request.validate().unwrap();
+        assert!(request.matches(&receipt));
+
+        let stale_request = ReceiptReplicationRequest {
+            after_processed_at_micros: Some(456),
+            ..request
+        };
+        assert!(!stale_request.matches(&receipt));
+    }
+
+    #[test]
+    fn receipt_replication_response_verifies_nested_receipts() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let frame = signed_frame(&source, node.node_id());
+        let receipt = SignedActionReceipt::new(&node, &frame, "echo", None, 456, None).unwrap();
+        let response =
+            ReceiptReplicationResponse::new(node.node_id(), vec![receipt.clone()], false);
+
+        response.verify().unwrap();
+
+        let wrong_node = ReceiptReplicationResponse::new(source.node_id(), vec![receipt], false);
+        assert!(matches!(
+            wrong_node.verify(),
+            Err(ZapLedgerError::ReceiptNodeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn receipt_replication_rejects_bad_limit() {
+        let request = ReceiptReplicationRequest {
+            limit: Some(0),
+            ..ReceiptReplicationRequest::default()
+        };
+
+        assert!(matches!(
+            request.validate(),
+            Err(ZapLedgerError::InvalidReplicationLimit { .. })
+        ));
     }
 }

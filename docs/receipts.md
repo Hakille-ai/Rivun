@@ -58,4 +58,24 @@ cargo run -p zap-cli -- receipts merge \
 and writes a deduplicated JSONL archive. The output path must be separate from
 all input logs.
 
+Pull signed receipts from a configured peer over signed `ZENV` control
+messages:
+
+```bash
+cargo run -p zap-cli -- receipts pull \
+  --config zap.toml \
+  --target <peer-node-id> \
+  --after-processed-at-micros 1735689600000000 \
+  --limit 100 \
+  --out logs/peer-receipts.jsonl \
+  --json
+```
+
+`pull` sends `zap.receipts.request`, verifies the signed
+`zap.receipts.response`, verifies every nested receipt signature, and writes a
+JSONL log that can be passed to `receipts verify`, `prune`, or `merge`.
+Requests can filter by processed timestamp, kind, subject, source node, and
+target node. Responses include a `truncated` flag when more matching receipts
+exist than the requested limit.
+
 Receipts make local and future distributed operation auditable without creating financial semantics.
