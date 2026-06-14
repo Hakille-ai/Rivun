@@ -44,20 +44,33 @@ Foundation implemented:
 - `zap driver-manifest verify` checks manifest signature, hash, ABI, and action;
 - local `registry.index.toml` files track active or revoked manifest versions;
 - `zap registry revoke` marks unsafe manifest versions as revoked;
+- `zap registry deprecate` marks migration-only releases that should not be
+  selected automatically by installers;
 - optional operator signatures can approve registry indexes for deployment gates;
 - `zap registry pull` fetches a peer registry index over signed control messages
   and can require an expected operator public key;
 - `zap registry mirror` merges compatible signed peer indexes and preserves
   revocation priority for unsafe driver versions;
+- `zap registry resolve` selects the highest active semantic version compatible
+  with an exact, caret, tilde, wildcard, or comparator requirement plus optional
+  ABI ranges such as `>=1,<=2`;
+- `zap registry migration add` records signed migration metadata on target
+  registry entries, including source version/ABI requirements, approval needs,
+  and optional migration drivers;
 - `zap registry publication create/verify` records a signed publication
   statement over the canonical registry hash for release audit trails;
+- `zap registry plan create/verify` signs exact install plans from semantic
+  driver requests, ABI requirements, and migration metadata, then rechecks
+  registry hashes before rollout;
 - `zap registry bundle export/verify/import` packages signed registries,
   publication metadata, manifests, and optional drivers for offline deployment;
+- `zap registry bundle pull-manifest` discovers a peer's published bundle
+  manifest over signed control frames before artifact transfer/import;
 - `zap-node` verifies configured manifests and registry entries before daemon startup;
 - `zap-driver-sdk` provides minimal ABI helpers for driver authors.
 
-Next: registry compatibility policy, semantic package version ranges, and
-remote bundle distribution services.
+Next: remote bundle artifact transfer, automated rollout execution, and
+fleet-level installation policy.
 
 ## Phase 4: Proof-of-Action Network
 

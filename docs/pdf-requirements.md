@@ -19,11 +19,11 @@ This file tracks the technical specification PDF against the current repository.
 | Cognitive interpreter | Externalized by product decision | Models and gateways emit typed `ZENV` messages; ZAP enforces `[message_policy]`, signatures, routing, PoA, and sandboxing |
 | Proof-of-Action | Foundation implemented | `ZPOA` trailer, validator signatures, threshold verification, daemon enforcement, static configured validator networking, signed versioned validator-set files, and peer pull propagation exist; dynamic discovery remains future work |
 | Financial layer | Out of scope by product decision | Signed action receipts, offline verification, remote pull, retention filtering, and archive merge provide technical auditability only |
-| ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, signed local registry approval, CLI create/verify/sign/revoke/pull/mirror/publication/bundle, daemon config enforcement, signed peer index fetch, strict merge conflict detection, revocation-priority mirroring, signed publication metadata, and offline bundle export/verify/import exist; remote package services remain future work |
-| SDKs for major languages | Planned | Rust crates exist; external language SDKs still to implement |
+| ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, signed local registry approval, semantic version requirement resolution, ABI requirement ranges, migration metadata, deprecation and revocation states, signed install plans, CLI create/verify/sign/revoke/deprecate/migration/resolve/pull/mirror/publication/plan/bundle, daemon config enforcement, signed peer index fetch, remote bundle manifest discovery, strict merge conflict detection, revocation-priority mirroring, signed publication metadata, and offline bundle export/verify/import exist; remote artifact transfer services remain future work |
+| SDKs for major languages | Foundation implemented | Rust crates plus external Python, TypeScript, Go, and Rust SDK directories with protocol/ZapStore helpers and examples now exist; publishable package pipelines remain future work |
 
 Next high-impact PDF features:
 
-1. Add registry compatibility policy, semantic package version ranges, and remote bundle distribution services for ZapStore.
+1. Add fleet rollout automation and remote bundle artifact transfer services for ZapStore.
 2. Expose SDK-friendly schemas for typed messages, frames, manifests, receipts, routes, capabilities, and memory.
 3. Add dynamic validator discovery, automated validator-set rollout, and quorum policy hardening.

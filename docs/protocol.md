@@ -110,6 +110,8 @@ include:
 | `zap.poa.validator_set.response` | `application/zap-poa-validator-set+json` | Return a signed PoA validator set or an unavailable reason |
 | `zap.registry.index.request` | `application/zap-registry-index+json` | Request a peer's ZapStore registry index |
 | `zap.registry.index.response` | `application/zap-registry-index+json` | Return a registry index or an unavailable reason |
+| `zap.registry.bundle.manifest.request` | `application/zap-registry-bundle-manifest+json` | Request a peer's ZapStore bundle manifest |
+| `zap.registry.bundle.manifest.response` | `application/zap-registry-bundle-manifest+json` | Return a bundle manifest or an unavailable reason |
 | `zap.receipts.request` | `application/zap-receipts+json` | Request signed receipts from a peer receipt log |
 | `zap.receipts.response` | `application/zap-receipts+json` | Return verified signed receipts, with a truncation flag |
 
@@ -124,6 +126,12 @@ should verify the response frame and, for production, require an operator public
 key so the pulled index is both peer-authenticated and operator-approved.
 Multi-source mirroring reuses the same request/response subjects once per peer
 and merges only compatible entries; it is not a separate wire protocol.
+
+Registry bundle manifest requests can require publication metadata and driver
+artifact entries. Responses are signed as normal frames and carry a
+`RegistryBundleManifest` with registry, publication, manifest, and driver
+checksums. Receivers should treat the manifest as discovery metadata, then
+verify downloaded bundle files with `registry bundle verify` before import.
 
 Receipt replication requests can filter by `after_processed_at_micros`, `kind`,
 `subject`, `source_node`, and `target_node`, and include a bounded `limit`.

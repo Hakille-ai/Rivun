@@ -8,6 +8,7 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
 use zap_capability::DriverPermissions;
@@ -18,15 +19,21 @@ pub const REGISTRY_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_INDEX_SYNC_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_PUBLICATION_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_BUNDLE_SCHEMA_VERSION: u8 = 1;
+pub const REGISTRY_INSTALL_PLAN_SCHEMA_VERSION: u8 = 1;
 pub const DRIVER_ABI_VERSION: u16 = 1;
 pub const DRIVER_HASH_PREFIX: &str = "blake3:";
 pub const REGISTRY_INDEX_CONTENT_TYPE: &str = "application/zap-registry-index+json";
+pub const REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE: &str =
+    "application/zap-registry-bundle-manifest+json";
 pub const REGISTRY_INDEX_REQUEST_SUBJECT: &str = "zap.registry.index.request";
 pub const REGISTRY_INDEX_RESPONSE_SUBJECT: &str = "zap.registry.index.response";
+pub const REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT: &str = "zap.registry.bundle.manifest.request";
+pub const REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT: &str = "zap.registry.bundle.manifest.response";
 
 const MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-MANIFEST-v1";
 const REGISTRY_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-v1";
 const REGISTRY_PUBLICATION_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-PUBLICATION-v1";
+const REGISTRY_INSTALL_PLAN_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-INSTALL-PLAN-v1";
 const PUBLIC_KEY_LEN: usize = 32;
 const SIGNATURE_LEN: usize = 64;
 
@@ -46,8 +53,20 @@ pub enum ZapStoreError {
     UnsupportedRegistryPublicationSchemaVersion(u8),
     #[error("driver registry bundle schema version {0} is unsupported")]
     UnsupportedRegistryBundleSchemaVersion(u8),
+    #[error("driver registry install plan schema version {0} is unsupported")]
+    UnsupportedRegistryInstallPlanSchemaVersion(u8),
     #[error("driver registry entry `{action}` version `{version}` is duplicated")]
     DuplicateRegistryEntry { action: String, version: String },
+    #[error("driver registry entry version `{0}` is not a MAJOR.MINOR.PATCH version")]
+    InvalidDriverVersion(String),
+    #[error("driver registry version requirement `{0}` is invalid")]
+    InvalidDriverVersionRequirement(String),
+    #[error("driver registry ABI requirement `{0}` is invalid")]
+    InvalidDriverAbiRequirement(String),
+    #[error(
+        "driver registry has no active compatible entry for action `{action}` requirement `{requirement}`"
+    )]
+    NoCompatibleRegistryEntry { action: String, requirement: String },
     #[error("driver registry has no entry for action `{action}` version `{version}`")]
     MissingRegistryEntry { action: String, version: String },
     #[error("driver registry entry `{action}` version `{version}` is revoked: {reason}")]
@@ -90,6 +109,40 @@ pub enum ZapStoreError {
     RegistryPublicationFieldMismatch { field: &'static str },
     #[error("registry publication signature verification failed")]
     InvalidRegistryPublicationSignature,
+    #[error("registry install plan must contain at least one entry")]
+    EmptyRegistryInstallPlan,
+    #[error(
+        "registry install plan planner public key derives node_id {derived}, but plan declares {declared}"
+    )]
+    RegistryInstallPlanPlannerNodeMismatch { declared: Uuid, derived: Uuid },
+    #[error("registry install plan planner mismatch: expected node_id {expected}, actual {actual}")]
+    RegistryInstallPlanPlannerPublicKeyMismatch { expected: Uuid, actual: Uuid },
+    #[error("registry install plan field `{field}` mismatch")]
+    RegistryInstallPlanFieldMismatch { field: &'static str },
+    #[error(
+        "registry install plan entry `{action}` selected version `{version}` does not satisfy `{requirement}`"
+    )]
+    RegistryInstallPlanRequirementMismatch {
+        action: String,
+        version: String,
+        requirement: String,
+    },
+    #[error(
+        "registry install plan entry `{action}` selected ABI `{abi_version}` does not satisfy `{requirement}`"
+    )]
+    RegistryInstallPlanAbiRequirementMismatch {
+        action: String,
+        abi_version: u16,
+        requirement: String,
+    },
+    #[error("registry install plan entry `{action}` version `{version}` field `{field}` mismatch")]
+    RegistryInstallPlanEntryMismatch {
+        action: String,
+        version: String,
+        field: &'static str,
+    },
+    #[error("registry install plan signature verification failed")]
+    InvalidRegistryInstallPlanSignature,
     #[error("registry bundle path `{0}` is invalid")]
     InvalidRegistryBundlePath(String),
     #[error("registry bundle publication path/hash metadata is incomplete")]
@@ -165,6 +218,7 @@ pub struct DriverManifest {
 pub enum DriverRegistryStatus {
     #[default]
     Active,
+    Deprecated,
     Revoked,
 }
 
@@ -182,6 +236,25 @@ pub struct DriverRegistryEntry {
     pub status: DriverRegistryStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub migrations: Vec<DriverRegistryMigration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DriverRegistryMigration {
+    pub from_version_requirement: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_abi_requirement: Option<String>,
+    #[serde(default)]
+    pub requires_operator_approval: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration_driver_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub migration_driver_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -216,11 +289,71 @@ pub struct RegistryIndexResponse {
     pub unavailable_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryBundleManifestRequest {
+    pub schema_version: u8,
+    #[serde(default)]
+    pub require_publication: bool,
+    #[serde(default)]
+    pub require_drivers: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryBundleManifestResponse {
+    pub schema_version: u8,
+    pub node_id: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest: Option<RegistryBundleManifest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unavailable_reason: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DriverRegistryMergeReport {
     pub added: usize,
     pub unchanged: usize,
+    pub deprecated_overrides: usize,
     pub revoked_overrides: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DriverVersion {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverVersionRequirement {
+    raw: String,
+    comparators: Vec<DriverVersionComparator>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverAbiRequirement {
+    raw: String,
+    comparators: Vec<DriverAbiComparator>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DriverVersionOperator {
+    Equal,
+    Greater,
+    GreaterOrEqual,
+    Less,
+    LessOrEqual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DriverVersionComparator {
+    operator: DriverVersionOperator,
+    version: DriverVersion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DriverAbiComparator {
+    operator: DriverVersionOperator,
+    abi_version: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -238,6 +371,55 @@ pub struct RegistryPublication {
     pub publisher_node_id: Uuid,
     pub publisher_public_key: String,
     pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryInstallPlanRequest {
+    pub action: String,
+    pub requirement: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi_requirement: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryInstallPlan {
+    pub schema_version: u8,
+    pub registry_hash: String,
+    pub registry_entries: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_operator_node_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication_hash: Option<String>,
+    pub requested_at_micros: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    pub entries: Vec<RegistryInstallPlanEntry>,
+    pub planner_node_id: Uuid,
+    pub planner_public_key: String,
+    pub signature: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RegistryInstallPlanEntry {
+    pub action: String,
+    pub requirement: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_abi_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_abi_requirement: Option<String>,
+    pub selected_version: String,
+    pub name: String,
+    pub abi_version: u16,
+    pub wasm_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_path: Option<String>,
+    pub author_node_id: Uuid,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub migrations: Vec<DriverRegistryMigration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -387,6 +569,340 @@ impl DriverManifest {
     }
 }
 
+impl DriverVersion {
+    pub fn parse(input: &str) -> Result<Self> {
+        input.parse()
+    }
+
+    fn next_major(self, requirement: &str) -> Result<Self> {
+        Ok(Self {
+            major: self.major.checked_add(1).ok_or_else(|| {
+                ZapStoreError::InvalidDriverVersionRequirement(requirement.to_string())
+            })?,
+            minor: 0,
+            patch: 0,
+        })
+    }
+
+    fn next_minor(self, requirement: &str) -> Result<Self> {
+        Ok(Self {
+            major: self.major,
+            minor: self.minor.checked_add(1).ok_or_else(|| {
+                ZapStoreError::InvalidDriverVersionRequirement(requirement.to_string())
+            })?,
+            patch: 0,
+        })
+    }
+
+    fn next_patch(self, requirement: &str) -> Result<Self> {
+        Ok(Self {
+            major: self.major,
+            minor: self.minor,
+            patch: self.patch.checked_add(1).ok_or_else(|| {
+                ZapStoreError::InvalidDriverVersionRequirement(requirement.to_string())
+            })?,
+        })
+    }
+}
+
+impl FromStr for DriverVersion {
+    type Err = ZapStoreError;
+
+    fn from_str(input: &str) -> Result<Self> {
+        fn parse_component(component: Option<&str>, input: &str) -> Result<u64> {
+            let component =
+                component.ok_or_else(|| ZapStoreError::InvalidDriverVersion(input.to_string()))?;
+            if component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(ZapStoreError::InvalidDriverVersion(input.to_string()));
+            }
+            component
+                .parse()
+                .map_err(|_| ZapStoreError::InvalidDriverVersion(input.to_string()))
+        }
+
+        let input = input.trim();
+        let mut parts = input.split('.');
+        let major = parse_component(parts.next(), input)?;
+        let minor = parse_component(parts.next(), input)?;
+        let patch = parse_component(parts.next(), input)?;
+        if parts.next().is_some() {
+            return Err(ZapStoreError::InvalidDriverVersion(input.to_string()));
+        }
+        Ok(Self {
+            major,
+            minor,
+            patch,
+        })
+    }
+}
+
+impl fmt::Display for DriverVersion {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+impl DriverVersionRequirement {
+    pub fn parse(input: &str) -> Result<Self> {
+        let raw = input.trim();
+        if raw == "*" {
+            return Ok(Self {
+                raw: raw.to_string(),
+                comparators: Vec::new(),
+            });
+        }
+        if raw.is_empty() {
+            return Err(ZapStoreError::InvalidDriverVersionRequirement(
+                input.to_string(),
+            ));
+        }
+
+        if let Some(base) = raw.strip_prefix('^') {
+            let base = Self::parse_version_for_requirement(base, raw)?;
+            let upper = if base.major > 0 {
+                base.next_major(raw)?
+            } else if base.minor > 0 {
+                base.next_minor(raw)?
+            } else {
+                base.next_patch(raw)?
+            };
+            return Ok(Self::from_comparators(
+                raw,
+                vec![
+                    DriverVersionComparator {
+                        operator: DriverVersionOperator::GreaterOrEqual,
+                        version: base,
+                    },
+                    DriverVersionComparator {
+                        operator: DriverVersionOperator::Less,
+                        version: upper,
+                    },
+                ],
+            ));
+        }
+
+        if let Some(base) = raw.strip_prefix('~') {
+            let base = Self::parse_version_for_requirement(base, raw)?;
+            return Ok(Self::from_comparators(
+                raw,
+                vec![
+                    DriverVersionComparator {
+                        operator: DriverVersionOperator::GreaterOrEqual,
+                        version: base,
+                    },
+                    DriverVersionComparator {
+                        operator: DriverVersionOperator::Less,
+                        version: base.next_minor(raw)?,
+                    },
+                ],
+            ));
+        }
+
+        let comparators = raw
+            .split(',')
+            .map(str::trim)
+            .map(|part| Self::parse_comparator(raw, part))
+            .collect::<Result<Vec<_>>>()?;
+        if comparators.is_empty() {
+            return Err(ZapStoreError::InvalidDriverVersionRequirement(
+                raw.to_string(),
+            ));
+        }
+        Ok(Self::from_comparators(raw, comparators))
+    }
+
+    pub fn matches(&self, version: DriverVersion) -> bool {
+        self.comparators
+            .iter()
+            .all(|comparator| match comparator.operator {
+                DriverVersionOperator::Equal => version == comparator.version,
+                DriverVersionOperator::Greater => version > comparator.version,
+                DriverVersionOperator::GreaterOrEqual => version >= comparator.version,
+                DriverVersionOperator::Less => version < comparator.version,
+                DriverVersionOperator::LessOrEqual => version <= comparator.version,
+            })
+    }
+
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    fn from_comparators(raw: &str, comparators: Vec<DriverVersionComparator>) -> Self {
+        Self {
+            raw: raw.to_string(),
+            comparators,
+        }
+    }
+
+    fn parse_comparator(requirement: &str, part: &str) -> Result<DriverVersionComparator> {
+        if part.is_empty() {
+            return Err(ZapStoreError::InvalidDriverVersionRequirement(
+                requirement.to_string(),
+            ));
+        }
+
+        let (operator, version) = if let Some(version) = part.strip_prefix(">=") {
+            (DriverVersionOperator::GreaterOrEqual, version)
+        } else if let Some(version) = part.strip_prefix("<=") {
+            (DriverVersionOperator::LessOrEqual, version)
+        } else if let Some(version) = part.strip_prefix('>') {
+            (DriverVersionOperator::Greater, version)
+        } else if let Some(version) = part.strip_prefix('<') {
+            (DriverVersionOperator::Less, version)
+        } else if let Some(version) = part.strip_prefix('=') {
+            (DriverVersionOperator::Equal, version)
+        } else {
+            (DriverVersionOperator::Equal, part)
+        };
+
+        Ok(DriverVersionComparator {
+            operator,
+            version: Self::parse_version_for_requirement(version, requirement)?,
+        })
+    }
+
+    fn parse_version_for_requirement(version: &str, requirement: &str) -> Result<DriverVersion> {
+        DriverVersion::parse(version.trim())
+            .map_err(|_| ZapStoreError::InvalidDriverVersionRequirement(requirement.to_string()))
+    }
+}
+
+impl DriverAbiRequirement {
+    pub fn parse(input: &str) -> Result<Self> {
+        let raw = input.trim();
+        if raw == "*" {
+            return Ok(Self {
+                raw: raw.to_string(),
+                comparators: Vec::new(),
+            });
+        }
+        if raw.is_empty() {
+            return Err(ZapStoreError::InvalidDriverAbiRequirement(
+                input.to_string(),
+            ));
+        }
+
+        let comparators = raw
+            .split(',')
+            .map(str::trim)
+            .map(|part| Self::parse_comparator(raw, part))
+            .collect::<Result<Vec<_>>>()?;
+        if comparators.is_empty() {
+            return Err(ZapStoreError::InvalidDriverAbiRequirement(raw.to_string()));
+        }
+        Ok(Self {
+            raw: raw.to_string(),
+            comparators,
+        })
+    }
+
+    pub fn exact(abi_version: u16) -> Self {
+        Self {
+            raw: format!("={abi_version}"),
+            comparators: vec![DriverAbiComparator {
+                operator: DriverVersionOperator::Equal,
+                abi_version,
+            }],
+        }
+    }
+
+    pub fn matches(&self, abi_version: u16) -> bool {
+        self.comparators
+            .iter()
+            .all(|comparator| match comparator.operator {
+                DriverVersionOperator::Equal => abi_version == comparator.abi_version,
+                DriverVersionOperator::Greater => abi_version > comparator.abi_version,
+                DriverVersionOperator::GreaterOrEqual => abi_version >= comparator.abi_version,
+                DriverVersionOperator::Less => abi_version < comparator.abi_version,
+                DriverVersionOperator::LessOrEqual => abi_version <= comparator.abi_version,
+            })
+    }
+
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    fn parse_comparator(requirement: &str, part: &str) -> Result<DriverAbiComparator> {
+        if part.is_empty() {
+            return Err(ZapStoreError::InvalidDriverAbiRequirement(
+                requirement.to_string(),
+            ));
+        }
+
+        let (operator, abi_version) = if let Some(abi_version) = part.strip_prefix(">=") {
+            (DriverVersionOperator::GreaterOrEqual, abi_version)
+        } else if let Some(abi_version) = part.strip_prefix("<=") {
+            (DriverVersionOperator::LessOrEqual, abi_version)
+        } else if let Some(abi_version) = part.strip_prefix('>') {
+            (DriverVersionOperator::Greater, abi_version)
+        } else if let Some(abi_version) = part.strip_prefix('<') {
+            (DriverVersionOperator::Less, abi_version)
+        } else if let Some(abi_version) = part.strip_prefix('=') {
+            (DriverVersionOperator::Equal, abi_version)
+        } else {
+            (DriverVersionOperator::Equal, part)
+        };
+
+        Ok(DriverAbiComparator {
+            operator,
+            abi_version: Self::parse_abi_for_requirement(abi_version, requirement)?,
+        })
+    }
+
+    fn parse_abi_for_requirement(abi_version: &str, requirement: &str) -> Result<u16> {
+        let abi_version = abi_version.trim();
+        if abi_version.is_empty() || !abi_version.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(ZapStoreError::InvalidDriverAbiRequirement(
+                requirement.to_string(),
+            ));
+        }
+        abi_version
+            .parse()
+            .map_err(|_| ZapStoreError::InvalidDriverAbiRequirement(requirement.to_string()))
+    }
+}
+
+impl DriverRegistryMigration {
+    pub fn new(
+        from_version_requirement: impl Into<String>,
+        from_abi_requirement: Option<String>,
+        requires_operator_approval: bool,
+        migration_driver_action: Option<String>,
+        migration_driver_version: Option<String>,
+        notes: Option<String>,
+    ) -> Self {
+        Self {
+            from_version_requirement: from_version_requirement.into(),
+            from_abi_requirement,
+            requires_operator_approval,
+            migration_driver_action,
+            migration_driver_version,
+            notes,
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        DriverVersionRequirement::parse(&self.from_version_requirement)?;
+        if let Some(requirement) = &self.from_abi_requirement {
+            DriverAbiRequirement::parse(requirement)?;
+        }
+        if self.migration_driver_action.is_some() != self.migration_driver_version.is_some() {
+            return Err(ZapStoreError::InvalidDriverVersionRequirement(
+                self.from_version_requirement.clone(),
+            ));
+        }
+        if let Some(action) = &self.migration_driver_action
+            && action.trim().is_empty()
+        {
+            return Err(ZapStoreError::EmptyAction);
+        }
+        if let Some(version) = &self.migration_driver_version {
+            DriverVersion::parse(version)?;
+        }
+        Ok(())
+    }
+}
+
 impl DriverRegistry {
     pub fn empty(generated_by: Option<String>) -> Self {
         Self {
@@ -446,6 +962,52 @@ impl DriverRegistry {
         self.validate()
     }
 
+    pub fn deprecate(
+        &mut self,
+        action: &str,
+        version: &str,
+        reason: impl Into<String>,
+    ) -> Result<()> {
+        self.validate()?;
+        {
+            let entry = self
+                .entries
+                .iter_mut()
+                .find(|entry| entry.action == action && entry.version == version)
+                .ok_or_else(|| ZapStoreError::MissingRegistryEntry {
+                    action: action.to_string(),
+                    version: version.to_string(),
+                })?;
+            entry.status = DriverRegistryStatus::Deprecated;
+            entry.deprecated_reason = Some(reason.into());
+        }
+        self.clear_signature();
+        self.validate()
+    }
+
+    pub fn add_migration(
+        &mut self,
+        action: &str,
+        version: &str,
+        migration: DriverRegistryMigration,
+    ) -> Result<()> {
+        self.validate()?;
+        migration.validate()?;
+        {
+            let entry = self
+                .entries
+                .iter_mut()
+                .find(|entry| entry.action == action && entry.version == version)
+                .ok_or_else(|| ZapStoreError::MissingRegistryEntry {
+                    action: action.to_string(),
+                    version: version.to_string(),
+                })?;
+            entry.migrations.push(migration);
+        }
+        self.clear_signature();
+        self.validate()
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != REGISTRY_SCHEMA_VERSION {
             return Err(ZapStoreError::UnsupportedRegistrySchemaVersion(
@@ -459,6 +1021,9 @@ impl DriverRegistry {
                 return Err(ZapStoreError::EmptyAction);
             }
             validate_driver_hash(&entry.wasm_hash)?;
+            for migration in &entry.migrations {
+                migration.validate()?;
+            }
             if !seen.insert((entry.action.clone(), entry.version.clone())) {
                 return Err(ZapStoreError::DuplicateRegistryEntry {
                     action: entry.action.clone(),
@@ -467,6 +1032,64 @@ impl DriverRegistry {
             }
         }
         Ok(())
+    }
+
+    pub fn resolve(
+        &self,
+        action: &str,
+        requirement: &str,
+        abi_version: Option<u16>,
+    ) -> Result<&DriverRegistryEntry> {
+        let abi_requirement = abi_version.map(DriverAbiRequirement::exact);
+        self.resolve_with_requirements(action, requirement, abi_requirement.as_ref())
+    }
+
+    pub fn resolve_compatible(
+        &self,
+        action: &str,
+        requirement: &str,
+        abi_requirement: Option<&str>,
+    ) -> Result<&DriverRegistryEntry> {
+        let abi_requirement = abi_requirement
+            .map(DriverAbiRequirement::parse)
+            .transpose()?;
+        self.resolve_with_requirements(action, requirement, abi_requirement.as_ref())
+    }
+
+    fn resolve_with_requirements(
+        &self,
+        action: &str,
+        requirement: &str,
+        abi_requirement: Option<&DriverAbiRequirement>,
+    ) -> Result<&DriverRegistryEntry> {
+        self.validate()?;
+        let requirement = DriverVersionRequirement::parse(requirement)?;
+        let mut selected: Option<(&DriverRegistryEntry, DriverVersion)> = None;
+
+        for entry in self.entries.iter().filter(|entry| {
+            entry.action == action
+                && entry.status == DriverRegistryStatus::Active
+                && abi_requirement.is_none_or(|requirement| requirement.matches(entry.abi_version))
+        }) {
+            let version = DriverVersion::parse(&entry.version)?;
+            if !requirement.matches(version) {
+                continue;
+            }
+            let should_select = match selected {
+                Some((_, selected_version)) => version > selected_version,
+                None => true,
+            };
+            if should_select {
+                selected = Some((entry, version));
+            }
+        }
+
+        selected
+            .map(|(entry, _)| entry)
+            .ok_or_else(|| ZapStoreError::NoCompatibleRegistryEntry {
+                action: action.to_string(),
+                requirement: requirement.raw().to_string(),
+            })
     }
 
     pub fn verify_manifest(&self, manifest: &DriverManifest) -> Result<()> {
@@ -515,14 +1138,18 @@ impl DriverRegistry {
                 Some(index) => {
                     let existing = &mut self.entries[index];
                     validate_registry_merge_compatibility(existing, incoming)?;
-                    if existing.status == DriverRegistryStatus::Revoked
-                        || incoming.status == DriverRegistryStatus::Active
+                    if registry_status_rank(existing.status)
+                        >= registry_status_rank(incoming.status)
                     {
                         report.unchanged += 1;
                         continue;
                     }
                     *existing = incoming.clone();
-                    report.revoked_overrides += 1;
+                    match incoming.status {
+                        DriverRegistryStatus::Active => {}
+                        DriverRegistryStatus::Deprecated => report.deprecated_overrides += 1,
+                        DriverRegistryStatus::Revoked => report.revoked_overrides += 1,
+                    }
                     changed = true;
                 }
                 None => {
@@ -691,6 +1318,71 @@ impl RegistryIndexResponse {
     }
 }
 
+impl Default for RegistryBundleManifestRequest {
+    fn default() -> Self {
+        Self {
+            schema_version: REGISTRY_BUNDLE_SCHEMA_VERSION,
+            require_publication: false,
+            require_drivers: false,
+        }
+    }
+}
+
+impl RegistryBundleManifestRequest {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != REGISTRY_BUNDLE_SCHEMA_VERSION {
+            return Err(ZapStoreError::UnsupportedRegistryBundleSchemaVersion(
+                self.schema_version,
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl RegistryBundleManifestResponse {
+    pub fn new(
+        node_id: Uuid,
+        manifest: Option<RegistryBundleManifest>,
+        unavailable_reason: Option<String>,
+    ) -> Self {
+        Self {
+            schema_version: REGISTRY_BUNDLE_SCHEMA_VERSION,
+            node_id,
+            manifest,
+            unavailable_reason,
+        }
+    }
+
+    pub fn verify(&self, request: &RegistryBundleManifestRequest) -> Result<()> {
+        if self.schema_version != REGISTRY_BUNDLE_SCHEMA_VERSION {
+            return Err(ZapStoreError::UnsupportedRegistryBundleSchemaVersion(
+                self.schema_version,
+            ));
+        }
+        request.validate()?;
+        if let Some(manifest) = &self.manifest {
+            manifest.validate()?;
+            if request.require_publication
+                && (manifest.publication_path.is_none() || manifest.publication_hash.is_none())
+            {
+                return Err(ZapStoreError::RegistryBundlePublicationMetadataIncomplete);
+            }
+            if request.require_drivers {
+                for entry in &manifest.entries {
+                    if entry.driver_path.is_none() || entry.driver_hash.is_none() {
+                        return Err(ZapStoreError::RegistryBundleArtifactMetadataIncomplete {
+                            action: entry.action.clone(),
+                            version: entry.version.clone(),
+                            artifact: "driver",
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 impl RegistryPublication {
     pub fn new(
         registry: &DriverRegistry,
@@ -809,6 +1501,338 @@ impl RegistryPublication {
         message.extend_from_slice(REGISTRY_PUBLICATION_SIGNATURE_DOMAIN);
         message.extend_from_slice(&encoded);
         Ok(message)
+    }
+}
+
+impl RegistryInstallPlanRequest {
+    pub fn new(
+        action: impl Into<String>,
+        requirement: impl Into<String>,
+        abi_version: Option<u16>,
+    ) -> Self {
+        Self {
+            action: action.into(),
+            requirement: requirement.into(),
+            abi_version,
+            abi_requirement: None,
+        }
+    }
+
+    pub fn new_with_abi_requirement(
+        action: impl Into<String>,
+        requirement: impl Into<String>,
+        abi_requirement: Option<String>,
+    ) -> Self {
+        Self {
+            action: action.into(),
+            requirement: requirement.into(),
+            abi_version: None,
+            abi_requirement,
+        }
+    }
+
+    fn abi_requirement(&self) -> Result<Option<DriverAbiRequirement>> {
+        match (self.abi_version, self.abi_requirement.as_deref()) {
+            (Some(_), Some(requirement)) => Err(ZapStoreError::InvalidDriverAbiRequirement(
+                requirement.to_string(),
+            )),
+            (Some(abi_version), None) => Ok(Some(DriverAbiRequirement::exact(abi_version))),
+            (None, Some(requirement)) => Ok(Some(DriverAbiRequirement::parse(requirement)?)),
+            (None, None) => Ok(None),
+        }
+    }
+}
+
+impl RegistryInstallPlan {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        registry: &DriverRegistry,
+        requests: &[RegistryInstallPlanRequest],
+        planner: &Keypair,
+        requested_at_micros: u64,
+        target: Option<String>,
+        labels: Vec<String>,
+        publication_hash: Option<String>,
+    ) -> Result<Self> {
+        registry.verify_signature()?;
+        if requests.is_empty() {
+            return Err(ZapStoreError::EmptyRegistryInstallPlan);
+        }
+        let planner_public_key = STANDARD_NO_PAD.encode(planner.verifying_key().to_bytes());
+        let mut entries = requests
+            .iter()
+            .map(|request| {
+                let abi_requirement = request.abi_requirement()?;
+                let selected = registry.resolve_with_requirements(
+                    &request.action,
+                    &request.requirement,
+                    abi_requirement.as_ref(),
+                )?;
+                Ok(RegistryInstallPlanEntry::from_registry_entry(
+                    selected,
+                    &request.requirement,
+                    request.abi_version,
+                    request.abi_requirement.clone(),
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        entries.sort_by(|left, right| {
+            left.action
+                .cmp(&right.action)
+                .then_with(|| left.selected_version.cmp(&right.selected_version))
+        });
+
+        let mut plan = Self {
+            schema_version: REGISTRY_INSTALL_PLAN_SCHEMA_VERSION,
+            registry_hash: registry_hash(registry)?,
+            registry_entries: registry.entries.len(),
+            registry_operator_node_id: registry.operator_node_id,
+            publication_hash,
+            requested_at_micros,
+            target,
+            labels,
+            entries,
+            planner_node_id: planner.node_id(),
+            planner_public_key,
+            signature: String::new(),
+        };
+        plan.validate_static()?;
+        let signing_key = SigningKey::from_bytes(&planner.secret_bytes());
+        let signature: Signature = signing_key.sign(&plan.signing_message()?);
+        plan.signature = STANDARD_NO_PAD.encode(signature.to_bytes());
+        Ok(plan)
+    }
+
+    pub fn from_json_str(input: &str) -> Result<Self> {
+        Ok(serde_json::from_str(input)?)
+    }
+
+    pub fn to_json_string(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
+    }
+
+    pub fn verify_for_registry(
+        &self,
+        registry: &DriverRegistry,
+        expected_planner_public_key: Option<&str>,
+    ) -> Result<()> {
+        self.validate_static()?;
+        registry.verify_signature()?;
+        compare_registry_install_plan_field(
+            "registry_hash",
+            self.registry_hash.as_str(),
+            registry_hash(registry)?.as_str(),
+        )?;
+        compare_registry_install_plan_field(
+            "registry_entries",
+            self.registry_entries,
+            registry.entries.len(),
+        )?;
+        compare_registry_install_plan_field(
+            "registry_operator_node_id",
+            self.registry_operator_node_id,
+            registry.operator_node_id,
+        )?;
+
+        let planner_public_key =
+            decode_fixed::<PUBLIC_KEY_LEN>(&self.planner_public_key, "planner_public_key")?;
+        let derived_node_id = node_id_from_public_key(&planner_public_key);
+        if derived_node_id != self.planner_node_id {
+            return Err(ZapStoreError::RegistryInstallPlanPlannerNodeMismatch {
+                declared: self.planner_node_id,
+                derived: derived_node_id,
+            });
+        }
+        if let Some(expected_planner_public_key) = expected_planner_public_key {
+            let expected =
+                decode_fixed::<PUBLIC_KEY_LEN>(expected_planner_public_key, "expected_planner")?;
+            if expected != planner_public_key {
+                return Err(ZapStoreError::RegistryInstallPlanPlannerPublicKeyMismatch {
+                    expected: node_id_from_public_key(&expected),
+                    actual: self.planner_node_id,
+                });
+            }
+        }
+
+        for entry in &self.entries {
+            let abi_requirement = entry.abi_requirement()?;
+            let resolved = registry.resolve_with_requirements(
+                &entry.action,
+                &entry.requirement,
+                abi_requirement.as_ref(),
+            )?;
+            entry.verify_against_registry_entry(resolved)?;
+        }
+
+        let verifying_key = VerifyingKey::from_bytes(&planner_public_key)?;
+        let signature_bytes =
+            decode_fixed::<SIGNATURE_LEN>(&self.signature, "install_plan_signature")?;
+        let signature = Signature::from_bytes(&signature_bytes);
+        verifying_key
+            .verify(&self.signing_message()?, &signature)
+            .map_err(|_| ZapStoreError::InvalidRegistryInstallPlanSignature)
+    }
+
+    fn validate_static(&self) -> Result<()> {
+        if self.schema_version != REGISTRY_INSTALL_PLAN_SCHEMA_VERSION {
+            return Err(ZapStoreError::UnsupportedRegistryInstallPlanSchemaVersion(
+                self.schema_version,
+            ));
+        }
+        validate_driver_hash(&self.registry_hash)?;
+        if let Some(publication_hash) = &self.publication_hash {
+            validate_driver_hash(publication_hash)?;
+        }
+        if self.entries.is_empty() {
+            return Err(ZapStoreError::EmptyRegistryInstallPlan);
+        }
+        decode_fixed::<PUBLIC_KEY_LEN>(&self.planner_public_key, "planner_public_key")?;
+        for entry in &self.entries {
+            entry.validate()?;
+        }
+        Ok(())
+    }
+
+    fn signing_message(&self) -> Result<Vec<u8>> {
+        let payload = RegistryInstallPlanSigningPayload {
+            schema_version: self.schema_version,
+            registry_hash: &self.registry_hash,
+            registry_entries: self.registry_entries,
+            registry_operator_node_id: self.registry_operator_node_id,
+            publication_hash: self.publication_hash.as_deref(),
+            requested_at_micros: self.requested_at_micros,
+            target: self.target.as_deref(),
+            labels: &self.labels,
+            entries: &self.entries,
+            planner_node_id: self.planner_node_id,
+            planner_public_key: &self.planner_public_key,
+        };
+        let encoded = serde_json::to_vec(&payload)?;
+        let mut message =
+            Vec::with_capacity(REGISTRY_INSTALL_PLAN_SIGNATURE_DOMAIN.len() + encoded.len());
+        message.extend_from_slice(REGISTRY_INSTALL_PLAN_SIGNATURE_DOMAIN);
+        message.extend_from_slice(&encoded);
+        Ok(message)
+    }
+}
+
+impl RegistryInstallPlanEntry {
+    pub fn from_registry_entry(
+        entry: &DriverRegistryEntry,
+        requirement: &str,
+        requested_abi_version: Option<u16>,
+        requested_abi_requirement: Option<String>,
+    ) -> Self {
+        Self {
+            action: entry.action.clone(),
+            requirement: requirement.to_string(),
+            requested_abi_version,
+            requested_abi_requirement,
+            selected_version: entry.version.clone(),
+            name: entry.name.clone(),
+            abi_version: entry.abi_version,
+            wasm_hash: entry.wasm_hash.clone(),
+            manifest_path: entry.manifest_path.clone(),
+            author_node_id: entry.author_node_id,
+            migrations: entry.migrations.clone(),
+        }
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.action.trim().is_empty() {
+            return Err(ZapStoreError::EmptyAction);
+        }
+        validate_driver_hash(&self.wasm_hash)?;
+        let version = DriverVersion::parse(&self.selected_version)?;
+        let requirement = DriverVersionRequirement::parse(&self.requirement)?;
+        if !requirement.matches(version) {
+            return Err(ZapStoreError::RegistryInstallPlanRequirementMismatch {
+                action: self.action.clone(),
+                version: self.selected_version.clone(),
+                requirement: self.requirement.clone(),
+            });
+        }
+        let abi_requirement = self.abi_requirement()?;
+        if let Some(requirement) = &abi_requirement
+            && !requirement.matches(self.abi_version)
+        {
+            return Err(ZapStoreError::RegistryInstallPlanAbiRequirementMismatch {
+                action: self.action.clone(),
+                abi_version: self.abi_version,
+                requirement: requirement.raw().to_string(),
+            });
+        }
+        for migration in &self.migrations {
+            migration.validate()?;
+        }
+        Ok(())
+    }
+
+    fn verify_against_registry_entry(&self, entry: &DriverRegistryEntry) -> Result<()> {
+        compare_registry_install_plan_entry_field(
+            self,
+            entry,
+            "selected_version",
+            self.selected_version.as_str(),
+            entry.version.as_str(),
+        )?;
+        compare_registry_install_plan_entry_field(
+            self,
+            entry,
+            "name",
+            self.name.as_str(),
+            entry.name.as_str(),
+        )?;
+        compare_registry_install_plan_entry_field(
+            self,
+            entry,
+            "abi_version",
+            self.abi_version,
+            entry.abi_version,
+        )?;
+        compare_registry_install_plan_entry_field(
+            self,
+            entry,
+            "wasm_hash",
+            self.wasm_hash.as_str(),
+            entry.wasm_hash.as_str(),
+        )?;
+        compare_registry_install_plan_entry_field(
+            self,
+            entry,
+            "manifest_path",
+            self.manifest_path.as_deref(),
+            entry.manifest_path.as_deref(),
+        )?;
+        compare_registry_install_plan_entry_field(
+            self,
+            entry,
+            "author_node_id",
+            self.author_node_id,
+            entry.author_node_id,
+        )?;
+        if self.migrations != entry.migrations {
+            return Err(ZapStoreError::RegistryInstallPlanEntryMismatch {
+                action: self.action.clone(),
+                version: self.selected_version.clone(),
+                field: "migrations",
+            });
+        }
+        Ok(())
+    }
+
+    fn abi_requirement(&self) -> Result<Option<DriverAbiRequirement>> {
+        match (
+            self.requested_abi_version,
+            self.requested_abi_requirement.as_deref(),
+        ) {
+            (Some(_), Some(requirement)) => Err(ZapStoreError::InvalidDriverAbiRequirement(
+                requirement.to_string(),
+            )),
+            (Some(abi_version), None) => Ok(Some(DriverAbiRequirement::exact(abi_version))),
+            (None, Some(requirement)) => Ok(Some(DriverAbiRequirement::parse(requirement)?)),
+            (None, None) => Ok(None),
+        }
     }
 }
 
@@ -941,6 +1965,8 @@ impl DriverRegistryEntry {
             author_node_id: manifest.author_node_id,
             status: DriverRegistryStatus::Active,
             revoked_reason: None,
+            deprecated_reason: None,
+            migrations: Vec::new(),
         }
     }
 }
@@ -979,6 +2005,21 @@ struct RegistryPublicationSigningPayload<'a> {
     labels: &'a [String],
     publisher_node_id: Uuid,
     publisher_public_key: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryInstallPlanSigningPayload<'a> {
+    schema_version: u8,
+    registry_hash: &'a str,
+    registry_entries: usize,
+    registry_operator_node_id: Option<Uuid>,
+    publication_hash: Option<&'a str>,
+    requested_at_micros: u64,
+    target: Option<&'a str>,
+    labels: &'a [String],
+    entries: &'a [RegistryInstallPlanEntry],
+    planner_node_id: Uuid,
+    planner_public_key: &'a str,
 }
 
 pub fn driver_hash(wasm: &[u8]) -> String {
@@ -1030,6 +2071,36 @@ where
     Ok(())
 }
 
+fn compare_registry_install_plan_field<T>(field: &'static str, expected: T, actual: T) -> Result<()>
+where
+    T: PartialEq,
+{
+    if expected != actual {
+        return Err(ZapStoreError::RegistryInstallPlanFieldMismatch { field });
+    }
+    Ok(())
+}
+
+fn compare_registry_install_plan_entry_field<T>(
+    plan_entry: &RegistryInstallPlanEntry,
+    registry_entry: &DriverRegistryEntry,
+    field: &'static str,
+    expected: T,
+    actual: T,
+) -> Result<()>
+where
+    T: PartialEq,
+{
+    if expected != actual {
+        return Err(ZapStoreError::RegistryInstallPlanEntryMismatch {
+            action: plan_entry.action.clone(),
+            version: registry_entry.version.clone(),
+            field,
+        });
+    }
+    Ok(())
+}
+
 fn validate_bundle_path(path: &str) -> Result<()> {
     let path = std::path::Path::new(path);
     if path.is_absolute() || path.as_os_str().is_empty() {
@@ -1076,6 +2147,14 @@ fn validate_registry_merge_compatibility(
         existing.author_node_id,
         incoming.author_node_id,
     )
+}
+
+fn registry_status_rank(status: DriverRegistryStatus) -> u8 {
+    match status {
+        DriverRegistryStatus::Active => 0,
+        DriverRegistryStatus::Deprecated => 1,
+        DriverRegistryStatus::Revoked => 2,
+    }
 }
 
 fn compare_registry_merge_field<T>(
@@ -1341,6 +2420,36 @@ mod tests {
     }
 
     #[test]
+    fn registry_merge_prefers_deprecated_entry_over_active_version() {
+        let author = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "0.1.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut left = DriverRegistry::empty(Some("left".to_string()));
+        left.add_manifest(&manifest, None).unwrap();
+        let mut right = DriverRegistry::empty(Some("right".to_string()));
+        right.add_manifest(&manifest, None).unwrap();
+        right.deprecate("echo", "0.1.0", "use >=0.2.0").unwrap();
+
+        let report = left.merge_from(&right).unwrap();
+
+        assert_eq!(report.deprecated_overrides, 1);
+        assert_eq!(report.revoked_overrides, 0);
+        assert_eq!(left.entries[0].status, DriverRegistryStatus::Deprecated);
+        assert_eq!(
+            left.entries[0].deprecated_reason.as_deref(),
+            Some("use >=0.2.0")
+        );
+    }
+
+    #[test]
     fn registry_merge_rejects_conflicting_driver_identity() {
         let author = Keypair::generate();
         let echo = DriverManifest::new(
@@ -1374,6 +2483,173 @@ mod tests {
                 field: "wasm_hash",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn driver_version_requirement_matches_common_ranges() {
+        let caret = DriverVersionRequirement::parse("^1.2.3").unwrap();
+        assert!(caret.matches(DriverVersion::parse("1.2.3").unwrap()));
+        assert!(caret.matches(DriverVersion::parse("1.9.9").unwrap()));
+        assert!(!caret.matches(DriverVersion::parse("2.0.0").unwrap()));
+
+        let tilde = DriverVersionRequirement::parse("~1.2.3").unwrap();
+        assert!(tilde.matches(DriverVersion::parse("1.2.9").unwrap()));
+        assert!(!tilde.matches(DriverVersion::parse("1.3.0").unwrap()));
+
+        let comparators = DriverVersionRequirement::parse(">=1.0.0, <2.0.0").unwrap();
+        assert!(comparators.matches(DriverVersion::parse("1.5.0").unwrap()));
+        assert!(!comparators.matches(DriverVersion::parse("0.9.9").unwrap()));
+        assert!(!comparators.matches(DriverVersion::parse("2.0.0").unwrap()));
+
+        assert!(matches!(
+            DriverVersionRequirement::parse("^1"),
+            Err(ZapStoreError::InvalidDriverVersionRequirement(_))
+        ));
+    }
+
+    #[test]
+    fn driver_abi_requirement_parses_ranges() {
+        let exact = DriverAbiRequirement::parse("1").unwrap();
+        assert!(exact.matches(1));
+        assert!(!exact.matches(2));
+
+        let range = DriverAbiRequirement::parse(">=1, <=2").unwrap();
+        assert!(range.matches(1));
+        assert!(range.matches(2));
+        assert!(!range.matches(3));
+
+        assert!(matches!(
+            DriverAbiRequirement::parse(">=one"),
+            Err(ZapStoreError::InvalidDriverAbiRequirement(_))
+        ));
+    }
+
+    #[test]
+    fn registry_resolve_selects_highest_active_compatible_version() {
+        let author = Keypair::generate();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        for version in ["1.0.0", "1.2.0", "1.3.0", "2.0.0"] {
+            let manifest = DriverManifest::new(
+                "echo",
+                version,
+                "echo",
+                wasm(),
+                DriverPermissions::none(),
+                None,
+                &author,
+            )
+            .unwrap();
+            registry.add_manifest(&manifest, None).unwrap();
+        }
+        registry.revoke("echo", "1.3.0", "bad release").unwrap();
+
+        let selected = registry
+            .resolve("echo", ">=1.0.0, <2.0.0", Some(DRIVER_ABI_VERSION))
+            .unwrap();
+
+        assert_eq!(selected.version, "1.2.0");
+        assert_eq!(selected.status, DriverRegistryStatus::Active);
+    }
+
+    #[test]
+    fn registry_resolve_can_filter_by_abi_version() {
+        let author = Keypair::generate();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        for version in ["1.0.0", "1.1.0"] {
+            let manifest = DriverManifest::new(
+                "echo",
+                version,
+                "echo",
+                wasm(),
+                DriverPermissions::none(),
+                None,
+                &author,
+            )
+            .unwrap();
+            registry.add_manifest(&manifest, None).unwrap();
+        }
+        registry
+            .entries
+            .iter_mut()
+            .find(|entry| entry.version == "1.1.0")
+            .unwrap()
+            .abi_version = DRIVER_ABI_VERSION + 1;
+
+        let selected = registry
+            .resolve("echo", "*", Some(DRIVER_ABI_VERSION))
+            .unwrap();
+
+        assert_eq!(selected.version, "1.0.0");
+        assert_eq!(
+            registry.resolve("echo", "*", None).unwrap().version,
+            "1.1.0"
+        );
+    }
+
+    #[test]
+    fn registry_resolve_can_filter_by_abi_requirement() {
+        let author = Keypair::generate();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        for version in ["1.0.0", "1.1.0", "1.2.0"] {
+            let manifest = DriverManifest::new(
+                "echo",
+                version,
+                "echo",
+                wasm(),
+                DriverPermissions::none(),
+                None,
+                &author,
+            )
+            .unwrap();
+            registry.add_manifest(&manifest, None).unwrap();
+        }
+        registry
+            .entries
+            .iter_mut()
+            .find(|entry| entry.version == "1.1.0")
+            .unwrap()
+            .abi_version = DRIVER_ABI_VERSION + 1;
+        registry
+            .entries
+            .iter_mut()
+            .find(|entry| entry.version == "1.2.0")
+            .unwrap()
+            .abi_version = DRIVER_ABI_VERSION + 2;
+
+        let selected = registry
+            .resolve_compatible("echo", "*", Some(">=1,<=2"))
+            .unwrap();
+
+        assert_eq!(selected.version, "1.1.0");
+        assert_eq!(selected.abi_version, DRIVER_ABI_VERSION + 1);
+    }
+
+    #[test]
+    fn registry_resolve_rejects_invalid_versions_and_missing_matches() {
+        let author = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "1.0.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        registry.add_manifest(&manifest, None).unwrap();
+
+        assert!(matches!(
+            registry.resolve("echo", "^2.0.0", None),
+            Err(ZapStoreError::NoCompatibleRegistryEntry { .. })
+        ));
+
+        registry.entries[0].version = "latest".to_string();
+        assert!(matches!(
+            registry.resolve("echo", "*", None),
+            Err(ZapStoreError::InvalidDriverVersion(version)) if version == "latest"
         ));
     }
 
@@ -1461,6 +2737,161 @@ mod tests {
         assert!(matches!(
             RegistryPublication::new(&registry, &publisher, 123, None, Vec::new()),
             Err(ZapStoreError::MissingRegistrySignature)
+        ));
+    }
+
+    #[test]
+    fn registry_install_plan_signs_and_verifies_selected_versions() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let planner = Keypair::generate();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        for version in ["1.0.0", "1.2.0", "2.0.0"] {
+            let manifest = DriverManifest::new(
+                "echo",
+                version,
+                "echo",
+                wasm(),
+                DriverPermissions::none(),
+                None,
+                &author,
+            )
+            .unwrap();
+            registry
+                .add_manifest(&manifest, Some(format!("echo-{version}.manifest.toml")))
+                .unwrap();
+        }
+        registry.sign(&operator).unwrap();
+        let planner_public_key = STANDARD_NO_PAD.encode(planner.verifying_key().to_bytes());
+
+        let plan = RegistryInstallPlan::new(
+            &registry,
+            &[RegistryInstallPlanRequest::new("echo", "^1.0.0", None)],
+            &planner,
+            4242,
+            Some("factory-a".to_string()),
+            vec!["stable".to_string()],
+            Some(artifact_hash(b"publication")),
+        )
+        .unwrap();
+
+        plan.verify_for_registry(&registry, Some(&planner_public_key))
+            .unwrap();
+        assert_eq!(plan.registry_hash, registry_hash(&registry).unwrap());
+        assert_eq!(plan.registry_operator_node_id, Some(operator.node_id()));
+        assert_eq!(plan.entries.len(), 1);
+        assert_eq!(plan.entries[0].selected_version, "1.2.0");
+        assert_eq!(plan.entries[0].requirement, "^1.0.0");
+        assert_eq!(
+            plan.entries[0].manifest_path.as_deref(),
+            Some("echo-1.2.0.manifest.toml")
+        );
+    }
+
+    #[test]
+    fn registry_install_plan_records_abi_requirement_and_migrations() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let planner = Keypair::generate();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        for version in ["1.0.0", "2.0.0"] {
+            let manifest = DriverManifest::new(
+                "echo",
+                version,
+                "echo",
+                wasm(),
+                DriverPermissions::none(),
+                None,
+                &author,
+            )
+            .unwrap();
+            registry.add_manifest(&manifest, None).unwrap();
+        }
+        registry
+            .entries
+            .iter_mut()
+            .find(|entry| entry.version == "2.0.0")
+            .unwrap()
+            .abi_version = DRIVER_ABI_VERSION + 1;
+        registry
+            .add_migration(
+                "echo",
+                "2.0.0",
+                DriverRegistryMigration::new(
+                    "^1.0.0",
+                    Some("=1".to_string()),
+                    true,
+                    Some("echo-migrate".to_string()),
+                    Some("0.1.0".to_string()),
+                    Some("copy persisted state before switching ABI".to_string()),
+                ),
+            )
+            .unwrap();
+        registry.sign(&operator).unwrap();
+
+        let plan = RegistryInstallPlan::new(
+            &registry,
+            &[RegistryInstallPlanRequest::new_with_abi_requirement(
+                "echo",
+                "*",
+                Some(">=1,<=2".to_string()),
+            )],
+            &planner,
+            4242,
+            None,
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+
+        plan.verify_for_registry(&registry, None).unwrap();
+        assert_eq!(plan.entries[0].selected_version, "2.0.0");
+        assert_eq!(
+            plan.entries[0].requested_abi_requirement.as_deref(),
+            Some(">=1,<=2")
+        );
+        assert_eq!(plan.entries[0].abi_version, DRIVER_ABI_VERSION + 1);
+        assert_eq!(plan.entries[0].migrations.len(), 1);
+        assert!(plan.entries[0].migrations[0].requires_operator_approval);
+    }
+
+    #[test]
+    fn registry_install_plan_rejects_registry_mutation() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let planner = Keypair::generate();
+        let manifest = DriverManifest::new(
+            "echo",
+            "1.0.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(Some("test".to_string()));
+        registry.add_manifest(&manifest, None).unwrap();
+        registry.sign(&operator).unwrap();
+        let plan = RegistryInstallPlan::new(
+            &registry,
+            &[RegistryInstallPlanRequest::new("echo", "^1.0.0", None)],
+            &planner,
+            4242,
+            None,
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+
+        registry.generated_by = Some("mutated".to_string());
+        registry.sign(&operator).unwrap();
+
+        assert!(matches!(
+            plan.verify_for_registry(&registry, None),
+            Err(ZapStoreError::RegistryInstallPlanFieldMismatch {
+                field: "registry_hash"
+            })
         ));
     }
 
@@ -1562,6 +2993,54 @@ mod tests {
     }
 
     #[test]
+    fn registry_bundle_manifest_response_enforces_request_requirements() {
+        let bundle = RegistryBundleManifest::new(
+            Some("test".to_string()),
+            "registry.index.toml".to_string(),
+            artifact_hash(b"registry"),
+            None,
+            None,
+            vec![RegistryBundleEntry {
+                action: "echo".to_string(),
+                version: "0.1.0".to_string(),
+                name: "echo".to_string(),
+                abi_version: DRIVER_ABI_VERSION,
+                wasm_hash: artifact_hash(b"driver"),
+                author_node_id: Uuid::nil(),
+                status: DriverRegistryStatus::Active,
+                manifest_path: Some("manifests/echo.toml".to_string()),
+                manifest_hash: Some(artifact_hash(b"manifest")),
+                driver_path: None,
+                driver_hash: None,
+            }],
+        );
+        let response = RegistryBundleManifestResponse::new(Uuid::nil(), Some(bundle), None);
+
+        response
+            .verify(&RegistryBundleManifestRequest::default())
+            .unwrap();
+        assert!(matches!(
+            response.verify(&RegistryBundleManifestRequest {
+                schema_version: REGISTRY_BUNDLE_SCHEMA_VERSION,
+                require_publication: true,
+                require_drivers: false,
+            }),
+            Err(ZapStoreError::RegistryBundlePublicationMetadataIncomplete)
+        ));
+        assert!(matches!(
+            response.verify(&RegistryBundleManifestRequest {
+                schema_version: REGISTRY_BUNDLE_SCHEMA_VERSION,
+                require_publication: false,
+                require_drivers: true,
+            }),
+            Err(ZapStoreError::RegistryBundleArtifactMetadataIncomplete {
+                artifact: "driver",
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn registry_mutations_clear_signature() {
         let author = Keypair::generate();
         let operator = Keypair::generate();
@@ -1619,6 +3098,57 @@ mod tests {
             registry.verify_manifest(&manifest),
             Err(ZapStoreError::RevokedRegistryEntry { .. })
         ));
+    }
+
+    #[test]
+    fn registry_deprecates_manifest_version_and_resolution_skips_it() {
+        let author = Keypair::generate();
+        let operator = Keypair::generate();
+        let older = DriverManifest::new(
+            "echo",
+            "1.0.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let newer = DriverManifest::new(
+            "echo",
+            "1.1.0",
+            "echo",
+            wasm(),
+            DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        let mut registry = DriverRegistry::empty(None);
+        registry.add_manifest(&older, None).unwrap();
+        registry.add_manifest(&newer, None).unwrap();
+        registry.sign(&operator).unwrap();
+
+        registry
+            .deprecate("echo", "1.1.0", "use 2.x migration")
+            .unwrap();
+
+        let deprecated = registry
+            .entries
+            .iter()
+            .find(|entry| entry.version == "1.1.0")
+            .unwrap();
+        assert_eq!(deprecated.status, DriverRegistryStatus::Deprecated);
+        assert_eq!(
+            deprecated.deprecated_reason.as_deref(),
+            Some("use 2.x migration")
+        );
+        assert!(registry.signature.is_none());
+        registry.verify_manifest(&newer).unwrap();
+        assert_eq!(
+            registry.resolve("echo", "^1.0.0", None).unwrap().version,
+            "1.0.0"
+        );
     }
 
     #[test]

@@ -2537,6 +2537,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-agent"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+ "zap-capability",
+]
+
+[[package]]
 name = "zap-capability"
 version = "0.1.0"
 dependencies = [
@@ -2671,6 +2682,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-machine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "zap-capability",
+]
+
+[[package]]
 name = "zap-memory"
 version = "0.1.0"
 dependencies = [
@@ -2730,6 +2751,20 @@ dependencies = [
  "zap-runtime",
  "zap-schema",
  "zap-store",
+]
+
+[[package]]
+name = "zap-ops"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "toml",
+ "uuid",
 ]
 
 [[package]]

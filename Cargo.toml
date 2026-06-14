@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/zap-agent",
     "crates/zap-capability",
     "crates/zap-cli",
     "crates/zap-core",
@@ -7,9 +8,11 @@ members = [
     "crates/zap-driver-sdk",
     "crates/zap-envelope",
     "crates/zap-ledger",
+    "crates/zap-machine",
     "crates/zap-memory",
     "crates/zap-net",
     "crates/zap-node",
+    "crates/zap-ops",
     "crates/zap-policy",
     "crates/zap-router",
     "crates/zap-runtime",
@@ -41,6 +44,7 @@ proptest = "1"
 rand_core = { version = "0.6", features = ["getrandom"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 snow = "0.10"
 tempfile = "3"
 thiserror = "2"
@@ -51,8 +55,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 wasmtime = { version = "45.0.1", default-features = false, features = ["cranelift", "runtime", "std", "wat"] }
 wat = "1"
+zap-agent = { path = "crates/zap-agent" }
 zap-capability = { path = "crates/zap-capability" }
 zap-memory = { path = "crates/zap-memory" }
+zap-ops = { path = "crates/zap-ops" }
 zap-policy = { path = "crates/zap-policy" }
 zap-router = { path = "crates/zap-router" }
 zap-schema = { path = "crates/zap-schema" }

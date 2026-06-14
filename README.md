@@ -285,8 +285,16 @@ zap registry add --registry registry.index.toml --manifest echo.manifest.toml
 zap registry verify --registry registry.index.toml --manifest echo.manifest.toml
 zap registry revoke --registry registry.index.toml \
   --action echo --version 0.1.0 --reason "bad release"
+zap registry deprecate --registry registry.index.toml \
+  --action echo --version 0.1.0 --reason "use 0.2.0"
+zap registry migration add --registry registry.index.toml \
+  --action echo --version 2.0.0 --from-version-req '^1.0.0' \
+  --from-abi-req '=1' --requires-operator-approval \
+  --migration-driver echo-migrate@0.1.0
 zap registry sign --registry registry.index.toml --operator-key .zap/node.key
 zap registry verify-signature --registry registry.index.toml
+zap registry resolve --registry registry.index.toml \
+  --action echo --version-req '^0.1.0' --abi-req '>=1,<=2' --json
 zap registry pull --config zap.toml --target <uuid> \
   --out registry.index.toml --operator-public-key <base64-public-key> --json
 zap registry mirror --config zap.toml --out mirrored-registry.index.toml \
@@ -296,9 +304,17 @@ zap registry publication create --registry mirrored-registry.index.toml \
   --publisher-key .zap/node.key --out registry.publication.json --channel stable
 zap registry publication verify --registry mirrored-registry.index.toml \
   --publication registry.publication.json
+zap registry plan create --registry mirrored-registry.index.toml \
+  --publication registry.publication.json --planner-key .zap/node.key \
+  --out registry.install-plan.json --driver 'echo@^0.1.0' \
+  --abi-req '>=1,<=2' --json
+zap registry plan verify --registry mirrored-registry.index.toml \
+  --plan registry.install-plan.json --planner-public-key <base64-public-key>
 zap registry bundle export --registry mirrored-registry.index.toml \
   --publication registry.publication.json --out zapstore-bundle \
   --driver echo@0.1.0=echo.wat --json
+zap registry bundle pull-manifest --config zap.toml --target <uuid> \
+  --out pulled-zapstore.bundle.json --require-publication --require-drivers --json
 zap registry bundle verify --bundle zapstore-bundle --require-drivers
 zap registry bundle import --bundle zapstore-bundle --out .zap/imported-zapstore
 ```

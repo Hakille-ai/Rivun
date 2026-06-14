@@ -1,0 +1,17 @@
+{
+  "name": "@zap-protocol/sdk",
+  "version": "0.1.0",
+  "description": "Lightweight TypeScript SDK for ZAP control envelopes and ZapStore payloads",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

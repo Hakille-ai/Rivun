@@ -24,7 +24,7 @@ use zap_capability::{
     CapabilityResponse, CapabilitySet, DriverPermissions, JsonlCapabilityCache,
     capabilities_for_driver,
 };
-use zap_core::{ZapFlags, ZapFrame, now_micros};
+use zap_core::{ED25519_SIGNATURE_LEN, ZapFlags, ZapFrame, now_micros};
 use zap_crypto::{
     Keypair, POA_ATTESTATION_CONTENT_TYPE, POA_ATTESTATION_REQUEST_SUBJECT,
     POA_ATTESTATION_RESPONSE_SUBJECT, POA_VALIDATOR_SET_CONTENT_TYPE,
@@ -49,8 +49,11 @@ use zap_router::{RouteDecision, RouteMessage, RouteRule, RouteTable};
 use zap_runtime::{ExecutionLimits, HostCallKind, HostCallRecord, WasmDriver, WasmExecutor};
 use zap_schema::{MessageContract, MessageContractSet, MessageParts};
 use zap_store::{
-    DriverManifest, DriverRegistry, REGISTRY_INDEX_CONTENT_TYPE, REGISTRY_INDEX_REQUEST_SUBJECT,
-    REGISTRY_INDEX_RESPONSE_SUBJECT, RegistryIndexRequest, RegistryIndexResponse,
+    DriverManifest, DriverRegistry, REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+    REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT, REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT,
+    REGISTRY_INDEX_CONTENT_TYPE, REGISTRY_INDEX_REQUEST_SUBJECT, REGISTRY_INDEX_RESPONSE_SUBJECT,
+    RegistryBundleManifest, RegistryBundleManifestRequest, RegistryBundleManifestResponse,
+    RegistryIndexRequest, RegistryIndexResponse,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,6 +133,9 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
     }
     if let Some(path) = config.registry.path.take() {
         config.registry.path = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(path) = config.registry.bundle_path.take() {
+        config.registry.bundle_path = Some(resolve_relative_path(base_dir, &path));
     }
     if let Some(path) = config.poa.validator_set.take() {
         config.poa.validator_set = Some(resolve_relative_path(base_dir, &path));
@@ -335,6 +341,8 @@ pub struct RegistryConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub require_signature: bool,
+    #[serde(default)]
+    pub bundle_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -365,6 +373,396 @@ pub struct CapabilityCacheConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub max_age_micros: Option<u64>,
+}
+
+pub const DISCOVERY_SCHEMA_VERSION: u8 = 1;
+pub const DISCOVERY_QUERY_SUBJECT: &str = "zap.discovery.query";
+pub const DISCOVERY_RESPONSE_SUBJECT: &str = "zap.discovery.response";
+pub const DISCOVERY_ANNOUNCE_SUBJECT: &str = "zap.discovery.announce";
+pub const DISCOVERY_CONTENT_TYPE: &str = "application/zap-discovery+json";
+const DISCOVERY_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DISCOVERY-ANNOUNCEMENT-v1";
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryService {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability: Option<CapabilityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryPeer {
+    pub node_id: Uuid,
+    pub addr: String,
+    pub public_key: String,
+    pub status: PeerTrustStatus,
+    pub allow_send: bool,
+    pub allow_receive: bool,
+    pub allow_forward: bool,
+    pub allow_poa_attestation: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_key_epoch: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport_key_rotated_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryAdvertisement {
+    pub schema_version: u8,
+    pub node_id: Uuid,
+    pub public_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub advertised_addr: Option<String>,
+    pub capabilities: CapabilityAdvertisement,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<DiscoveryService>,
+    pub issued_at_micros: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+}
+
+impl DiscoveryAdvertisement {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != DISCOVERY_SCHEMA_VERSION {
+            bail!(
+                "unsupported discovery advertisement schema_version {}",
+                self.schema_version
+            );
+        }
+        let public_key = decode_public_key(&self.public_key)?;
+        if public_key.node_id() != self.node_id {
+            bail!(
+                "discovery advertisement public_key derives node_id {}, but declares {}",
+                public_key.node_id(),
+                self.node_id
+            );
+        }
+        if self.capabilities.node_id != self.node_id {
+            bail!(
+                "discovery advertisement capability node_id {} does not match {}",
+                self.capabilities.node_id,
+                self.node_id
+            );
+        }
+        if let Some(addr) = self.advertised_addr.as_deref() {
+            validate_discovery_text("discovery advertised_addr", addr, 256, false)?;
+        }
+        if let Some(expires_at) = self.expires_at_micros
+            && expires_at <= self.issued_at_micros
+        {
+            bail!("discovery advertisement expires_at_micros must be after issued_at_micros");
+        }
+        let mut service_ids = HashSet::new();
+        for service in &self.services {
+            validate_discovery_service(service)?;
+            if !service_ids.insert(service.id.clone()) {
+                bail!("duplicate discovery service `{}`", service.id);
+            }
+        }
+        for label in &self.labels {
+            validate_discovery_text("discovery label", label, 64, false)?;
+        }
+        Ok(())
+    }
+
+    fn signing_bytes(&self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(self)?)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SignedDiscoveryAdvertisement {
+    pub schema_version: u8,
+    pub advertisement: DiscoveryAdvertisement,
+    pub signature: String,
+}
+
+impl SignedDiscoveryAdvertisement {
+    pub fn verify(&self, expected_public_key: Option<&PublicKey>) -> Result<()> {
+        verify_discovery_advertisement(self, expected_public_key)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryQuery {
+    pub schema_version: u8,
+    #[serde(default)]
+    pub requested: Vec<CapabilityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service: Option<String>,
+    #[serde(default = "default_true")]
+    pub include_peers: bool,
+    #[serde(default = "default_true")]
+    pub include_known: bool,
+}
+
+impl Default for DiscoveryQuery {
+    fn default() -> Self {
+        Self {
+            schema_version: DISCOVERY_SCHEMA_VERSION,
+            requested: Vec::new(),
+            service: None,
+            include_peers: true,
+            include_known: true,
+        }
+    }
+}
+
+impl DiscoveryQuery {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != DISCOVERY_SCHEMA_VERSION {
+            bail!(
+                "unsupported discovery query schema_version {}",
+                self.schema_version
+            );
+        }
+        if let Some(service) = self.service.as_deref() {
+            validate_discovery_text("discovery query service", service, 128, false)?;
+        }
+        Ok(())
+    }
+
+    fn matches_advertisement(&self, advertisement: &DiscoveryAdvertisement) -> bool {
+        let capability_match = self.requested.is_empty()
+            || self
+                .requested
+                .iter()
+                .any(|capability| advertisement.capabilities.capabilities.contains(capability));
+        let service_match = self.service.as_deref().is_none_or(|requested| {
+            advertisement
+                .services
+                .iter()
+                .any(|service| service.id == requested)
+        });
+        capability_match && service_match
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DiscoveryResponse {
+    pub schema_version: u8,
+    pub node_id: Uuid,
+    pub advertisement: SignedDiscoveryAdvertisement,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peers: Vec<DiscoveryPeer>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub announcements: Vec<SignedDiscoveryAdvertisement>,
+}
+
+impl DiscoveryResponse {
+    pub fn verify(&self, expected_node: Uuid, expected_public_key: &PublicKey) -> Result<()> {
+        if self.schema_version != DISCOVERY_SCHEMA_VERSION {
+            bail!(
+                "unsupported discovery response schema_version {}",
+                self.schema_version
+            );
+        }
+        if self.node_id != expected_node {
+            bail!(
+                "discovery response from {} advertised node_id {}",
+                expected_node,
+                self.node_id
+            );
+        }
+        self.advertisement.verify(Some(expected_public_key))?;
+        if self.advertisement.advertisement.node_id != self.node_id {
+            bail!(
+                "discovery response advertisement node_id {} does not match {}",
+                self.advertisement.advertisement.node_id,
+                self.node_id
+            );
+        }
+        for announcement in &self.announcements {
+            announcement.verify(None)?;
+        }
+        Ok(())
+    }
+}
+
+pub fn discovery_services_for_capabilities(
+    advertisement: &CapabilityAdvertisement,
+) -> Vec<DiscoveryService> {
+    advertisement
+        .capabilities
+        .iter()
+        .map(|capability| {
+            let action = capability.driver_action();
+            DiscoveryService {
+                id: capability.to_string(),
+                capability: Some(capability.clone()),
+                kind: action
+                    .map(|_| "action".to_string())
+                    .or_else(|| Some("capability".to_string())),
+                subject: action.map(ToString::to_string),
+                content_type: None,
+                description: None,
+                tags: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+pub fn build_discovery_advertisement(
+    keypair: &Keypair,
+    advertised_addr: Option<String>,
+    capability_advertisement: CapabilityAdvertisement,
+    mut services: Vec<DiscoveryService>,
+    labels: Vec<String>,
+    expires_at_micros: Option<u64>,
+) -> Result<DiscoveryAdvertisement> {
+    if capability_advertisement.node_id != keypair.node_id() {
+        bail!(
+            "capability advertisement node_id {} does not match signing key {}",
+            capability_advertisement.node_id,
+            keypair.node_id()
+        );
+    }
+    if services.is_empty() {
+        services = discovery_services_for_capabilities(&capability_advertisement);
+    }
+    let advertisement = DiscoveryAdvertisement {
+        schema_version: DISCOVERY_SCHEMA_VERSION,
+        node_id: keypair.node_id(),
+        public_key: STANDARD_NO_PAD.encode(keypair.verifying_key().to_bytes()),
+        advertised_addr,
+        capabilities: capability_advertisement,
+        services,
+        issued_at_micros: now_micros()?,
+        expires_at_micros,
+        labels,
+    };
+    advertisement.validate()?;
+    Ok(advertisement)
+}
+
+pub fn sign_discovery_advertisement(
+    keypair: &Keypair,
+    advertisement: DiscoveryAdvertisement,
+) -> Result<SignedDiscoveryAdvertisement> {
+    if advertisement.node_id != keypair.node_id() {
+        bail!(
+            "discovery advertisement node_id {} does not match signing key {}",
+            advertisement.node_id,
+            keypair.node_id()
+        );
+    }
+    advertisement.validate()?;
+    let signature =
+        keypair.sign_domain_message(DISCOVERY_SIGNATURE_DOMAIN, &advertisement.signing_bytes()?);
+    Ok(SignedDiscoveryAdvertisement {
+        schema_version: DISCOVERY_SCHEMA_VERSION,
+        advertisement,
+        signature: STANDARD_NO_PAD.encode(signature),
+    })
+}
+
+pub fn verify_discovery_advertisement(
+    signed: &SignedDiscoveryAdvertisement,
+    expected_public_key: Option<&PublicKey>,
+) -> Result<()> {
+    if signed.schema_version != DISCOVERY_SCHEMA_VERSION {
+        bail!(
+            "unsupported signed discovery advertisement schema_version {}",
+            signed.schema_version
+        );
+    }
+    signed.advertisement.validate()?;
+    let public_key = decode_public_key(&signed.advertisement.public_key)?;
+    if let Some(expected) = expected_public_key
+        && expected.to_bytes() != public_key.to_bytes()
+    {
+        bail!(
+            "discovery advertisement expected public key for {}, got {}",
+            expected.node_id(),
+            public_key.node_id()
+        );
+    }
+    let signature = decode_signature(&signed.signature)?;
+    public_key.verify_domain_message(
+        DISCOVERY_SIGNATURE_DOMAIN,
+        &signed.advertisement.signing_bytes()?,
+        &signature,
+    )?;
+    Ok(())
+}
+
+fn validate_discovery_service(service: &DiscoveryService) -> Result<()> {
+    validate_discovery_text("discovery service id", &service.id, 128, false)?;
+    if let Some(kind) = service.kind.as_deref() {
+        validate_discovery_text("discovery service kind", kind, 64, false)?;
+    }
+    if let Some(subject) = service.subject.as_deref() {
+        validate_discovery_text(
+            "discovery service subject",
+            subject,
+            ZENV_MAX_SUBJECT_LEN,
+            false,
+        )?;
+    }
+    if let Some(content_type) = service.content_type.as_deref() {
+        validate_discovery_text(
+            "discovery service content_type",
+            content_type,
+            ZENV_MAX_CONTENT_TYPE_LEN,
+            false,
+        )?;
+    }
+    if let Some(description) = service.description.as_deref() {
+        validate_discovery_text("discovery service description", description, 512, false)?;
+    }
+    for tag in &service.tags {
+        validate_discovery_text("discovery service tag", tag, 64, false)?;
+    }
+    Ok(())
+}
+
+fn validate_discovery_text(
+    label: &str,
+    value: &str,
+    max_len: usize,
+    allow_empty: bool,
+) -> Result<()> {
+    validate_message_text(label, value, max_len, allow_empty)
+}
+
+fn validate_discovery_advertisement_time(advertisement: &DiscoveryAdvertisement) -> Result<()> {
+    if let Some(expires_at) = advertisement.expires_at_micros
+        && expires_at <= now_micros()?
+    {
+        bail!(
+            "discovery advertisement for {} expired at {}",
+            advertisement.node_id,
+            expires_at
+        );
+    }
+    Ok(())
+}
+
+fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
+    let bytes = STANDARD_NO_PAD.decode(encoded)?;
+    if bytes.len() != ED25519_SIGNATURE_LEN {
+        bail!(
+            "invalid signature length: expected {}, got {}",
+            ED25519_SIGNATURE_LEN,
+            bytes.len()
+        );
+    }
+    Ok(bytes.try_into().unwrap())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -467,6 +865,7 @@ pub struct ConfigValidationReport {
     pub registry_enabled: bool,
     pub registry_entry_count: usize,
     pub registry_signature_required: bool,
+    pub registry_bundle_enabled: bool,
     pub require_signed: bool,
     pub poa_validator_count: usize,
     pub poa_required_threshold: u16,
@@ -644,6 +1043,7 @@ pub struct ZapNode {
     poa_validator_set_authority: Option<PublicKey>,
     receipt_log_path: Option<PathBuf>,
     registry_path: Option<PathBuf>,
+    registry_bundle_path: Option<PathBuf>,
     registry_require_signature: bool,
     memory: MemoryConfig,
     route_table: RouteTable,
@@ -651,6 +1051,8 @@ pub struct ZapNode {
     message_contracts: MessageContractSet,
     peer_ids: Vec<Uuid>,
     capability_advertisement: CapabilityAdvertisement,
+    discovery_peers: Vec<DiscoveryPeer>,
+    discovery_announcements: Mutex<HashMap<Uuid, SignedDiscoveryAdvertisement>>,
 }
 
 struct DriverRegistration {
@@ -677,6 +1079,7 @@ impl ZapNode {
         let mut public_keys = HashMap::new();
         let mut peer_trust = HashMap::new();
         let mut peer_ids = Vec::with_capacity(config.peers.len());
+        let mut discovery_peers = Vec::with_capacity(config.peers.len());
         for peer in &config.peers {
             let peer_addr = peer
                 .addr
@@ -693,6 +1096,20 @@ impl ZapNode {
             public_keys.insert(peer.node_id, decode_public_key(&peer.public_key)?);
             peer_trust.insert(peer.node_id, peer.trust.clone());
             peer_ids.push(peer.node_id);
+            discovery_peers.push(DiscoveryPeer {
+                node_id: peer.node_id,
+                addr: peer.addr.clone(),
+                public_key: peer.public_key.clone(),
+                status: peer.trust.status,
+                allow_send: peer.trust.allow_send,
+                allow_receive: peer.trust.allow_receive,
+                allow_forward: peer.trust.allow_forward,
+                allow_poa_attestation: peer.trust.allow_poa_attestation,
+                transport_key_epoch: peer.transport_key_epoch,
+                transport_key_rotated_at_micros: peer.transport_key_rotated_at_micros,
+                expires_at_micros: peer.trust.expires_at_micros,
+                labels: peer.trust.labels.clone(),
+            });
         }
         let poa_verifier = load_poa_verifier(&config.poa)?;
         let poa_validator_set_path = config.poa.validator_set.clone();
@@ -706,6 +1123,7 @@ impl ZapNode {
 
         let runtime = WasmExecutor::new()?;
         let registry_path = config.registry.path.clone();
+        let registry_bundle_path = config.registry.bundle_path.clone();
         let registry_require_signature = config.registry.require_signature;
         let registry = load_driver_registry_optional(&config.registry)?;
         let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
@@ -731,6 +1149,7 @@ impl ZapNode {
             poa_validator_set_authority,
             receipt_log_path: config.receipts.path,
             registry_path,
+            registry_bundle_path,
             registry_require_signature,
             memory: config.memory,
             route_table,
@@ -738,6 +1157,8 @@ impl ZapNode {
             message_contracts,
             peer_ids,
             capability_advertisement,
+            discovery_peers,
+            discovery_announcements: Mutex::new(HashMap::new()),
         })
     }
 
@@ -795,6 +1216,17 @@ impl ZapNode {
                 .await?;
             None
         } else if message.kind == ZapMessageKind::Control
+            && message.subject == DISCOVERY_ANNOUNCE_SUBJECT
+        {
+            self.record_discovery_announcement(inbound.peer.node_id, &message.body)?;
+            None
+        } else if message.kind == ZapMessageKind::Control
+            && message.subject == DISCOVERY_QUERY_SUBJECT
+        {
+            self.respond_to_discovery_query(inbound.peer.node_id, &message.body)
+                .await?;
+            None
+        } else if message.kind == ZapMessageKind::Control
             && message.subject == CAPABILITY_QUERY_SUBJECT
         {
             self.respond_to_capability_query(inbound.peer.node_id, &message.body)
@@ -816,6 +1248,12 @@ impl ZapNode {
             && message.subject == REGISTRY_INDEX_REQUEST_SUBJECT
         {
             self.respond_to_registry_index_request(inbound.peer.node_id, &message.body)
+                .await?;
+            None
+        } else if message.kind == ZapMessageKind::Control
+            && message.subject == REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT
+        {
+            self.respond_to_registry_bundle_manifest_request(inbound.peer.node_id, &message.body)
                 .await?;
             None
         } else {
@@ -888,6 +1326,112 @@ impl ZapNode {
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
         Ok(())
+    }
+
+    fn record_discovery_announcement(&self, announcer_node: Uuid, body: &[u8]) -> Result<()> {
+        let signed: SignedDiscoveryAdvertisement =
+            serde_json::from_slice(body).context("invalid discovery announcement")?;
+        signed.verify(None)?;
+        if signed.advertisement.node_id != announcer_node {
+            bail!(
+                "discovery announcement node_id {} does not match frame source {}",
+                signed.advertisement.node_id,
+                announcer_node
+            );
+        }
+        validate_discovery_advertisement_time(&signed.advertisement)?;
+        let mut announcements = self
+            .discovery_announcements
+            .lock()
+            .map_err(|_| anyhow!("discovery announcement mutex poisoned"))?;
+        announcements.insert(announcer_node, signed);
+        Ok(())
+    }
+
+    async fn respond_to_discovery_query(&self, requester_node: Uuid, body: &[u8]) -> Result<()> {
+        self.ensure_peer_can_send(requester_node)?;
+        let query = if body.is_empty() {
+            DiscoveryQuery::default()
+        } else {
+            serde_json::from_slice::<DiscoveryQuery>(body).context("invalid discovery query")?
+        };
+        query.validate()?;
+        let response = self.discovery_response(&query)?;
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            DISCOVERY_RESPONSE_SUBJECT,
+            DISCOVERY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&response)?),
+        )?;
+        let frame = ZapFrame::new(
+            self.keypair.node_id(),
+            requester_node,
+            ZapFlags::ENCRYPTED,
+            envelope.encode(),
+        )?;
+        let frame = sign_frame(&self.keypair, &frame)?;
+        self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    fn discovery_response(&self, query: &DiscoveryQuery) -> Result<DiscoveryResponse> {
+        let advertisement = self.signed_discovery_advertisement(None)?;
+        let peers = if query.include_peers {
+            self.discovery_peers.clone()
+        } else {
+            Vec::new()
+        };
+        let announcements = if query.include_known {
+            self.discovery_announcements_for_query(query)?
+        } else {
+            Vec::new()
+        };
+        let response = DiscoveryResponse {
+            schema_version: DISCOVERY_SCHEMA_VERSION,
+            node_id: self.keypair.node_id(),
+            advertisement,
+            peers,
+            announcements,
+        };
+        response.verify(self.keypair.node_id(), &self.keypair.verifying_key())?;
+        Ok(response)
+    }
+
+    fn signed_discovery_advertisement(
+        &self,
+        expires_at_micros: Option<u64>,
+    ) -> Result<SignedDiscoveryAdvertisement> {
+        let advertised_addr = Some(self.local_addr()?.to_string());
+        let advertisement = build_discovery_advertisement(
+            &self.keypair,
+            advertised_addr,
+            self.capability_advertisement.clone(),
+            Vec::new(),
+            Vec::new(),
+            expires_at_micros,
+        )?;
+        sign_discovery_advertisement(&self.keypair, advertisement)
+    }
+
+    fn discovery_announcements_for_query(
+        &self,
+        query: &DiscoveryQuery,
+    ) -> Result<Vec<SignedDiscoveryAdvertisement>> {
+        let announcements = self
+            .discovery_announcements
+            .lock()
+            .map_err(|_| anyhow!("discovery announcement mutex poisoned"))?;
+        let mut matches = Vec::new();
+        for announcement in announcements.values() {
+            if validate_discovery_advertisement_time(&announcement.advertisement).is_err() {
+                continue;
+            }
+            if query.matches_advertisement(&announcement.advertisement) {
+                matches.push(announcement.clone());
+            }
+        }
+        matches.sort_by_key(|announcement| announcement.advertisement.node_id);
+        Ok(matches)
     }
 
     async fn respond_to_receipt_replication_request(
@@ -1005,6 +1549,7 @@ impl ZapNode {
                 let registry_config = RegistryConfig {
                     path: Some(path.clone()),
                     require_signature,
+                    bundle_path: None,
                 };
                 match load_driver_registry_optional(&registry_config) {
                     Ok(Some(registry)) => (Some(registry), None),
@@ -1026,6 +1571,55 @@ impl ZapNode {
             ZapMessageKind::Control,
             REGISTRY_INDEX_RESPONSE_SUBJECT,
             REGISTRY_INDEX_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&response)?),
+        )?;
+        let frame = ZapFrame::new(
+            self.keypair.node_id(),
+            requester_node,
+            ZapFlags::ENCRYPTED,
+            envelope.encode(),
+        )?;
+        let frame = sign_frame(&self.keypair, &frame)?;
+        self.endpoint.send_frame(requester_node, &frame).await?;
+        Ok(())
+    }
+
+    async fn respond_to_registry_bundle_manifest_request(
+        &self,
+        requester_node: Uuid,
+        body: &[u8],
+    ) -> Result<()> {
+        self.ensure_peer_can_send(requester_node)?;
+        let request = if body.is_empty() {
+            RegistryBundleManifestRequest::default()
+        } else {
+            serde_json::from_slice::<RegistryBundleManifestRequest>(body)
+                .context("invalid registry bundle manifest request")?
+        };
+        request.validate()?;
+        let (manifest, unavailable_reason) = match &self.registry_bundle_path {
+            Some(path) => match load_registry_bundle_manifest_optional(path, &request) {
+                Ok(Some(manifest)) => (Some(manifest), None),
+                Ok(None) => (
+                    None,
+                    Some("node has no configured registry.bundle_path".to_string()),
+                ),
+                Err(error) => (None, Some(format!("{error:#}"))),
+            },
+            None => (
+                None,
+                Some("node has no configured registry.bundle_path".to_string()),
+            ),
+        };
+        let response = RegistryBundleManifestResponse::new(
+            self.keypair.node_id(),
+            manifest,
+            unavailable_reason,
+        );
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT,
+            REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
             Bytes::from(serde_json::to_vec(&response)?),
         )?;
         let frame = ZapFrame::new(
@@ -1495,6 +2089,8 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         .as_ref()
         .map(|registry| registry.entries.len())
         .unwrap_or(0);
+    let registry_bundle_enabled =
+        load_registry_bundle_manifest_from_config(&config.registry)?.is_some();
     let signed_driver_count = validate_drivers(
         &config.drivers,
         config.runtime,
@@ -1523,6 +2119,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         registry_enabled: config.registry.path.is_some(),
         registry_entry_count,
         registry_signature_required: config.registry.require_signature,
+        registry_bundle_enabled,
         require_signed: config.require_signed,
         poa_validator_count: poa_summary.validator_count,
         poa_required_threshold: poa_summary.required_threshold,
@@ -2522,6 +3119,35 @@ fn load_driver_registry_optional(config: &RegistryConfig) -> Result<Option<Drive
             .with_context(|| format!("invalid driver registry signature {}", path.display()))?;
     }
     Ok(Some(registry))
+}
+
+fn load_registry_bundle_manifest_from_config(
+    config: &RegistryConfig,
+) -> Result<Option<RegistryBundleManifest>> {
+    let Some(path) = config.bundle_path.as_deref() else {
+        return Ok(None);
+    };
+    load_registry_bundle_manifest_optional(path, &RegistryBundleManifestRequest::default())
+}
+
+fn load_registry_bundle_manifest_optional(
+    bundle_path: &Path,
+    request: &RegistryBundleManifestRequest,
+) -> Result<Option<RegistryBundleManifest>> {
+    let path = bundle_path.join("zapstore.bundle.json");
+    let input = fs::read_to_string(&path)
+        .with_context(|| format!("failed to read registry bundle manifest {}", path.display()))?;
+    let manifest = RegistryBundleManifest::from_json_str(&input).with_context(|| {
+        format!(
+            "failed to parse registry bundle manifest {}",
+            path.display()
+        )
+    })?;
+    let response = RegistryBundleManifestResponse::new(Uuid::nil(), Some(manifest.clone()), None);
+    response
+        .verify(request)
+        .with_context(|| format!("invalid registry bundle manifest {}", path.display()))?;
+    Ok(Some(manifest))
 }
 
 fn hash_frame(frame: &ZapFrame) -> String {
@@ -4248,6 +4874,166 @@ path = "logs/receipts.jsonl"
                 .capabilities
                 .contains(&CapabilityId::new("driver.execute:echo").unwrap())
         );
+    }
+
+    #[tokio::test]
+    async fn node_responds_to_discovery_query_with_signed_services_and_peers() {
+        let harness = node_harness(SecurityConfig::default()).await;
+        let query = DiscoveryQuery::default();
+        let envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            DISCOVERY_QUERY_SUBJECT,
+            DISCOVERY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&query).unwrap()),
+        )
+        .unwrap();
+        let unsigned = ZapFrame::with_timestamp(
+            harness.sender_key.node_id(),
+            harness.receiver_key.node_id(),
+            ZapFlags::ENCRYPTED,
+            now_micros().unwrap(),
+            envelope.encode(),
+        )
+        .unwrap();
+        let signed = sign_frame(&harness.sender_key, &unsigned).unwrap();
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.kind, ZapMessageKind::Control);
+        assert_eq!(event.subject, DISCOVERY_QUERY_SUBJECT);
+
+        let response = timeout(Duration::from_secs(2), harness.sender_endpoint.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        verify_frame(&harness.receiver_key.verifying_key(), &response.frame).unwrap();
+        let response_envelope = ZapEnvelopeRef::parse(&response.frame.payload).unwrap();
+        assert_eq!(response_envelope.kind(), ZapMessageKind::Control);
+        assert_eq!(response_envelope.subject(), DISCOVERY_RESPONSE_SUBJECT);
+        let response: DiscoveryResponse = serde_json::from_slice(response_envelope.body()).unwrap();
+        response
+            .verify(
+                harness.receiver_key.node_id(),
+                &harness.receiver_key.verifying_key(),
+            )
+            .unwrap();
+        assert!(
+            response
+                .advertisement
+                .advertisement
+                .services
+                .iter()
+                .any(|service| service.id == "driver.execute:echo")
+        );
+        assert!(
+            response
+                .peers
+                .iter()
+                .any(|peer| peer.node_id == harness.sender_key.node_id())
+        );
+    }
+
+    #[tokio::test]
+    async fn node_records_discovery_announcement_for_later_queries() {
+        let harness = node_harness(SecurityConfig::default()).await;
+        let mut capabilities = CapabilityAdvertisement::new(harness.sender_key.node_id());
+        capabilities
+            .capabilities
+            .insert(CapabilityId::new("driver.execute:remote").unwrap());
+        let advertisement = build_discovery_advertisement(
+            &harness.sender_key,
+            Some(harness.sender_endpoint.local_addr().unwrap().to_string()),
+            capabilities,
+            vec![DiscoveryService {
+                id: "remote.echo".to_string(),
+                capability: Some(CapabilityId::new("driver.execute:remote").unwrap()),
+                kind: Some("action".to_string()),
+                subject: Some("remote".to_string()),
+                content_type: None,
+                description: Some("remote echo test service".to_string()),
+                tags: vec!["test".to_string()],
+            }],
+            vec!["dynamic".to_string()],
+            None,
+        )
+        .unwrap();
+        let announcement =
+            sign_discovery_advertisement(&harness.sender_key, advertisement).unwrap();
+        let announce_envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            DISCOVERY_ANNOUNCE_SUBJECT,
+            DISCOVERY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&announcement).unwrap()),
+        )
+        .unwrap();
+        let unsigned = ZapFrame::with_timestamp(
+            harness.sender_key.node_id(),
+            harness.receiver_key.node_id(),
+            ZapFlags::ENCRYPTED,
+            now_micros().unwrap(),
+            announce_envelope.encode(),
+        )
+        .unwrap();
+        let signed = sign_frame(&harness.sender_key, &unsigned).unwrap();
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.subject, DISCOVERY_ANNOUNCE_SUBJECT);
+
+        let query_envelope = ZapEnvelope::new(
+            ZapMessageKind::Control,
+            DISCOVERY_QUERY_SUBJECT,
+            DISCOVERY_CONTENT_TYPE,
+            Bytes::from(serde_json::to_vec(&DiscoveryQuery::default()).unwrap()),
+        )
+        .unwrap();
+        let unsigned = ZapFrame::with_timestamp(
+            harness.sender_key.node_id(),
+            harness.receiver_key.node_id(),
+            ZapFlags::ENCRYPTED,
+            now_micros().unwrap(),
+            query_envelope.encode(),
+        )
+        .unwrap();
+        let signed = sign_frame(&harness.sender_key, &unsigned).unwrap();
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        let response = timeout(Duration::from_secs(2), harness.sender_endpoint.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        verify_frame(&harness.receiver_key.verifying_key(), &response.frame).unwrap();
+        let response_envelope = ZapEnvelopeRef::parse(&response.frame.payload).unwrap();
+        let response: DiscoveryResponse = serde_json::from_slice(response_envelope.body()).unwrap();
+        assert_eq!(response.announcements.len(), 1);
+        let known = &response.announcements[0];
+        known
+            .verify(Some(&harness.sender_key.verifying_key()))
+            .unwrap();
+        assert_eq!(known.advertisement.node_id, harness.sender_key.node_id());
+        assert_eq!(known.advertisement.services[0].id, "remote.echo");
     }
 
     #[tokio::test]

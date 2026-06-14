@@ -1,0 +1,17 @@
+[package]
+name = "zap-agent"
+description = "High-level agent protocol contracts for ZAP."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zap-capability.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

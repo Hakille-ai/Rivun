@@ -14,7 +14,10 @@ use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
 use zap_ledger::SignedActionReceipt;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{PeerTrustStatus, ZapNode, ZapNodeConfig};
-use zap_store::{DriverManifest, DriverRegistry, DriverRegistryStatus, RegistryPublication};
+use zap_store::{
+    DriverManifest, DriverRegistry, DriverRegistryStatus, RegistryBundleEntry,
+    RegistryBundleManifest, RegistryInstallPlan, RegistryPublication, artifact_hash,
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -938,6 +941,396 @@ fn registry_revoke_marks_entry_and_clears_signature() {
     assert!(String::from_utf8_lossy(&verify_signature.stderr).contains("not signed"));
 }
 
+#[test]
+fn registry_deprecate_marks_entry_and_resolve_skips_it() {
+    let dir = tempdir().unwrap();
+    let author = Keypair::generate();
+    let manifest_path = dir.path().join("echo.manifest.toml");
+    let registry_path = dir.path().join("registry.index.toml");
+    let manifest = DriverManifest::new(
+        "echo-driver",
+        "0.1.0",
+        "echo",
+        echo_driver_wat().as_bytes(),
+        Default::default(),
+        None,
+        &author,
+    )
+    .unwrap();
+    std::fs::write(&manifest_path, manifest.to_toml_string().unwrap()).unwrap();
+
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args(["registry", "init", "--out", registry_path.to_str().unwrap()])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    assert!(
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "registry",
+                "add",
+                "--registry",
+                registry_path.to_str().unwrap(),
+                "--manifest",
+                manifest_path.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+
+    let deprecate = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "deprecate",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version",
+            "0.1.0",
+            "--reason",
+            "use 0.2.0",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        deprecate.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&deprecate.stdout),
+        String::from_utf8_lossy(&deprecate.stderr)
+    );
+
+    let registry =
+        DriverRegistry::from_toml_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    assert_eq!(registry.entries[0].status, DriverRegistryStatus::Deprecated);
+    assert_eq!(
+        registry.entries[0].deprecated_reason.as_deref(),
+        Some("use 0.2.0")
+    );
+
+    let resolve = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "resolve",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version-req",
+            "^0.1.0",
+        ])
+        .output()
+        .unwrap();
+    assert!(!resolve.status.success());
+    assert!(
+        String::from_utf8_lossy(&resolve.stderr).contains("no active compatible entry"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&resolve.stderr)
+    );
+}
+
+#[test]
+fn registry_migration_add_records_migration_metadata() {
+    let dir = tempdir().unwrap();
+    let author = Keypair::generate();
+    let registry_path = dir.path().join("registry.index.toml");
+    let manifest = DriverManifest::new(
+        "echo-driver",
+        "2.0.0",
+        "echo",
+        echo_driver_wat().as_bytes(),
+        zap_runtime::DriverPermissions::none(),
+        None,
+        &author,
+    )
+    .unwrap();
+    let mut registry = DriverRegistry::empty(Some("test".to_string()));
+    registry.add_manifest(&manifest, None).unwrap();
+    std::fs::write(&registry_path, registry.to_toml_string().unwrap()).unwrap();
+
+    let add = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "migration",
+            "add",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version",
+            "2.0.0",
+            "--from-version-req",
+            "^1.0.0",
+            "--from-abi-req",
+            "=1",
+            "--requires-operator-approval",
+            "--migration-driver",
+            "echo-migrate@0.1.0",
+            "--notes",
+            "copy persisted state before switching ABI",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        add.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&add.stdout),
+        String::from_utf8_lossy(&add.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&add.stdout).contains("signature=cleared"),
+        "stdout:\n{}",
+        String::from_utf8_lossy(&add.stdout)
+    );
+
+    let registry =
+        DriverRegistry::from_toml_str(&std::fs::read_to_string(&registry_path).unwrap()).unwrap();
+    let migration = &registry.entries[0].migrations[0];
+    assert_eq!(migration.from_version_requirement, "^1.0.0");
+    assert_eq!(migration.from_abi_requirement.as_deref(), Some("=1"));
+    assert!(migration.requires_operator_approval);
+    assert_eq!(
+        migration.migration_driver_action.as_deref(),
+        Some("echo-migrate")
+    );
+    assert_eq!(migration.migration_driver_version.as_deref(), Some("0.1.0"));
+}
+
+#[test]
+fn registry_resolve_selects_highest_compatible_active_entry() {
+    let dir = tempdir().unwrap();
+    let author = Keypair::generate();
+    let registry_path = dir.path().join("registry.index.toml");
+    let mut registry = DriverRegistry::empty(Some("test".to_string()));
+    for version in ["1.0.0", "1.2.0", "1.3.0", "2.0.0"] {
+        let manifest = DriverManifest::new(
+            "echo-driver",
+            version,
+            "echo",
+            echo_driver_wat().as_bytes(),
+            zap_runtime::DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        registry
+            .add_manifest(&manifest, Some(format!("manifests/echo-{version}.toml")))
+            .unwrap();
+    }
+    registry
+        .entries
+        .iter_mut()
+        .find(|entry| entry.version == "1.2.0")
+        .unwrap()
+        .abi_version = 2;
+    registry.revoke("echo", "1.3.0", "bad release").unwrap();
+    std::fs::write(&registry_path, registry.to_toml_string().unwrap()).unwrap();
+
+    let resolve = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "resolve",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version-req",
+            "^1.0.0",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        resolve.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&resolve.stdout),
+        String::from_utf8_lossy(&resolve.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&resolve.stdout).unwrap();
+    assert_eq!(report["action"], "echo");
+    assert_eq!(report["requirement"], "^1.0.0");
+    assert_eq!(report["version"], "1.2.0");
+    assert_eq!(report["status"], "active");
+    assert_eq!(report["manifest_path"], "manifests/echo-1.2.0.toml");
+
+    let abi_filtered = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "resolve",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version-req",
+            "^1.0.0",
+            "--abi-req",
+            "=1",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        abi_filtered.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&abi_filtered.stdout),
+        String::from_utf8_lossy(&abi_filtered.stderr)
+    );
+    let abi_report: serde_json::Value = serde_json::from_slice(&abi_filtered.stdout).unwrap();
+    assert_eq!(abi_report["version"], "1.0.0");
+    assert_eq!(abi_report["abi_requirement"], "=1");
+
+    let missing = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "resolve",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--action",
+            "echo",
+            "--version-req",
+            "^3.0.0",
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("no active compatible entry"),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+}
+
+#[test]
+fn registry_install_plan_create_and_verify_round_trip() {
+    let dir = tempdir().unwrap();
+    let author = Keypair::generate();
+    let operator = Keypair::generate();
+    let publisher = Keypair::generate();
+    let planner = Keypair::generate();
+    let registry_path = dir.path().join("registry.index.toml");
+    let publication_path = dir.path().join("registry.publication.json");
+    let planner_key_path = dir.path().join("planner.key");
+    let plan_path = dir.path().join("registry.install-plan.json");
+    std::fs::write(&planner_key_path, planner.to_key_file_toml().unwrap()).unwrap();
+
+    let mut registry = DriverRegistry::empty(Some("test".to_string()));
+    for version in ["1.0.0", "1.2.0", "2.0.0"] {
+        let manifest = DriverManifest::new(
+            "echo-driver",
+            version,
+            "echo",
+            echo_driver_wat().as_bytes(),
+            zap_runtime::DriverPermissions::none(),
+            None,
+            &author,
+        )
+        .unwrap();
+        registry
+            .add_manifest(&manifest, Some(format!("manifests/echo-{version}.toml")))
+            .unwrap();
+    }
+    registry.sign(&operator).unwrap();
+    std::fs::write(&registry_path, registry.to_toml_string().unwrap()).unwrap();
+    let publication = RegistryPublication::new(
+        &registry,
+        &publisher,
+        4241,
+        Some("stable".to_string()),
+        vec![],
+    )
+    .unwrap();
+    std::fs::write(&publication_path, publication.to_json_string().unwrap()).unwrap();
+
+    let create = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "plan",
+            "create",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--publication",
+            publication_path.to_str().unwrap(),
+            "--planner-key",
+            planner_key_path.to_str().unwrap(),
+            "--out",
+            plan_path.to_str().unwrap(),
+            "--driver",
+            "echo@^1.0.0",
+            "--requested-at-micros",
+            "4242",
+            "--target",
+            "factory-a",
+            "--label",
+            "stable",
+            "--abi-req",
+            ">=1,<=1",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        create.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&create.stdout),
+        String::from_utf8_lossy(&create.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&create.stdout).unwrap();
+    assert_eq!(report["verified"], true);
+    assert_eq!(report["entries"], 1);
+    assert_eq!(report["planner_node_id"], planner.node_id().to_string());
+    assert_eq!(report["target"], "factory-a");
+    assert!(
+        report["publication_hash"]
+            .as_str()
+            .unwrap()
+            .starts_with("blake3:")
+    );
+
+    let plan =
+        RegistryInstallPlan::from_json_str(&std::fs::read_to_string(&plan_path).unwrap()).unwrap();
+    plan.verify_for_registry(&registry, Some(&public_key_string(&planner)))
+        .unwrap();
+    assert_eq!(plan.entries[0].selected_version, "1.2.0");
+    assert_eq!(
+        plan.entries[0].requested_abi_requirement.as_deref(),
+        Some(">=1,<=1")
+    );
+    assert_eq!(
+        plan.entries[0].manifest_path.as_deref(),
+        Some("manifests/echo-1.2.0.toml")
+    );
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "registry",
+            "plan",
+            "verify",
+            "--registry",
+            registry_path.to_str().unwrap(),
+            "--plan",
+            plan_path.to_str().unwrap(),
+            "--planner-public-key",
+            &public_key_string(&planner),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        verify.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&verify.stdout),
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let verify_report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(verify_report["verified"], true);
+    assert_eq!(verify_report["registry_hash"], report["registry_hash"]);
+}
+
 #[tokio::test]
 async fn registry_pull_fetches_peer_signed_index() {
     let dir = tempdir().unwrap();
@@ -1057,6 +1450,143 @@ transport_key = '{}'
         .unwrap();
     assert_eq!(pulled.entries.len(), 1);
     assert_eq!(pulled.entries[0].action, "echo");
+}
+
+#[tokio::test]
+async fn registry_bundle_pull_manifest_fetches_peer_bundle_manifest() {
+    let dir = tempdir().unwrap();
+    let receiver = Keypair::generate();
+    let sender = Keypair::generate();
+    let author = Keypair::generate();
+    let transport_key = [0x62_u8; 32];
+    let sender_addr = free_udp_addr();
+    let receiver_key_path = dir.path().join("receiver.key");
+    let receiver_config_path = dir.path().join("receiver.toml");
+    let bundle_path = dir.path().join("bundle");
+    let pulled_manifest_path = dir.path().join("pulled-zapstore.bundle.json");
+    std::fs::create_dir_all(&bundle_path).unwrap();
+    std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
+
+    let manifest = DriverManifest::new(
+        "echo-driver",
+        "0.1.0",
+        "echo",
+        echo_driver_wat().as_bytes(),
+        zap_runtime::DriverPermissions::none(),
+        None,
+        &author,
+    )
+    .unwrap();
+    let mut registry = DriverRegistry::empty(Some("test".to_string()));
+    registry.add_manifest(&manifest, None).unwrap();
+    let mut bundle_entry = RegistryBundleEntry::from_registry_entry(&registry.entries[0]);
+    bundle_entry.manifest_path = Some("manifests/echo.manifest.toml".to_string());
+    bundle_entry.manifest_hash = Some(artifact_hash(b"manifest"));
+    bundle_entry.driver_path = Some("drivers/echo.wat".to_string());
+    bundle_entry.driver_hash = Some(registry.entries[0].wasm_hash.clone());
+    let bundle_manifest = RegistryBundleManifest::new(
+        Some("test".to_string()),
+        "registry.index.toml".to_string(),
+        artifact_hash(b"registry"),
+        Some("registry.publication.json".to_string()),
+        Some(artifact_hash(b"publication")),
+        vec![bundle_entry],
+    );
+    std::fs::write(
+        bundle_path.join("zapstore.bundle.json"),
+        bundle_manifest.to_json_string().unwrap(),
+    )
+    .unwrap();
+
+    std::fs::write(
+        &receiver_config_path,
+        format!(
+            r#"
+bind = '127.0.0.1:0'
+key_file = '{}'
+require_signed = true
+
+[registry]
+bundle_path = '{}'
+
+[[peers]]
+node_id = '{}'
+addr = '{}'
+public_key = '{}'
+transport_key = '{}'
+"#,
+            receiver_key_path.display(),
+            bundle_path.display(),
+            sender.node_id(),
+            sender_addr,
+            public_key_string(&sender),
+            hex_transport_key(transport_key),
+        ),
+    )
+    .unwrap();
+    let receiver_node =
+        ZapNode::from_config(ZapNodeConfig::from_path(&receiver_config_path).unwrap())
+            .await
+            .unwrap();
+    let sender_config = write_sender_config(
+        &dir,
+        &sender,
+        &receiver,
+        receiver_node.local_addr().unwrap(),
+        &sender_addr,
+        transport_key,
+    );
+    let target = receiver.node_id().to_string();
+    let config_arg = sender_config.clone();
+    let out_arg = pulled_manifest_path.clone();
+
+    let command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "registry",
+                "bundle",
+                "pull-manifest",
+                "--config",
+                config_arg.to_str().unwrap(),
+                "--target",
+                &target,
+                "--out",
+                out_arg.to_str().unwrap(),
+                "--require-publication",
+                "--require-drivers",
+                "--json",
+            ])
+            .output()
+    });
+    let handled = receiver_node.handle_once();
+    let (event, output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled, command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let output = output.unwrap().unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["peer"], receiver.node_id().to_string());
+    assert_eq!(report["entries"], 1);
+    assert_eq!(report["publication"], true);
+    assert_eq!(report["manifests"], 1);
+    assert_eq!(report["drivers"], 1);
+
+    let pulled = RegistryBundleManifest::from_json_str(
+        &std::fs::read_to_string(pulled_manifest_path).unwrap(),
+    )
+    .unwrap();
+    pulled.validate().unwrap();
+    assert_eq!(pulled.entries.len(), 1);
+    assert_eq!(pulled.entries[0].action, "echo");
+    assert!(pulled.entries[0].driver_path.is_some());
 }
 
 #[tokio::test]
@@ -3639,6 +4169,152 @@ path = '{}'
     let verify_json: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
     assert_eq!(verify_json["verified"], true);
     assert_eq!(verify_json["entries"], 1);
+}
+
+#[tokio::test]
+async fn discovery_announce_then_query_returns_dynamic_services() {
+    let dir = tempdir().unwrap();
+    let receiver = Keypair::generate();
+    let sender = Keypair::generate();
+    let transport_key = [0x65_u8; 32];
+    let sender_addr = free_udp_addr();
+    let receiver_key_path = dir.path().join("receiver.key");
+    let receiver_driver_path = dir.path().join("receiver-echo.wat");
+    let receiver_config_path = dir.path().join("receiver.toml");
+    std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
+    std::fs::write(&receiver_driver_path, echo_driver_wat()).unwrap();
+    std::fs::write(
+        &receiver_config_path,
+        format!(
+            r#"
+bind = '127.0.0.1:0'
+key_file = '{}'
+require_signed = true
+
+[[peers]]
+node_id = '{}'
+addr = '{}'
+public_key = '{}'
+transport_key = '{}'
+
+[[drivers]]
+action = 'echo'
+path = '{}'
+"#,
+            receiver_key_path.display(),
+            sender.node_id(),
+            sender_addr,
+            public_key_string(&sender),
+            hex_transport_key(transport_key),
+            receiver_driver_path.display(),
+        ),
+    )
+    .unwrap();
+    let receiver_node =
+        ZapNode::from_config(ZapNodeConfig::from_path(&receiver_config_path).unwrap())
+            .await
+            .unwrap();
+    let sender_config = write_sender_config(
+        &dir,
+        &sender,
+        &receiver,
+        receiver_node.local_addr().unwrap(),
+        &sender_addr,
+        transport_key,
+    );
+    let target = receiver.node_id().to_string();
+    let announce_config_arg = sender_config.clone();
+
+    let announce_command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "discovery",
+                "announce",
+                "--config",
+                announce_config_arg.to_str().unwrap(),
+                "--target",
+                &target,
+                "--service",
+                "remote.status",
+                "--label",
+                "dynamic",
+                "--json",
+            ])
+            .output()
+    });
+    let handled_announce = receiver_node.handle_once();
+    let (event, announce_output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled_announce, announce_command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let announce_output = announce_output.unwrap().unwrap();
+    assert!(
+        announce_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&announce_output.stdout),
+        String::from_utf8_lossy(&announce_output.stderr)
+    );
+    let announce_json: serde_json::Value = serde_json::from_slice(&announce_output.stdout).unwrap();
+    assert_eq!(announce_json["target"], receiver.node_id().to_string());
+    assert_eq!(announce_json["node_id"], sender.node_id().to_string());
+    assert_eq!(announce_json["service_count"], 1);
+    assert_eq!(
+        announce_json["announcement"]["advertisement"]["services"][0]["id"],
+        "remote.status"
+    );
+
+    let target = receiver.node_id().to_string();
+    let query_config_arg = sender_config.clone();
+    let query_command = tokio::task::spawn_blocking(move || {
+        Command::new(env!("CARGO_BIN_EXE_zap"))
+            .args([
+                "discovery",
+                "query",
+                "--config",
+                query_config_arg.to_str().unwrap(),
+                "--target",
+                &target,
+                "--json",
+            ])
+            .output()
+    });
+    let handled_query = receiver_node.handle_once();
+    let (event, query_output) = timeout(Duration::from_secs(5), async {
+        tokio::join!(handled_query, query_command)
+    })
+    .await
+    .unwrap();
+    event.unwrap();
+    let query_output = query_output.unwrap().unwrap();
+    assert!(
+        query_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&query_output.stdout),
+        String::from_utf8_lossy(&query_output.stderr)
+    );
+    let query_json: serde_json::Value = serde_json::from_slice(&query_output.stdout).unwrap();
+    assert_eq!(query_json["target"], receiver.node_id().to_string());
+    assert_eq!(query_json["node_id"], receiver.node_id().to_string());
+    assert_eq!(query_json["peer_count"], 1);
+    assert_eq!(query_json["announcement_count"], 1);
+    assert_eq!(query_json["known_service_count"], 1);
+    assert!(
+        query_json["response"]["advertisement"]["advertisement"]["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|service| service["id"] == "driver.execute:echo")
+    );
+    assert_eq!(
+        query_json["response"]["announcements"][0]["advertisement"]["node_id"],
+        sender.node_id().to_string()
+    );
+    assert_eq!(
+        query_json["response"]["announcements"][0]["advertisement"]["services"][0]["id"],
+        "remote.status"
+    );
 }
 
 #[test]

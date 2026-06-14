@@ -1,0 +1,95 @@
+schema_version = 1
+
+[audit]
+log_path = ".zap/audit/governance.jsonl"
+hash_chained = true
+retain_days = 365
+
+[[operators]]
+id = "alice"
+display_name = "Alice Release"
+roles = ["release_manager", "operator"]
+groups = ["release"]
+
+[[operators]]
+id = "bob"
+display_name = "Bob Security"
+roles = ["security_officer", "operator"]
+groups = ["security"]
+
+[[operators]]
+id = "carla"
+display_name = "Carla Registry"
+roles = ["registry_maintainer", "release_manager", "operator"]
+groups = ["release", "registry"]
+
+[[operators]]
+id = "drew"
+display_name = "Drew Incident"
+roles = ["incident_commander", "sre", "operator"]
+groups = ["sre"]
+
+[[groups]]
+id = "release"
+description = "Maintainers allowed to cut public ZAP releases."
+min_approvals = 2
+accepted_roles = ["release_manager"]
+members = ["alice", "carla"]
+
+[[groups]]
+id = "security"
+description = "Security reviewers for signed release and registry changes."
+min_approvals = 1
+accepted_roles = ["security_officer"]
+members = ["bob"]
+
+[[groups]]
+id = "registry"
+description = "Registry maintainers allowed to publish or revoke ZapStore bundles."
+min_approvals = 1
+accepted_roles = ["registry_maintainer"]
+members = ["carla"]
+
+[[groups]]
+id = "sre"
+description = "Production operators allowed to perform break-glass operations."
+min_approvals = 1
+accepted_roles = ["incident_commander", "sre"]
+members = ["drew"]
+
+[[policies]]
+id = "stable-release"
+action_pattern = "release.stable"
+require_audit_entry = true
+break_glass_role = "incident_commander"
+
+[[policies.required_groups]]
+group_id = "release"
+approvals_required = 2
+
+[[policies.required_groups]]
+group_id = "security"
+approvals_required = 1
+
+[[policies]]
+id = "registry-publication"
+action_pattern = "registry.publication.*"
+require_audit_entry = true
+
+[[policies.required_groups]]
+group_id = "registry"
+approvals_required = 1
+
+[[policies.required_groups]]
+group_id = "security"
+approvals_required = 1
+
+[[policies]]
+id = "production-break-glass"
+action_pattern = "ops.break_glass.*"
+require_audit_entry = true
+break_glass_role = "incident_commander"
+
+[[policies.required_groups]]
+group_id = "sre"
+approvals_required = 1

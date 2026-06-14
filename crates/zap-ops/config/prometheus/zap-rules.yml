@@ -1,0 +1,66 @@
+groups:
+  - name: zap-node-health
+    interval: 15s
+    rules:
+      - alert: ZapNodeDown
+        expr: up{job="zap-node"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ZAP node target is not scrapeable"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapnodedown"
+
+      - alert: ZapHealthCritical
+        expr: zap_node_health_status >= 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ZAP node reports a critical health check"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zaphealthcritical"
+
+      - alert: ZapReceiptAuditFailing
+        expr: increase(zap_receipt_log_verify_failures_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Receipt log verification failed"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapreceiptauditfailing"
+
+      - alert: ZapRegistrySignatureInvalid
+        expr: zap_registry_signature_valid == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ZapStore registry signature is missing or invalid"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapregistrysignatureinvalid"
+
+      - alert: ZapCapabilityCacheStale
+        expr: zap_capability_cache_age_seconds > 86400
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Capability cache has not been refreshed within 24 hours"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapcapabilitycachestale"
+
+      - alert: ZapDriverErrorRateHigh
+        expr: sum by (cluster, action) (rate(zap_driver_execution_errors_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Driver execution errors are elevated for {{ $labels.action }}"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapdrivererrorratehigh"
+
+      - alert: ZapPoaAttestationFailures
+        expr: increase(zap_poa_attestation_failures_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proof-of-Action attestation failures detected"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zappoaattestationfailures"

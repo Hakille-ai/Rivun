@@ -1,0 +1,15 @@
+[package]
+name = "zap-machine"
+description = "Hardware-neutral machine connection profiles, adapters, and mockable command bus."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+zap-capability.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

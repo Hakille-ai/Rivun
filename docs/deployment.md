@@ -85,6 +85,8 @@ keys when peer membership changes.
   peer indexes, then review and re-sign the merged registry before deployment.
 - Create and archive `zap registry publication create` output for every
   approved registry rollout so audits can verify the exact deployed index hash.
+- Use `zap registry bundle pull-manifest --require-publication --require-drivers`
+  to inspect a peer-published bundle contract before fetching artifacts.
 - Use `zap registry bundle verify --require-drivers` before importing offline
   ZapStore bundles into production or factory images.
 - Enable `[receipts].path` when audit trails are required.

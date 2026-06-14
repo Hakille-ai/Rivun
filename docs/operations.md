@@ -216,14 +216,20 @@ Create a local registry index and add a signed manifest:
 cargo run -p zap-cli -- registry init --out registry.index.toml
 cargo run -p zap-cli -- registry add --registry registry.index.toml --manifest examples/wasm-drivers/echo/echo.manifest.toml
 cargo run -p zap-cli -- registry revoke --registry registry.index.toml --action echo --version 0.1.0 --reason "bad release"
+cargo run -p zap-cli -- registry deprecate --registry registry.index.toml --action echo --version 0.1.0 --reason "use 0.2.0"
+cargo run -p zap-cli -- registry migration add --registry registry.index.toml --action echo --version 2.0.0 --from-version-req '^1.0.0' --from-abi-req '=1' --requires-operator-approval --migration-driver echo-migrate@0.1.0
 cargo run -p zap-cli -- registry sign --registry registry.index.toml --operator-key .zap/node.key
 cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
+cargo run -p zap-cli -- registry resolve --registry registry.index.toml --action echo --version-req '^0.1.0' --abi-req '>=1,<=2' --json
 cargo run -p zap-cli -- registry pull --config zap.toml --target <uuid> --out registry.index.toml --operator-public-key <base64-public-key> --json
 cargo run -p zap-cli -- registry mirror --config zap.toml --out mirrored-registry.index.toml --operator-public-key <base64-public-key> --json
 cargo run -p zap-cli -- registry sign --registry mirrored-registry.index.toml --operator-key .zap/node.key
 cargo run -p zap-cli -- registry publication create --registry mirrored-registry.index.toml --publisher-key .zap/node.key --out registry.publication.json --channel stable --json
 cargo run -p zap-cli -- registry publication verify --registry mirrored-registry.index.toml --publication registry.publication.json --json
+cargo run -p zap-cli -- registry plan create --registry mirrored-registry.index.toml --publication registry.publication.json --planner-key .zap/node.key --out registry.install-plan.json --driver 'echo@^0.1.0' --abi-req '>=1,<=2' --json
+cargo run -p zap-cli -- registry plan verify --registry mirrored-registry.index.toml --plan registry.install-plan.json --planner-public-key <base64-public-key> --json
 cargo run -p zap-cli -- registry bundle export --registry mirrored-registry.index.toml --publication registry.publication.json --out zapstore-bundle --driver echo@0.1.0=examples/wasm-drivers/echo/echo.wat --json
+cargo run -p zap-cli -- registry bundle pull-manifest --config zap.toml --target <uuid> --out pulled-zapstore.bundle.json --require-publication --require-drivers --json
 cargo run -p zap-cli -- registry bundle verify --bundle zapstore-bundle --require-drivers --json
 cargo run -p zap-cli -- registry bundle import --bundle zapstore-bundle --out .zap/imported-zapstore --require-drivers --json
 ```
@@ -234,11 +240,22 @@ Configure a node to enforce that index:
 [registry]
 path = "registry.index.toml"
 require_signature = true
+bundle_path = "zapstore-bundle"
 ```
 
 Set `require_signature = true` for production gates that should fail when the
 local registry was not approved by an operator key. Registry mutations clear the
-operator signature, so review and re-sign after every `add` or `revoke`.
+operator signature, so review and re-sign after every `add`, `deprecate`,
+`migration add`, or `revoke`.
+Use `registry resolve` in installers or CI gates to choose the highest active
+driver entry matching an action, `MAJOR.MINOR.PATCH` version requirement, and
+optional ABI requirement. Supported version requirements include `*`, exact versions,
+`^1.2.3`, `~1.2.3`, and comma-separated comparators such as
+`>=1.0.0,<2.0.0`; ABI requirements use integer comparators such as `=1` or
+`>=1,<=2`. Deprecated and revoked entries are never selected automatically. Use
+`registry deprecate` for migration nudges, `registry migration add` for signed
+upgrade instructions, and `registry revoke` for unsafe releases that must be
+blocked.
 Remote registry pulls use signed control frames plus the nested registry
 operator signature. Treat pulled indexes as deployment input: verify the
 operator key, then run `check-config --strict` before starting a daemon.
@@ -249,10 +266,20 @@ unsigned until reviewed and re-signed.
 Registry publication metadata signs the canonical hash of the approved registry
 index. Archive `registry.publication.json` with the deployed index so later
 audits can prove the exact registry bytes used by a rollout.
+Registry install plans sign the exact resolved driver set that a CI job,
+machine, or factory installer should trust. `registry plan create` binds each
+`action@version-req` request to the selected active version, ABI, manifest path,
+WASM hash, registry hash, optional ABI requirement, migration metadata, optional
+publication hash, target, and labels. `registry plan verify` rechecks the
+planner signature and registry hash before installation.
 Registry bundles package the signed registry, publication metadata, copied
 manifests, and optional driver artifacts into a safe directory layout.
 Verification recomputes every listed hash before import; use `--require-drivers`
 for air-gapped or factory deployments that must carry executable artifacts.
+Nodes with `registry.bundle_path` can serve the bundle manifest over signed
+control frames. Use `registry bundle pull-manifest --require-publication
+--require-drivers` to discover a peer's published bundle contract before
+fetching files through an external artifact channel or importing a local copy.
 
 Capability discovery is explicit and signed:
 

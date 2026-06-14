@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
@@ -42,16 +42,23 @@ use zap_ledger::{
 use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
-    PeerConfig, PeerTrustConfig, PeerTrustStatus, ZapNode, ZapNodeConfig, describe_capabilities,
+    DISCOVERY_ANNOUNCE_SUBJECT, DISCOVERY_CONTENT_TYPE, DISCOVERY_QUERY_SUBJECT,
+    DISCOVERY_RESPONSE_SUBJECT, DISCOVERY_SCHEMA_VERSION, DiscoveryQuery, DiscoveryResponse,
+    DiscoveryService, PeerConfig, PeerTrustConfig, PeerTrustStatus, SignedDiscoveryAdvertisement,
+    ZapNode, ZapNodeConfig, build_discovery_advertisement, describe_capabilities,
+    sign_discovery_advertisement,
 };
 use zap_policy::{PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
 use zap_schema::{MessageContract, MessageParts};
 use zap_store::{
-    DriverManifest, DriverRegistry, DriverRegistryMergeReport, REGISTRY_INDEX_CONTENT_TYPE,
-    REGISTRY_INDEX_REQUEST_SUBJECT, REGISTRY_INDEX_RESPONSE_SUBJECT, RegistryBundleEntry,
-    RegistryBundleManifest, RegistryIndexRequest, RegistryIndexResponse, RegistryPublication,
-    artifact_hash,
+    DriverAbiRequirement, DriverManifest, DriverRegistry, DriverRegistryMergeReport,
+    DriverRegistryMigration, REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+    REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT, REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT,
+    REGISTRY_INDEX_CONTENT_TYPE, REGISTRY_INDEX_REQUEST_SUBJECT, REGISTRY_INDEX_RESPONSE_SUBJECT,
+    RegistryBundleEntry, RegistryBundleManifest, RegistryBundleManifestRequest,
+    RegistryBundleManifestResponse, RegistryIndexRequest, RegistryIndexResponse,
+    RegistryInstallPlan, RegistryInstallPlanRequest, RegistryPublication, artifact_hash,
 };
 
 #[derive(Debug, Parser)]
@@ -163,6 +170,11 @@ enum Commands {
     Capability {
         #[command(subcommand)]
         command: CapabilityCommand,
+    },
+    /// Discover signed peer and service advertisements.
+    Discovery {
+        #[command(subcommand)]
+        command: DiscoveryCommand,
     },
     /// Operate on a local auditable memory JSONL store.
     Memory {
@@ -296,6 +308,50 @@ enum CapabilityCacheCommand {
     Verify {
         #[arg(long, default_value = ".zap/capabilities.jsonl")]
         path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DiscoveryCommand {
+    /// Send this node's signed service advertisement to one configured peer.
+    Announce {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        /// Address to publish in the signed discovery advertisement.
+        #[arg(long)]
+        addr: Option<String>,
+        /// Service spec as id or id=capability. Repeat for multiple services.
+        #[arg(long = "service")]
+        services: Vec<String>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        expires_at_micros: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Query one configured peer for signed services, peers, and known announcements.
+    Query {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        #[arg(long = "capability")]
+        capabilities: Vec<String>,
+        #[arg(long)]
+        service: Option<String>,
+        /// Omit the peer inventory from the response.
+        #[arg(long)]
+        no_peers: bool,
+        /// Omit announcements the peer learned dynamically from other peers.
+        #[arg(long)]
+        no_known: bool,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
         #[arg(long)]
         json: bool,
     },
@@ -660,6 +716,26 @@ enum RegistryCommand {
         #[arg(long, default_value = "registry.index.toml")]
         registry: PathBuf,
     },
+    /// Resolve the highest active registry entry compatible with a version requirement.
+    Resolve {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        action: String,
+        #[arg(long = "version-req", default_value = "*")]
+        version_req: String,
+        #[arg(long)]
+        abi_version: Option<u16>,
+        #[arg(long = "abi-req", conflicts_with = "abi_version")]
+        abi_requirement: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Create or verify signed registry install plans.
+    Plan {
+        #[command(subcommand)]
+        command: RegistryInstallPlanCommand,
+    },
     /// Pull a remote peer's ZapStore registry index over ZAP control messages.
     Pull {
         #[arg(long, default_value = "zap.toml")]
@@ -730,12 +806,57 @@ enum RegistryCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Mark one manifest version as deprecated in a registry index.
+    Deprecate {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        action: String,
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        reason: Option<String>,
+        /// Write to a different registry index path.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Add migration metadata to registry entries.
+    Migration {
+        #[command(subcommand)]
+        command: RegistryMigrationCommand,
+    },
     /// List registry entries.
     List {
         #[arg(long, default_value = "registry.index.toml")]
         registry: PathBuf,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryMigrationCommand {
+    /// Add a migration guide to one manifest version in a registry index.
+    Add {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        action: String,
+        #[arg(long)]
+        version: String,
+        #[arg(long = "from-version-req")]
+        from_version_requirement: String,
+        #[arg(long = "from-abi-req")]
+        from_abi_requirement: Option<String>,
+        #[arg(long)]
+        requires_operator_approval: bool,
+        #[arg(long = "migration-driver")]
+        migration_driver: Option<String>,
+        #[arg(long)]
+        notes: Option<String>,
+        /// Write to a different registry index path.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -755,6 +876,25 @@ enum RegistryBundleCommand {
         /// Include a driver artifact as action@version=path. Repeat for multiple entries.
         #[arg(long = "driver")]
         drivers: Vec<String>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pull a peer's ZapStore bundle manifest over ZAP control messages.
+    PullManifest {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        #[arg(long)]
+        target: Uuid,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        require_publication: bool,
+        #[arg(long)]
+        require_drivers: bool,
+        #[arg(long, default_value_t = 2000, value_parser = clap::value_parser!(u64).range(1..))]
+        timeout_ms: u64,
         #[arg(long)]
         force: bool,
         #[arg(long)]
@@ -783,6 +923,51 @@ enum RegistryBundleCommand {
         require_drivers: bool,
         #[arg(long)]
         force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RegistryInstallPlanCommand {
+    /// Create a signed install plan from a signed registry index.
+    Create {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        publication: Option<PathBuf>,
+        #[arg(long)]
+        planner_key: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        /// Driver request as action@version-req. Repeat for multiple drivers.
+        #[arg(long = "driver")]
+        drivers: Vec<String>,
+        /// Optional ABI filter applied to every requested driver.
+        #[arg(long)]
+        abi_version: Option<u16>,
+        /// Optional ABI requirement applied to every requested driver, for example '>=1,<=2'.
+        #[arg(long = "abi-req", conflicts_with = "abi_version")]
+        abi_requirement: Option<String>,
+        #[arg(long)]
+        requested_at_micros: Option<u64>,
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long = "label")]
+        labels: Vec<String>,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a signed install plan against its signed registry index.
+    Verify {
+        #[arg(long, default_value = "registry.index.toml")]
+        registry: PathBuf,
+        #[arg(long)]
+        plan: PathBuf,
+        #[arg(long)]
+        planner_public_key: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -994,8 +1179,23 @@ enum BenchCommand {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    std::thread::Builder::new()
+        .name("zap-cli-main".to_string())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .context("failed to build tokio runtime")?;
+            runtime.block_on(async_main())
+        })
+        .context("failed to spawn zap-cli main thread")?
+        .join()
+        .map_err(|_| anyhow!("zap-cli main thread panicked"))?
+}
+
+async fn async_main() -> Result<()> {
     fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -1063,6 +1263,7 @@ async fn main() -> Result<()> {
             verify_with_public_key.as_deref(),
         ),
         Commands::Capability { command } => capability(command).await,
+        Commands::Discovery { command } => discovery(command).await,
         Commands::Memory { command } => memory(command),
         Commands::Route { command } => route(command),
         Commands::Trust { command } => trust(command),
@@ -3385,6 +3586,417 @@ fn capability_cache_verify(path: &Path, json: bool) -> Result<()> {
     Ok(())
 }
 
+async fn discovery(command: DiscoveryCommand) -> Result<()> {
+    match command {
+        DiscoveryCommand::Announce {
+            config,
+            target,
+            addr,
+            services,
+            labels,
+            expires_at_micros,
+            json,
+        } => {
+            discovery_announce(
+                &config,
+                target,
+                addr,
+                &services,
+                labels,
+                expires_at_micros,
+                json,
+            )
+            .await
+        }
+        DiscoveryCommand::Query {
+            config,
+            target,
+            capabilities,
+            service,
+            no_peers,
+            no_known,
+            timeout_ms,
+            json,
+        } => {
+            discovery_query(DiscoveryQueryOptions {
+                config_path: &config,
+                target,
+                capabilities: &capabilities,
+                service,
+                include_peers: !no_peers,
+                include_known: !no_known,
+                timeout_ms,
+                json,
+            })
+            .await
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct DiscoveryAnnounceReport {
+    target: Uuid,
+    node_id: Uuid,
+    service_count: usize,
+    capability_count: usize,
+    announcement: SignedDiscoveryAdvertisement,
+}
+
+#[derive(Debug, Serialize)]
+struct DiscoveryQueryReport {
+    target: Uuid,
+    node_id: Uuid,
+    service_count: usize,
+    capability_count: usize,
+    peer_count: usize,
+    announcement_count: usize,
+    known_service_count: usize,
+    response: DiscoveryResponse,
+}
+
+struct DiscoveryQueryOptions<'a> {
+    config_path: &'a Path,
+    target: Uuid,
+    capabilities: &'a [String],
+    service: Option<String>,
+    include_peers: bool,
+    include_known: bool,
+    timeout_ms: u64,
+    json: bool,
+}
+
+async fn discovery_announce(
+    config_path: &Path,
+    target: Uuid,
+    advertised_addr: Option<String>,
+    service_specs: &[String],
+    labels: Vec<String>,
+    expires_at_micros: Option<u64>,
+    json: bool,
+) -> Result<()> {
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let target_peer = configured_peer_for_control(&config, target, "discovery announcement")?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for discovery announcement",
+            target
+        );
+    }
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let announcement = signed_discovery_from_config(
+        &config,
+        &keypair,
+        advertised_addr.or_else(|| default_discovery_addr(&config)),
+        service_specs,
+        labels,
+        expires_at_micros,
+    )?;
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        DISCOVERY_ANNOUNCE_SUBJECT,
+        DISCOVERY_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(&announcement)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(&keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let report = DiscoveryAnnounceReport {
+        target,
+        node_id: announcement.advertisement.node_id,
+        service_count: announcement.advertisement.services.len(),
+        capability_count: announcement
+            .advertisement
+            .capabilities
+            .capabilities
+            .capabilities
+            .len(),
+        announcement,
+    };
+    print_discovery_announce_report(&report, json)
+}
+
+async fn discovery_query(options: DiscoveryQueryOptions<'_>) -> Result<()> {
+    let DiscoveryQueryOptions {
+        config_path,
+        target,
+        capabilities,
+        service,
+        include_peers,
+        include_known,
+        timeout_ms,
+        json,
+    } = options;
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let requested = parse_capability_ids(capabilities)?;
+    let query = DiscoveryQuery {
+        schema_version: DISCOVERY_SCHEMA_VERSION,
+        requested,
+        service,
+        include_peers,
+        include_known,
+    };
+    query.validate()?;
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let response =
+        query_discovery_peer(&config, &endpoint, &keypair, target, &query, timeout_ms).await?;
+    let report = DiscoveryQueryReport {
+        target,
+        node_id: response.node_id,
+        service_count: response.advertisement.advertisement.services.len(),
+        capability_count: response
+            .advertisement
+            .advertisement
+            .capabilities
+            .capabilities
+            .capabilities
+            .len(),
+        peer_count: response.peers.len(),
+        announcement_count: response.announcements.len(),
+        known_service_count: response
+            .announcements
+            .iter()
+            .map(|announcement| announcement.advertisement.services.len())
+            .sum(),
+        response,
+    };
+    print_discovery_query_report(&report, json)
+}
+
+fn signed_discovery_from_config(
+    config: &ZapNodeConfig,
+    keypair: &Keypair,
+    advertised_addr: Option<String>,
+    service_specs: &[String],
+    labels: Vec<String>,
+    expires_at_micros: Option<u64>,
+) -> Result<SignedDiscoveryAdvertisement> {
+    let capability_advertisement = describe_capabilities(config)?;
+    let services = parse_discovery_services(service_specs, &capability_advertisement)?;
+    let advertisement = build_discovery_advertisement(
+        keypair,
+        advertised_addr,
+        capability_advertisement,
+        services,
+        labels,
+        expires_at_micros,
+    )?;
+    sign_discovery_advertisement(keypair, advertisement)
+}
+
+fn parse_discovery_services(
+    specs: &[String],
+    capability_advertisement: &zap_capability::CapabilityAdvertisement,
+) -> Result<Vec<DiscoveryService>> {
+    let mut services = Vec::with_capacity(specs.len());
+    let mut seen = BTreeSet::new();
+    for spec in specs {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            bail!("discovery service spec must not be empty");
+        }
+        let (id, capability) = match trimmed.split_once('=') {
+            Some((id, capability)) => {
+                if id.trim().is_empty() || capability.trim().is_empty() {
+                    bail!("invalid discovery service `{spec}`; expected id=capability");
+                }
+                (
+                    id.trim().to_string(),
+                    Some(CapabilityId::new(capability.trim())?),
+                )
+            }
+            None => (trimmed.to_string(), None),
+        };
+        if !seen.insert(id.clone()) {
+            bail!("duplicate discovery service `{id}`");
+        }
+        if let Some(capability) = &capability
+            && !capability_advertisement.capabilities.contains(capability)
+        {
+            bail!(
+                "discovery service `{id}` references capability `{}` not advertised by local config",
+                capability
+            );
+        }
+        let action = capability
+            .as_ref()
+            .and_then(|capability| capability.driver_action())
+            .map(ToString::to_string);
+        services.push(DiscoveryService {
+            id,
+            capability,
+            kind: action
+                .as_ref()
+                .map(|_| "action".to_string())
+                .or_else(|| Some("service".to_string())),
+            subject: action,
+            content_type: None,
+            description: None,
+            tags: Vec::new(),
+        });
+    }
+    Ok(services)
+}
+
+fn default_discovery_addr(config: &ZapNodeConfig) -> Option<String> {
+    config
+        .bind
+        .parse::<SocketAddr>()
+        .ok()
+        .filter(|addr| addr.port() != 0)
+        .map(|addr| addr.to_string())
+}
+
+fn configured_peer_for_control<'a>(
+    config: &'a ZapNodeConfig,
+    target: Uuid,
+    operation: &str,
+) -> Result<&'a zap_node::PeerConfig> {
+    config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| {
+            format!(
+                "target {} not found in node config for {}",
+                target, operation
+            )
+        })
+}
+
+async fn query_discovery_peer(
+    config: &ZapNodeConfig,
+    endpoint: &ZapEndpoint,
+    keypair: &Keypair,
+    target: Uuid,
+    query: &DiscoveryQuery,
+    timeout_ms: u64,
+) -> Result<DiscoveryResponse> {
+    let target_peer = configured_peer_for_control(config, target, "discovery query")?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for discovery query",
+            target
+        );
+    }
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        DISCOVERY_QUERY_SUBJECT,
+        DISCOVERY_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(query)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let public_key = decode_public_key(&target_peer.public_key)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!("timed out waiting for discovery response from {}", target);
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let inbound = tokio::time::timeout(remaining, endpoint.recv()).await??;
+        if inbound.peer.node_id != target {
+            continue;
+        }
+        if config.require_signed {
+            verify_frame(&public_key, &inbound.frame)?;
+        }
+        let envelope = ZapEnvelopeRef::parse(&inbound.frame.payload)
+            .context("invalid discovery response envelope")?;
+        if envelope.kind() != ZapMessageKind::Control
+            || envelope.subject() != DISCOVERY_RESPONSE_SUBJECT
+        {
+            continue;
+        }
+        let response: DiscoveryResponse =
+            serde_json::from_slice(envelope.body()).context("invalid discovery response body")?;
+        response.verify(target, &public_key)?;
+        return Ok(response);
+    }
+}
+
+fn print_discovery_announce_report(report: &DiscoveryAnnounceReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    println!("target={}", report.target);
+    println!("node_id={}", report.node_id);
+    println!("services={}", report.service_count);
+    println!("capabilities={}", report.capability_count);
+    println!("signature=ok");
+    Ok(())
+}
+
+fn print_discovery_query_report(report: &DiscoveryQueryReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    println!("target={}", report.target);
+    println!("node_id={}", report.node_id);
+    println!("services={}", report.service_count);
+    println!("capabilities={}", report.capability_count);
+    println!("peers={}", report.peer_count);
+    println!("announcements={}", report.announcement_count);
+    println!("known_services={}", report.known_service_count);
+    for service in &report.response.advertisement.advertisement.services {
+        println!(
+            "service={} capability={} kind={} subject={}",
+            service.id,
+            service
+                .capability
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "none".to_string()),
+            service.kind.as_deref().unwrap_or("none"),
+            service.subject.as_deref().unwrap_or("none")
+        );
+    }
+    for peer in &report.response.peers {
+        println!(
+            "peer={} addr={} status={:?} send={} receive={} forward={}",
+            peer.node_id,
+            peer.addr,
+            peer.status,
+            peer.allow_send,
+            peer.allow_receive,
+            peer.allow_forward
+        );
+    }
+    for announcement in &report.response.announcements {
+        println!(
+            "announcement={} services={} capabilities={}",
+            announcement.advertisement.node_id,
+            announcement.advertisement.services.len(),
+            announcement
+                .advertisement
+                .capabilities
+                .capabilities
+                .capabilities
+                .len()
+        );
+    }
+    Ok(())
+}
+
 fn memory(command: MemoryCommand) -> Result<()> {
     match command {
         MemoryCommand::Put {
@@ -4615,6 +5227,22 @@ async fn registry(command: RegistryCommand) -> Result<()> {
             out,
         } => sign_registry(&registry, &operator_key, out.as_deref()),
         RegistryCommand::VerifySignature { registry } => verify_registry_signature(&registry),
+        RegistryCommand::Resolve {
+            registry,
+            action,
+            version_req,
+            abi_version,
+            abi_requirement,
+            json,
+        } => resolve_registry_entry(
+            &registry,
+            &action,
+            &version_req,
+            abi_version,
+            abi_requirement.as_deref(),
+            json,
+        ),
+        RegistryCommand::Plan { command } => registry_install_plan(command),
         RegistryCommand::Pull {
             config,
             target,
@@ -4662,7 +5290,7 @@ async fn registry(command: RegistryCommand) -> Result<()> {
             .await
         }
         RegistryCommand::Publication { command } => registry_publication(command),
-        RegistryCommand::Bundle { command } => registry_bundle(command),
+        RegistryCommand::Bundle { command } => registry_bundle(command).await,
         RegistryCommand::Revoke {
             registry,
             action,
@@ -4670,6 +5298,14 @@ async fn registry(command: RegistryCommand) -> Result<()> {
             reason,
             out,
         } => revoke_registry_entry(&registry, &action, &version, reason, out.as_deref()),
+        RegistryCommand::Deprecate {
+            registry,
+            action,
+            version,
+            reason,
+            out,
+        } => deprecate_registry_entry(&registry, &action, &version, reason, out.as_deref()),
+        RegistryCommand::Migration { command } => registry_migration(command),
         RegistryCommand::List { registry, json } => list_registry(&registry, json),
     }
 }
@@ -4750,6 +5386,17 @@ struct RegistryBundleImportOptions<'a> {
     json: bool,
 }
 
+struct RegistryBundlePullManifestOptions<'a> {
+    config_path: &'a Path,
+    target: Uuid,
+    out: &'a Path,
+    require_publication: bool,
+    require_drivers: bool,
+    timeout_ms: u64,
+    force: bool,
+    json: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct RegistryMirrorReport {
     out: String,
@@ -4759,6 +5406,7 @@ struct RegistryMirrorReport {
     entries: usize,
     added: usize,
     unchanged: usize,
+    deprecated_overrides: usize,
     revoked_overrides: usize,
     requires_resign: bool,
     results: Vec<RegistryMirrorPeerReport>,
@@ -4771,10 +5419,56 @@ struct RegistryMirrorPeerReport {
     entries: Option<usize>,
     added: Option<usize>,
     unchanged: Option<usize>,
+    deprecated_overrides: Option<usize>,
     revoked_overrides: Option<usize>,
     signed: Option<bool>,
     operator_node_id: Option<Uuid>,
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryResolveReport {
+    registry: String,
+    action: String,
+    requirement: String,
+    name: String,
+    version: String,
+    abi_version: u16,
+    abi_requirement: Option<String>,
+    wasm_hash: String,
+    author_node_id: Uuid,
+    status: String,
+    manifest_path: Option<String>,
+}
+
+struct RegistryInstallPlanCreateOptions<'a> {
+    registry_path: &'a Path,
+    publication_path: Option<&'a Path>,
+    planner_key_path: &'a Path,
+    out: &'a Path,
+    drivers: Vec<String>,
+    abi_version: Option<u16>,
+    abi_requirement: Option<String>,
+    requested_at_micros: Option<u64>,
+    target: Option<String>,
+    labels: Vec<String>,
+    force: bool,
+    json: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryInstallPlanReport {
+    registry: String,
+    plan: String,
+    verified: bool,
+    registry_hash: String,
+    registry_entries: usize,
+    publication_hash: Option<String>,
+    planner_node_id: Uuid,
+    requested_at_micros: u64,
+    target: Option<String>,
+    labels: Vec<String>,
+    entries: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -4801,6 +5495,16 @@ struct RegistryBundleReport {
     manifests: usize,
     drivers: usize,
     imported_to: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RegistryBundleManifestPullReport {
+    peer: Uuid,
+    out: String,
+    entries: usize,
+    publication: bool,
+    manifests: usize,
+    drivers: usize,
 }
 
 async fn pull_registry(options: RegistryPullOptions<'_>) -> Result<()> {
@@ -4904,6 +5608,7 @@ async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
                     Ok(report) => {
                         total.added += report.added;
                         total.unchanged += report.unchanged;
+                        total.deprecated_overrides += report.deprecated_overrides;
                         total.revoked_overrides += report.revoked_overrides;
                         results.push(RegistryMirrorPeerReport {
                             peer: *target,
@@ -4911,6 +5616,7 @@ async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
                             entries: Some(entries),
                             added: Some(report.added),
                             unchanged: Some(report.unchanged),
+                            deprecated_overrides: Some(report.deprecated_overrides),
                             revoked_overrides: Some(report.revoked_overrides),
                             signed: Some(signed),
                             operator_node_id,
@@ -4924,6 +5630,7 @@ async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
                             entries: Some(entries),
                             added: None,
                             unchanged: None,
+                            deprecated_overrides: None,
                             revoked_overrides: None,
                             signed: Some(signed),
                             operator_node_id,
@@ -4943,6 +5650,7 @@ async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
                     entries: None,
                     added: None,
                     unchanged: None,
+                    deprecated_overrides: None,
                     revoked_overrides: None,
                     signed: None,
                     operator_node_id: None,
@@ -4972,6 +5680,7 @@ async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
         entries: merged.entries.len(),
         added: total.added,
         unchanged: total.unchanged,
+        deprecated_overrides: total.deprecated_overrides,
         revoked_overrides: total.revoked_overrides,
         requires_resign: true,
         results,
@@ -4986,6 +5695,7 @@ async fn mirror_registry(options: RegistryMirrorOptions<'_>) -> Result<()> {
         println!("entries={}", report.entries);
         println!("added={}", report.added);
         println!("unchanged={}", report.unchanged);
+        println!("deprecated_overrides={}", report.deprecated_overrides);
         println!("revoked_overrides={}", report.revoked_overrides);
         println!("requires_resign={}", report.requires_resign);
         for result in &report.results {
@@ -5092,6 +5802,158 @@ async fn fetch_registry_index_from_peer(
             unavailable_reason.unwrap_or_else(|| "unavailable".to_string())
         )
     })
+}
+
+async fn pull_registry_bundle_manifest(
+    options: RegistryBundlePullManifestOptions<'_>,
+) -> Result<()> {
+    let RegistryBundlePullManifestOptions {
+        config_path,
+        target,
+        out,
+        require_publication,
+        require_drivers,
+        timeout_ms,
+        force,
+        json,
+    } = options;
+    let config = ZapNodeConfig::from_path(config_path)?;
+    config.validate()?;
+    let keypair = load_keypair(&config.key_file)?;
+    let endpoint = build_capability_endpoint(&config, &keypair).await?;
+    let request = RegistryBundleManifestRequest {
+        schema_version: zap_store::REGISTRY_BUNDLE_SCHEMA_VERSION,
+        require_publication,
+        require_drivers,
+    };
+    let manifest = fetch_registry_bundle_manifest_from_peer(
+        &config, &endpoint, &keypair, target, &request, timeout_ms,
+    )
+    .await?;
+    let output = manifest.to_json_string()?;
+    write_text_file(out, &format!("{output}\n"), force)?;
+    let report = RegistryBundleManifestPullReport {
+        peer: target,
+        out: out.display().to_string(),
+        entries: manifest.entries.len(),
+        publication: manifest.publication_path.is_some() && manifest.publication_hash.is_some(),
+        manifests: manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.manifest_path.is_some() && entry.manifest_hash.is_some())
+            .count(),
+        drivers: manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.driver_path.is_some() && entry.driver_hash.is_some())
+            .count(),
+    };
+    print_registry_bundle_manifest_pull_report(&report, json)
+}
+
+async fn fetch_registry_bundle_manifest_from_peer(
+    config: &ZapNodeConfig,
+    endpoint: &ZapEndpoint,
+    keypair: &Keypair,
+    target: Uuid,
+    request: &RegistryBundleManifestRequest,
+    timeout_ms: u64,
+) -> Result<RegistryBundleManifest> {
+    let target_peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.node_id == target)
+        .with_context(|| format!("target {} not found in node config", target))?;
+    if !target_peer.trust.allows_send() {
+        bail!(
+            "target {} is not permitted by local peer trust policy for registry bundle manifest pull",
+            target
+        );
+    }
+    request.validate()?;
+    let envelope = ZapEnvelope::new(
+        ZapMessageKind::Control,
+        REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+        REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+        Bytes::from(serde_json::to_vec(request)?),
+    )?;
+    let frame = ZapFrame::new(
+        keypair.node_id(),
+        target,
+        ZapFlags::ENCRYPTED,
+        envelope.encode(),
+    )?;
+    let frame = sign_frame(keypair, &frame)?;
+    endpoint.send_frame(target, &frame).await?;
+
+    let public_key = decode_public_key(&target_peer.public_key)?;
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let response = loop {
+        let now = Instant::now();
+        if now >= deadline {
+            bail!(
+                "timed out waiting for registry bundle manifest response from {}",
+                target
+            );
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        let inbound = tokio::time::timeout(remaining, endpoint.recv()).await??;
+        if inbound.peer.node_id != target {
+            continue;
+        }
+        if config.require_signed {
+            verify_frame(&public_key, &inbound.frame)?;
+        }
+        let envelope = ZapEnvelopeRef::parse(&inbound.frame.payload)
+            .context("invalid registry bundle manifest response envelope")?;
+        if envelope.kind() != ZapMessageKind::Control
+            || envelope.subject() != REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT
+        {
+            continue;
+        }
+        let response: RegistryBundleManifestResponse = serde_json::from_slice(envelope.body())
+            .context("invalid registry bundle manifest response body")?;
+        if response.node_id != target {
+            bail!(
+                "registry bundle manifest response from {} advertised node_id {}",
+                target,
+                response.node_id
+            );
+        }
+        response
+            .verify(request)
+            .context("invalid registry bundle manifest response")?;
+        break response;
+    };
+    let RegistryBundleManifestResponse {
+        manifest,
+        unavailable_reason,
+        ..
+    } = response;
+    manifest.with_context(|| {
+        format!(
+            "peer {} did not return a registry bundle manifest: {}",
+            target,
+            unavailable_reason.unwrap_or_else(|| "unavailable".to_string())
+        )
+    })
+}
+
+fn print_registry_bundle_manifest_pull_report(
+    report: &RegistryBundleManifestPullReport,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!("peer={}", report.peer);
+        println!("out={}", report.out);
+        println!("entries={}", report.entries);
+        println!("publication={}", report.publication);
+        println!("manifests={}", report.manifests);
+        println!("drivers={}", report.drivers);
+    }
+    Ok(())
 }
 
 fn registry_mirror_targets(config: &ZapNodeConfig, requested: &[Uuid]) -> Result<Vec<Uuid>> {
@@ -5253,7 +6115,155 @@ fn print_registry_publication_report(report: &RegistryPublicationReport, json: b
     Ok(())
 }
 
-fn registry_bundle(command: RegistryBundleCommand) -> Result<()> {
+fn registry_install_plan(command: RegistryInstallPlanCommand) -> Result<()> {
+    match command {
+        RegistryInstallPlanCommand::Create {
+            registry,
+            publication,
+            planner_key,
+            out,
+            drivers,
+            abi_version,
+            abi_requirement,
+            requested_at_micros,
+            target,
+            labels,
+            force,
+            json,
+        } => create_registry_install_plan(RegistryInstallPlanCreateOptions {
+            registry_path: &registry,
+            publication_path: publication.as_deref(),
+            planner_key_path: &planner_key,
+            out: &out,
+            drivers,
+            abi_version,
+            abi_requirement,
+            requested_at_micros,
+            target,
+            labels,
+            force,
+            json,
+        }),
+        RegistryInstallPlanCommand::Verify {
+            registry,
+            plan,
+            planner_public_key,
+            json,
+        } => verify_registry_install_plan(&registry, &plan, planner_public_key.as_deref(), json),
+    }
+}
+
+fn create_registry_install_plan(options: RegistryInstallPlanCreateOptions<'_>) -> Result<()> {
+    let RegistryInstallPlanCreateOptions {
+        registry_path,
+        publication_path,
+        planner_key_path,
+        out,
+        drivers,
+        abi_version,
+        abi_requirement,
+        requested_at_micros,
+        target,
+        labels,
+        force,
+        json,
+    } = options;
+    let registry = load_driver_registry(registry_path)?;
+    let publication_hash = match publication_path {
+        Some(publication_path) => Some(load_and_verify_registry_publication_hash(
+            publication_path,
+            &registry,
+        )?),
+        None => None,
+    };
+    let planner = load_keypair(planner_key_path)?;
+    let requests = parse_install_plan_requests(drivers, abi_version, abi_requirement.as_deref())?;
+    let requested_at_micros = match requested_at_micros {
+        Some(value) => value,
+        None => now_micros()?,
+    };
+    let plan = RegistryInstallPlan::new(
+        &registry,
+        &requests,
+        &planner,
+        requested_at_micros,
+        target,
+        labels,
+        publication_hash,
+    )?;
+    plan.verify_for_registry(&registry, None)?;
+    write_text_file(out, &format!("{}\n", plan.to_json_string()?), force)?;
+    let report = registry_install_plan_report(registry_path, out, true, &plan);
+    print_registry_install_plan_report(&report, json)
+}
+
+fn verify_registry_install_plan(
+    registry_path: &Path,
+    plan_path: &Path,
+    planner_public_key: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let registry = load_driver_registry(registry_path)?;
+    let plan = load_registry_install_plan(plan_path)?;
+    plan.verify_for_registry(&registry, planner_public_key)?;
+    let report = registry_install_plan_report(registry_path, plan_path, true, &plan);
+    print_registry_install_plan_report(&report, json)
+}
+
+fn registry_install_plan_report(
+    registry_path: &Path,
+    plan_path: &Path,
+    verified: bool,
+    plan: &RegistryInstallPlan,
+) -> RegistryInstallPlanReport {
+    RegistryInstallPlanReport {
+        registry: registry_path.display().to_string(),
+        plan: plan_path.display().to_string(),
+        verified,
+        registry_hash: plan.registry_hash.clone(),
+        registry_entries: plan.registry_entries,
+        publication_hash: plan.publication_hash.clone(),
+        planner_node_id: plan.planner_node_id,
+        requested_at_micros: plan.requested_at_micros,
+        target: plan.target.clone(),
+        labels: plan.labels.clone(),
+        entries: plan.entries.len(),
+    }
+}
+
+fn print_registry_install_plan_report(
+    report: &RegistryInstallPlanReport,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+    } else {
+        println!("registry={}", report.registry);
+        println!("plan={}", report.plan);
+        println!("verified={}", report.verified);
+        println!("registry_hash={}", report.registry_hash);
+        println!("registry_entries={}", report.registry_entries);
+        println!(
+            "publication_hash={}",
+            report.publication_hash.as_deref().unwrap_or("none")
+        );
+        println!("planner_node_id={}", report.planner_node_id);
+        println!("requested_at_micros={}", report.requested_at_micros);
+        println!("target={}", report.target.as_deref().unwrap_or("none"));
+        println!(
+            "labels={}",
+            if report.labels.is_empty() {
+                "none".to_string()
+            } else {
+                report.labels.join(",")
+            }
+        );
+        println!("entries={}", report.entries);
+    }
+    Ok(())
+}
+
+async fn registry_bundle(command: RegistryBundleCommand) -> Result<()> {
     match command {
         RegistryBundleCommand::Export {
             registry,
@@ -5272,6 +6282,28 @@ fn registry_bundle(command: RegistryBundleCommand) -> Result<()> {
             force,
             json,
         }),
+        RegistryBundleCommand::PullManifest {
+            config,
+            target,
+            out,
+            require_publication,
+            require_drivers,
+            timeout_ms,
+            force,
+            json,
+        } => {
+            pull_registry_bundle_manifest(RegistryBundlePullManifestOptions {
+                config_path: &config,
+                target,
+                out: &out,
+                require_publication,
+                require_drivers,
+                timeout_ms,
+                force,
+                json,
+            })
+            .await
+        }
         RegistryBundleCommand::Verify {
             bundle,
             publisher_public_key,
@@ -5687,6 +6719,57 @@ fn verify_registry_signature(registry_path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn resolve_registry_entry(
+    registry_path: &Path,
+    action: &str,
+    version_req: &str,
+    abi_version: Option<u16>,
+    abi_requirement: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let registry = load_driver_registry(registry_path)?;
+    let abi_requirement = abi_requirement
+        .map(str::to_string)
+        .or_else(|| abi_version.map(|version| format!("={version}")));
+    let entry = registry.resolve_compatible(action, version_req, abi_requirement.as_deref())?;
+    let report = RegistryResolveReport {
+        registry: registry_path.display().to_string(),
+        action: entry.action.clone(),
+        requirement: version_req.to_string(),
+        name: entry.name.clone(),
+        version: entry.version.clone(),
+        abi_version: entry.abi_version,
+        abi_requirement,
+        wasm_hash: entry.wasm_hash.clone(),
+        author_node_id: entry.author_node_id,
+        status: format!("{:?}", entry.status).to_ascii_lowercase(),
+        manifest_path: entry.manifest_path.clone(),
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("registry={}", report.registry);
+        println!("action={}", report.action);
+        println!("requirement={}", report.requirement);
+        println!("name={}", report.name);
+        println!("version={}", report.version);
+        println!("abi_version={}", report.abi_version);
+        println!(
+            "abi_requirement={}",
+            report.abi_requirement.as_deref().unwrap_or("none")
+        );
+        println!("wasm_hash={}", report.wasm_hash);
+        println!("author_node_id={}", report.author_node_id);
+        println!("status={}", report.status);
+        println!(
+            "manifest_path={}",
+            report.manifest_path.as_deref().unwrap_or("none")
+        );
+    }
+    Ok(())
+}
+
 fn revoke_registry_entry(
     registry_path: &Path,
     action: &str,
@@ -5708,6 +6791,124 @@ fn revoke_registry_entry(
     Ok(())
 }
 
+fn deprecate_registry_entry(
+    registry_path: &Path,
+    action: &str,
+    version: &str,
+    reason: Option<String>,
+    out: Option<&Path>,
+) -> Result<()> {
+    let mut registry = load_driver_registry(registry_path)?;
+    let reason = reason.unwrap_or_else(|| "deprecated by operator".to_string());
+    registry.deprecate(action, version, reason.clone())?;
+    let out = out.unwrap_or(registry_path);
+    write_text_file(out, &registry.to_toml_string()?, true)?;
+    println!("registry={}", out.display());
+    println!("action={action}");
+    println!("version={version}");
+    println!("status=deprecated");
+    println!("reason={reason}");
+    println!("signature=cleared");
+    Ok(())
+}
+
+fn registry_migration(command: RegistryMigrationCommand) -> Result<()> {
+    match command {
+        RegistryMigrationCommand::Add {
+            registry,
+            action,
+            version,
+            from_version_requirement,
+            from_abi_requirement,
+            requires_operator_approval,
+            migration_driver,
+            notes,
+            out,
+        } => add_registry_migration(RegistryMigrationOptions {
+            registry_path: &registry,
+            action: &action,
+            version: &version,
+            from_version_requirement,
+            from_abi_requirement,
+            requires_operator_approval,
+            migration_driver,
+            notes,
+            out: out.as_deref(),
+        }),
+    }
+}
+
+struct RegistryMigrationOptions<'a> {
+    registry_path: &'a Path,
+    action: &'a str,
+    version: &'a str,
+    from_version_requirement: String,
+    from_abi_requirement: Option<String>,
+    requires_operator_approval: bool,
+    migration_driver: Option<String>,
+    notes: Option<String>,
+    out: Option<&'a Path>,
+}
+
+fn add_registry_migration(options: RegistryMigrationOptions<'_>) -> Result<()> {
+    let RegistryMigrationOptions {
+        registry_path,
+        action,
+        version,
+        from_version_requirement,
+        from_abi_requirement,
+        requires_operator_approval,
+        migration_driver,
+        notes,
+        out,
+    } = options;
+    let (migration_driver_action, migration_driver_version) = match migration_driver {
+        Some(spec) => {
+            let (driver_action, driver_version) = spec.split_once('@').with_context(|| {
+                format!("invalid --migration-driver `{spec}`; expected action@version")
+            })?;
+            if driver_action.trim().is_empty() || driver_version.trim().is_empty() {
+                bail!("invalid --migration-driver `{spec}`; action and version are required");
+            }
+            (
+                Some(driver_action.trim().to_string()),
+                Some(driver_version.trim().to_string()),
+            )
+        }
+        None => (None, None),
+    };
+    let mut registry = load_driver_registry(registry_path)?;
+    let migration = DriverRegistryMigration::new(
+        from_version_requirement.clone(),
+        from_abi_requirement.clone(),
+        requires_operator_approval,
+        migration_driver_action.clone(),
+        migration_driver_version.clone(),
+        notes.clone(),
+    );
+    registry.add_migration(action, version, migration)?;
+    let out = out.unwrap_or(registry_path);
+    write_text_file(out, &registry.to_toml_string()?, true)?;
+    println!("registry={}", out.display());
+    println!("action={action}");
+    println!("version={version}");
+    println!("migration_from_version_req={from_version_requirement}");
+    println!(
+        "migration_from_abi_req={}",
+        from_abi_requirement.as_deref().unwrap_or("none")
+    );
+    println!("requires_operator_approval={requires_operator_approval}");
+    println!(
+        "migration_driver={}",
+        match (migration_driver_action, migration_driver_version) {
+            (Some(action), Some(version)) => format!("{action}@{version}"),
+            _ => "none".to_string(),
+        }
+    );
+    println!("signature=cleared");
+    Ok(())
+}
+
 fn list_registry(registry_path: &Path, json: bool) -> Result<()> {
     let registry = load_driver_registry(registry_path)?;
     if json {
@@ -5721,9 +6922,16 @@ fn list_registry(registry_path: &Path, json: bool) -> Result<()> {
         println!("entries={}", registry.entries.len());
         for entry in &registry.entries {
             println!(
-                "entry action={} version={} status={:?} wasm_hash={} author_node_id={}",
-                entry.action, entry.version, entry.status, entry.wasm_hash, entry.author_node_id
+                "entry action={} version={} status={:?} wasm_hash={} author_node_id={} deprecated_reason={} revoked_reason={}",
+                entry.action,
+                entry.version,
+                entry.status,
+                entry.wasm_hash,
+                entry.author_node_id,
+                entry.deprecated_reason.as_deref().unwrap_or("none"),
+                entry.revoked_reason.as_deref().unwrap_or("none")
             );
+            println!("entry_migrations={}", entry.migrations.len());
         }
     }
     Ok(())
@@ -5740,6 +6948,44 @@ fn load_registry_bundle_manifest(bundle: &Path) -> Result<RegistryBundleManifest
         .validate()
         .with_context(|| format!("invalid bundle manifest {}", path.display()))?;
     Ok(manifest)
+}
+
+fn parse_install_plan_requests(
+    specs: Vec<String>,
+    abi_version: Option<u16>,
+    abi_requirement: Option<&str>,
+) -> Result<Vec<RegistryInstallPlanRequest>> {
+    if specs.is_empty() {
+        bail!("at least one --driver action@version-req is required");
+    }
+    let abi_requirement = match abi_requirement {
+        Some(requirement) => {
+            DriverAbiRequirement::parse(requirement)?;
+            Some(requirement.to_string())
+        }
+        None => None,
+    };
+    specs
+        .into_iter()
+        .map(|spec| {
+            let (action, requirement) = spec.split_once('@').with_context(|| {
+                format!("invalid --driver `{spec}`; expected action@version-req")
+            })?;
+            if action.trim().is_empty() || requirement.trim().is_empty() {
+                bail!("invalid --driver `{spec}`; action and version requirement are required");
+            }
+            Ok(match &abi_requirement {
+                Some(abi_requirement) => RegistryInstallPlanRequest::new_with_abi_requirement(
+                    action.trim(),
+                    requirement.trim(),
+                    Some(abi_requirement.clone()),
+                ),
+                None => {
+                    RegistryInstallPlanRequest::new(action.trim(), requirement.trim(), abi_version)
+                }
+            })
+        })
+        .collect()
 }
 
 fn parse_bundle_driver_specs(specs: Vec<String>) -> Result<BTreeMap<String, PathBuf>> {
@@ -5881,6 +7127,28 @@ fn load_registry_publication(path: &Path) -> Result<RegistryPublication> {
             .with_context(|| format!("failed to read registry publication {}", path.display()))?,
     )
     .with_context(|| format!("failed to parse registry publication {}", path.display()))
+}
+
+fn load_and_verify_registry_publication_hash(
+    path: &Path,
+    registry: &DriverRegistry,
+) -> Result<String> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read registry publication {}", path.display()))?;
+    let publication = RegistryPublication::from_json_str(&contents)
+        .with_context(|| format!("failed to parse registry publication {}", path.display()))?;
+    publication
+        .verify_for_registry(registry, None)
+        .with_context(|| format!("failed to verify registry publication {}", path.display()))?;
+    Ok(artifact_hash(contents.as_bytes()))
+}
+
+fn load_registry_install_plan(path: &Path) -> Result<RegistryInstallPlan> {
+    RegistryInstallPlan::from_json_str(
+        &fs::read_to_string(path)
+            .with_context(|| format!("failed to read registry install plan {}", path.display()))?,
+    )
+    .with_context(|| format!("failed to parse registry install plan {}", path.display()))
 }
 
 fn load_driver_manifest(path: &Path) -> Result<DriverManifest> {

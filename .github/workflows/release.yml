@@ -1,0 +1,178 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to package, without the leading v"
+        required: true
+        type: string
+      channel:
+        description: "Release channel"
+        required: true
+        default: "preview"
+        type: choice
+        options:
+          - preview
+          - stable
+          - security
+
+permissions:
+  contents: write
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-version:
+    name: validate release version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            version="${{ inputs.version }}"
+            channel="${{ inputs.channel }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+            channel="stable"
+          fi
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | python -c 'import json,sys; data=json.load(sys.stdin); print(next(pkg["version"] for pkg in data["packages"] if pkg["name"] == "zap-cli"))')"
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "release version $version does not match workspace version $cargo_version" >&2
+            exit 1
+          fi
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          else
+            echo "invalid release version: $version" >&2
+            exit 1
+          fi
+
+  package:
+    name: package ${{ matrix.target }}
+    needs: validate-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_ext: tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive_ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive_ext: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo ci-fmt
+      - run: cargo ci-test
+      - run: cargo ci-clippy
+      - run: cargo build --locked --release -p zap-cli --target ${{ matrix.target }}
+      - name: Build archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate-version.outputs.version }}"
+          target="${{ matrix.target }}"
+          package="zap-${version}-${target}"
+          mkdir -p "dist/${package}"
+          bin="zap"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            bin="zap.exe"
+          fi
+          cp "target/${target}/release/${bin}" "dist/${package}/"
+          cp README.md LICENSE NOTICE "dist/${package}/"
+          cp docs/release.md docs/observability.md docs/governance.md "dist/${package}/"
+          pushd dist >/dev/null
+          if [[ "${{ matrix.archive_ext }}" == "zip" ]]; then
+            7z a "${package}.zip" "${package}"
+          else
+            tar -czf "${package}.tar.gz" "${package}"
+          fi
+          sha256sum "${package}.${{ matrix.archive_ext }}" > "${package}.${{ matrix.archive_ext }}.sha256"
+          popd >/dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish signed artifacts
+    needs:
+      - validate-version
+      - package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: sigstore/cosign-installer@v3
+      - name: Build checksums and keyless signatures
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+          for artifact in *.tar.gz *.zip; do
+            cosign sign-blob --yes --bundle "${artifact}.sigstore.json" "${artifact}"
+          done
+      - name: Write and validate release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked -p zap-ops --bin zap-release-manifest -- \
+            --version "$VERSION" \
+            --channel "$CHANNEL" \
+            --git-sha "$GITHUB_SHA" \
+            --out dist/zap-release-manifest.json \
+            dist/*.tar.gz dist/*.zip
+          cargo run --locked -p zap-ops --bin zap-release-manifest -- --check dist/zap-release-manifest.json
+        env:
+          VERSION: ${{ needs.validate-version.outputs.version }}
+          CHANNEL: ${{ needs.validate-version.outputs.channel }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-signed-artifacts
+          path: dist
+          if-no-files-found: error
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate-version.outputs.version }}"
+          gh release create "v${version}" dist/* \
+            --title "ZAP v${version}" \
+            --notes-file docs/release.md

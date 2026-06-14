@@ -1,0 +1,61 @@
+bind = "127.0.0.1:7100"
+key_file = "../../.zap/node-a.key"
+require_signed = true
+
+[[peers]]
+node_id = "22222222-2222-4222-8222-222222222222"
+addr = "127.0.0.1:7101"
+public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
+
+[peers.trust]
+status = "trusted"
+allow_send = true
+allow_receive = true
+allow_forward = false
+allow_poa_attestation = true
+labels = ["production-example"]
+
+[[drivers]]
+action = "echo"
+path = "../wasm-drivers/echo/echo.wat"
+manifest = "manifests/echo.manifest.toml"
+
+[runtime]
+fuel = 10000000
+timeout_ms = 1000
+max_memory_bytes = 16777216
+max_output_bytes = 1048576
+
+[security]
+max_clock_skew_micros = 300000000
+replay_cache_capacity = 4096
+
+[receipts]
+path = "../../.zap/examples/node-a-receipts.jsonl"
+
+[registry]
+path = "registry.index.toml"
+require_signature = true
+bundle_path = "zapstore-bundle"
+
+[memory]
+path = "../../.zap/examples/node-a-memory.jsonl"
+max_record_bytes = 1048576
+allow_driver_read = false
+allow_driver_write = false
+
+[capability_cache]
+path = "../../.zap/examples/node-a-capabilities.jsonl"
+max_age_micros = 86400000000
+
+[[routes]]
+name = "thermostat-on-node-b"
+requires_peer_grant = "driver.execute:thermostat.setpoint"
+
+[routes.match]
+kind = "action"
+subject = "thermostat.setpoint"
+
+[routes.target]
+peer = "22222222-2222-4222-8222-222222222222"

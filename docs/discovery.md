@@ -1,0 +1,83 @@
+# ZAP Dynamic Discovery
+
+ZAP discovery lets an operator query configured seed peers for signed service,
+capability, and peer inventory data without editing the local config for every
+service change.
+
+Discovery is intentionally layered on top of the existing encrypted ZAP
+transport. A node can only exchange discovery messages with peers that already
+have a trust contract and transport key in `[[peers]]`. Discovery does not
+silently enroll new transport keys or persist peer config changes.
+
+## Control Subjects
+
+Discovery uses signed `control` envelopes:
+
+- `zap.discovery.announce`: one peer sends a signed discovery advertisement.
+- `zap.discovery.query`: one peer asks for services, peer inventory, and known
+  dynamic announcements.
+- `zap.discovery.response`: the queried peer returns its signed local
+  advertisement, optional configured peer inventory, and optional announcements
+  it has received.
+
+All discovery envelopes use content type `application/zap-discovery+json`.
+
+## Trust Model
+
+Each discovery advertisement is signed with the advertising node identity using
+a discovery-specific Ed25519 domain. The receiving node also verifies the outer
+ZAP frame when `require_signed = true`.
+
+This gives two checks:
+
+- The transport frame proves which configured peer sent the message.
+- The embedded advertisement remains independently verifiable if relayed,
+  logged, or printed by the CLI.
+
+Nodes keep received announcements in memory only. Operators should still use
+the peer enrollment flow when a discovered node should become a configured
+transport peer.
+
+## CLI
+
+Send a signed local announcement to a configured peer:
+
+```powershell
+zap discovery announce --config zap.toml --target <peer-node-id> --service echo=driver.execute:echo --json
+```
+
+If no `--service` is supplied, ZAP derives services from the local capability
+advertisement. A service spec can be either `id` or `id=capability`.
+
+Query a configured peer:
+
+```powershell
+zap discovery query --config zap.toml --target <peer-node-id> --json
+```
+
+Useful filters:
+
+```powershell
+zap discovery query --config zap.toml --target <peer-node-id> --capability driver.execute:echo
+zap discovery query --config zap.toml --target <peer-node-id> --service remote.status
+zap discovery query --config zap.toml --target <peer-node-id> --no-peers --no-known
+```
+
+The JSON response includes:
+
+- `response.advertisement`: the queried peer's signed local advertisement.
+- `response.peers`: sanitized configured peer inventory, excluding transport
+  keys.
+- `response.announcements`: signed dynamic advertisements received from other
+  peers.
+
+## Operator Notes
+
+- Discovery respects peer trust. If `allow_send = false`, local queries and
+  announcements to that target are rejected.
+- Responses never expose `transport_key`.
+- Dynamic announcements are not durable. Restarting a node clears them.
+- `advertised_addr` is informational. It does not override the transport
+  address in config.
+- Use `zap peer invite` / `zap peer accept` for durable peer enrollment, then
+  use discovery to inspect changing services and capabilities.
