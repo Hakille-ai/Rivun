@@ -8,8 +8,9 @@ use zap_crypto::{Keypair, sign_frame};
 use zap_envelope::ZapEnvelope;
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
-    DriverConfig, MemoryConfig, PeerConfig, PeerTrustConfig, PoaConfig, ReceiptsConfig,
-    RegistryConfig, RuntimeConfig, SecurityConfig, TrustConfig, ZapNode, ZapNodeConfig,
+    DiscoveryConfig, DriverConfig, MemoryConfig, PeerConfig, PeerTrustConfig, PoaConfig,
+    ReceiptsConfig, RegistryConfig, RuntimeConfig, SecurityConfig, TrustConfig, ZapNode,
+    ZapNodeConfig,
 };
 
 fn public_key_string(keypair: &Keypair) -> String {
@@ -95,6 +96,7 @@ impl NodeBench {
             poa: PoaConfig::default(),
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
+            discovery: DiscoveryConfig::default(),
             memory: MemoryConfig::default(),
             capability_policy: zap_node::CapabilityPolicyConfig::default(),
             capability_cache: zap_node::CapabilityCacheConfig::default(),

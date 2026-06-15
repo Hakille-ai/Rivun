@@ -1102,6 +1102,57 @@ fn registry_migration_add_records_migration_metadata() {
 }
 
 #[test]
+fn agent_schema_and_validate_accept_agent_messages() {
+    let dir = tempdir().unwrap();
+    let schema_path = dir.path().join("agent.schema.json");
+    let message_path = dir.path().join("agent-message.json");
+    std::fs::write(
+        &message_path,
+        r#"{"type":"intent","payload":{"schema_version":1,"intent_id":"22222222-2222-4222-8222-222222222222","session_id":"11111111-1111-4111-8111-111111111111","source_agent":"planner.main","kind":"act","objective":"open valve","input":{"valve":"v-7"},"required_capabilities":["driver.execute:valve.open"],"priority":"high","metadata":{}}}"#,
+    )
+    .unwrap();
+
+    let schema = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args(["agent", "schema", "--out", schema_path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        schema.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&schema.stdout),
+        String::from_utf8_lossy(&schema.stderr)
+    );
+    let schema_json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&schema_path).unwrap()).unwrap();
+    assert_eq!(
+        schema_json["x-zap"]["content_type"],
+        "application/zap-agent+json"
+    );
+
+    let validate = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "validate",
+            "--input",
+            message_path.to_str().unwrap(),
+            "--subject",
+            "zap.agent.intent",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        validate.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&validate.stdout),
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&validate.stdout).unwrap();
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["subject"], "zap.agent.intent");
+}
+
+#[test]
 fn registry_resolve_selects_highest_compatible_active_entry() {
     let dir = tempdir().unwrap();
     let author = Keypair::generate();

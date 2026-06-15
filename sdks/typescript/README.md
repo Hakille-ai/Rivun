@@ -1,10 +1,11 @@
 # ZAP TypeScript SDK
 
-Dependency-free TypeScript helpers for ZAP `ZENV` control envelopes and
+TypeScript helpers for ZAP `ZENV` control envelopes, local UDP transport, and
 ZapStore registry payloads.
 
-This package does not open sockets. It prepares protocol-compatible bytes and
-JSON for a ZAP transport, CLI bridge, browser worker, or test fixture.
+This package prepares protocol-compatible bytes and JSON for a ZAP transport,
+CLI bridge, browser worker, or test fixture. In Node it also includes a small
+`ZapUdpClient` for loopback/dev peer integration.
 
 ## Build a registry bundle manifest request
 
@@ -32,13 +33,10 @@ console.log(parsed.jsonBody());
 ## Integrity helpers
 
 `validateArtifactHash()` checks the canonical `blake3:<64 hex chars>` shape.
-Node's standard crypto module does not currently provide BLAKE3, so
-`artifactHash()` throws an explicit error instead of producing an incompatible
-hash. Use `zap-cli`, the Rust SDK, or a caller-provided BLAKE3 implementation
-for canonical checksum production.
+`artifactHash()` computes canonical BLAKE3 values through `@noble/hashes`.
 
-Signature verification is represented by `signatureVerificationPlaceholder()`
-until the package grows a vetted Ed25519 backend.
+`verifyEd25519Signature()` verifies registry/publication signatures through
+`@noble/ed25519`.
 
 ## Test
 
@@ -46,4 +44,6 @@ Node 24 can run the TypeScript tests with built-in type stripping:
 
 ```bash
 node --test --experimental-strip-types sdks/typescript/test/*.test.ts
+npm run typecheck
+npm run build:types
 ```

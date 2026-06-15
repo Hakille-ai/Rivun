@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from typing import Any
 from uuid import UUID
 
@@ -124,6 +125,27 @@ class RegistryBundleManifestResponse:
 
 
 @dataclass(frozen=True)
+class DriverRegistryMigration:
+    from_version_requirement: str
+    from_abi_requirement: str | None = None
+    requires_operator_approval: bool = False
+    migration_driver_action: str | None = None
+    migration_driver_version: str | None = None
+    notes: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "DriverRegistryMigration":
+        return cls(
+            from_version_requirement=data["from_version_requirement"],
+            from_abi_requirement=data.get("from_abi_requirement"),
+            requires_operator_approval=data.get("requires_operator_approval", False),
+            migration_driver_action=data.get("migration_driver_action"),
+            migration_driver_version=data.get("migration_driver_version"),
+            notes=data.get("notes"),
+        )
+
+
+@dataclass(frozen=True)
 class DriverRegistryEntry:
     name: str
     version: str
@@ -135,6 +157,7 @@ class DriverRegistryEntry:
     status: str = "active"
     revoked_reason: str | None = None
     deprecated_reason: str | None = None
+    migrations: list[DriverRegistryMigration] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DriverRegistryEntry":
@@ -149,6 +172,7 @@ class DriverRegistryEntry:
             status=data.get("status", "active"),
             revoked_reason=data.get("revoked_reason"),
             deprecated_reason=data.get("deprecated_reason"),
+            migrations=[DriverRegistryMigration.from_dict(item) for item in data.get("migrations", [])],
         )
 
 
@@ -279,6 +303,7 @@ class RegistryInstallPlanRequest:
     action: str
     requirement: str
     abi_version: int | None = None
+    abi_requirement: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return _to_plain(self)
@@ -294,7 +319,9 @@ class RegistryInstallPlanEntry:
     wasm_hash: str
     author_node_id: UUID
     requested_abi_version: int | None = None
+    requested_abi_requirement: str | None = None
     manifest_path: str | None = None
+    migrations: list[DriverRegistryMigration] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -360,9 +387,27 @@ def verify_signature_placeholder(kind: str) -> SignatureVerificationStatus:
         supported=False,
         reason=(
             f"{kind} signatures are Ed25519 signatures over ZAP domain-separated payloads. "
-            "This dependency-free Python SDK does not verify them yet; use zap-cli or the Rust SDK."
+            "Build the exact canonical message and call verify_ed25519_signature(), "
+            "or use zap-cli/Rust for canonical registry verification."
         ),
     )
+
+
+def verify_ed25519_signature(message: bytes, signature: str, public_key: str) -> bool:
+    try:
+        from nacl.signing import VerifyKey  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise MissingCryptoBackend(
+            "Ed25519 verification requires the optional 'PyNaCl' Python package "
+            "or verification with zap-cli"
+        ) from exc
+    signature_bytes = base64.b64decode(_pad_base64(signature))
+    public_key_bytes = base64.b64decode(_pad_base64(public_key))
+    try:
+        VerifyKey(public_key_bytes).verify(message, signature_bytes)
+    except Exception:
+        return False
+    return True
 
 
 def _to_plain(value: Any) -> Any:
@@ -381,6 +426,10 @@ def _to_plain(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _to_plain(item) for key, item in value.items() if item is not None}
     return value
+
+
+def _pad_base64(value: str) -> str:
+    return value + "=" * (-len(value) % 4)
 
 
 def _validate_relative_path(path: str) -> None:

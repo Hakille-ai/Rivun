@@ -1,10 +1,10 @@
 # ZAP Python SDK
 
-Lightweight Python helpers for building ZAP control envelopes and ZapStore
-request/response payloads.
+Lightweight Python helpers for building ZAP control envelopes, local UDP
+requests, and ZapStore request/response payloads.
 
-This first distribution is intentionally network-free. It prepares bytes and
-JSON that can be handed to a ZAP transport, CLI bridge, or test harness.
+The SDK prepares bytes and JSON that can be handed to any ZAP transport, and it
+includes `ZapUdpClient` for loopback/dev peer integration.
 
 ## Install locally
 
@@ -42,9 +42,12 @@ print(parsed.json_body())
 Python package is installed. Without it, the SDK raises `MissingCryptoBackend`
 instead of returning a non-ZAP checksum.
 
-Ed25519 signature verification is exposed as an explicit unsupported status in
-this dependency-free package. Use `zap-cli` or the Rust SDK for canonical
-signature verification today.
+`verify_ed25519_signature()` verifies signatures when the optional `PyNaCl`
+package is installed. Install both optional crypto backends with:
+
+```bash
+python -m pip install -e "sdks/python[crypto]"
+```
 
 ## Test
 

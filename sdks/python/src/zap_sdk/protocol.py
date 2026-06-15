@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum
@@ -194,6 +195,49 @@ class ControlFrame:
             correlation_id=envelope.correlation_id,
             causation_id=envelope.causation_id,
         )
+
+
+class ZapUdpClient:
+    def __init__(self, local_addr: tuple[str, int] = ("127.0.0.1", 0), timeout: float = 2.0) -> None:
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.socket.bind(local_addr)
+        self.socket.settimeout(timeout)
+
+    @property
+    def local_addr(self) -> tuple[str, int]:
+        host, port = self.socket.getsockname()
+        return (host, port)
+
+    def send_envelope(self, envelope: ZapEnvelope, target: tuple[str, int]) -> int:
+        return self.socket.sendto(envelope.encode(), target)
+
+    def send_control(self, frame: ControlFrame, target: tuple[str, int]) -> int:
+        return self.send_envelope(frame.to_envelope(), target)
+
+    def recv_envelope(self, max_bytes: int = 65535) -> tuple[ZapEnvelope, tuple[str, int]]:
+        payload, addr = self.socket.recvfrom(max_bytes)
+        return ZapEnvelope.decode(payload), addr
+
+    def request_control(
+        self,
+        frame: ControlFrame,
+        target: tuple[str, int],
+        max_bytes: int = 65535,
+    ) -> ControlFrame:
+        self.send_control(frame, target)
+        envelope, _addr = self.recv_envelope(max_bytes)
+        if envelope.kind is not ZapMessageKind.CONTROL:
+            raise ValueError(f"expected control response, got {envelope.kind.protocol_name}")
+        return ControlFrame.decode(envelope.encode())
+
+    def close(self) -> None:
+        self.socket.close()
+
+    def __enter__(self) -> "ZapUdpClient":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
 
 
 def _optional_uuid(raw: bytes) -> UUID | None:

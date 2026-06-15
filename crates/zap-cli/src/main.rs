@@ -14,6 +14,7 @@ use std::{
 };
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
+use zap_agent::{AGENT_CONTENT_TYPE, AgentMessage, agent_message_json_schema};
 use zap_capability::{
     CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
     CapabilityCacheEntry, CapabilityId, CapabilityQuery, CapabilityResponse, DriverPermissions,
@@ -201,6 +202,11 @@ enum Commands {
         #[command(subcommand)]
         command: SchemaCommand,
     },
+    /// Validate and export high-level agent protocol contracts.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
     /// Evaluate deterministic message policies.
     Policy {
         #[command(subcommand)]
@@ -310,6 +316,29 @@ enum CapabilityCacheCommand {
         path: PathBuf,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentCommand {
+    /// Validate one agent protocol JSON message.
+    Validate {
+        /// Read the JSON message from this file. Omit to read stdin.
+        #[arg(long)]
+        input: Option<PathBuf>,
+        /// Require the message to match this ZENV subject.
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export the AgentMessage JSON schema.
+    Schema {
+        /// Write the schema to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -1269,6 +1298,7 @@ async fn async_main() -> Result<()> {
         Commands::Trust { command } => trust(command),
         Commands::Peer { command } => peer(command),
         Commands::Schema { command } => schema(command),
+        Commands::Agent { command } => agent(command),
         Commands::Policy { command } => policy(command),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command).await,
@@ -1389,6 +1419,7 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             "capability_cache_enabled={}",
             report.capability_cache_enabled
         );
+        println!("discovery_cache_enabled={}", report.discovery_cache_enabled);
         println!("message_policy_rules={}", report.message_policy_rule_count);
         println!(
             "message_schema_contracts={}",
@@ -4916,6 +4947,67 @@ fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
         );
     }
     Ok(bytes.try_into().unwrap())
+}
+
+fn agent(command: AgentCommand) -> Result<()> {
+    match command {
+        AgentCommand::Validate {
+            input,
+            subject,
+            json,
+        } => agent_validate(input.as_deref(), subject.as_deref(), json),
+        AgentCommand::Schema { out, force } => agent_schema(out.as_deref(), force),
+    }
+}
+
+fn agent_validate(input: Option<&Path>, subject: Option<&str>, json: bool) -> Result<()> {
+    let bytes = match input {
+        Some(path) => fs::read(path)
+            .with_context(|| format!("failed to read agent message {}", path.display()))?,
+        None => {
+            let mut bytes = Vec::new();
+            let mut stdin = std::io::stdin();
+            std::io::Read::read_to_end(&mut stdin, &mut bytes)
+                .context("failed to read agent message from stdin")?;
+            bytes
+        }
+    };
+    let message = AgentMessage::from_json_slice(&bytes).context("invalid agent message")?;
+    if let Some(expected_subject) = subject
+        && message.subject() != expected_subject
+    {
+        bail!(
+            "agent message subject mismatch: expected {}, got {}",
+            expected_subject,
+            message.subject()
+        );
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "valid": true,
+                "subject": message.subject(),
+                "content_type": AGENT_CONTENT_TYPE
+            }))?
+        );
+    } else {
+        println!("valid=true");
+        println!("subject={}", message.subject());
+        println!("content_type={AGENT_CONTENT_TYPE}");
+    }
+    Ok(())
+}
+
+fn agent_schema(out: Option<&Path>, force: bool) -> Result<()> {
+    let schema = serde_json::to_string_pretty(&agent_message_json_schema())?;
+    match out {
+        Some(path) => write_text_file(path, &format!("{schema}\n"), force),
+        None => {
+            println!("{schema}");
+            Ok(())
+        }
+    }
 }
 
 fn schema(command: SchemaCommand) -> Result<()> {

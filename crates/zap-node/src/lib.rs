@@ -18,6 +18,7 @@ use std::{
 };
 use tracing::{info, warn};
 use uuid::Uuid;
+use zap_agent::{AGENT_CONTENT_TYPE, AgentMessage};
 use zap_capability::{
     CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
     CapabilityAdvertisement, CapabilityGrant, CapabilityId, CapabilityQuery, CapabilityRequirement,
@@ -87,6 +88,8 @@ pub struct ZapNodeConfig {
     #[serde(default)]
     pub capability_cache: CapabilityCacheConfig,
     #[serde(default)]
+    pub discovery: DiscoveryConfig,
+    #[serde(default)]
     pub message_policy: MessagePolicyConfig,
     #[serde(default)]
     pub message_schema: MessageSchemaConfig,
@@ -145,6 +148,9 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
     }
     if let Some(path) = config.capability_cache.path.take() {
         config.capability_cache.path = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(path) = config.discovery.announcement_cache.take() {
+        config.discovery.announcement_cache = Some(resolve_relative_path(base_dir, &path));
     }
     for contract in &mut config.message_schema.contracts {
         contract.path = resolve_relative_path(base_dir, &contract.path);
@@ -373,6 +379,12 @@ pub struct CapabilityCacheConfig {
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub max_age_micros: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscoveryConfig {
+    #[serde(default)]
+    pub announcement_cache: Option<PathBuf>,
 }
 
 pub const DISCOVERY_SCHEMA_VERSION: u8 = 1;
@@ -878,6 +890,7 @@ pub struct ConfigValidationReport {
     pub capability_requirement_count: usize,
     pub ungranted_capability_count: usize,
     pub capability_cache_enabled: bool,
+    pub discovery_cache_enabled: bool,
     pub message_policy_rule_count: usize,
     pub message_schema_contract_count: usize,
     pub message_schema_require_match: bool,
@@ -1008,6 +1021,22 @@ fn validate_inbound_message(message: &InboundMessage) -> Result<()> {
     Ok(())
 }
 
+fn validate_agent_message_envelope(message: &InboundMessage) -> Result<()> {
+    if message.content_type.as_deref() != Some(AGENT_CONTENT_TYPE) {
+        return Ok(());
+    }
+    let agent_message =
+        AgentMessage::from_json_slice(&message.body).context("invalid agent protocol body")?;
+    if agent_message.subject() != message.subject {
+        bail!(
+            "agent protocol subject mismatch: envelope subject `{}` carries `{}`",
+            message.subject,
+            agent_message.subject()
+        );
+    }
+    Ok(())
+}
+
 fn validate_message_text(
     label: &str,
     value: &str,
@@ -1024,6 +1053,76 @@ fn validate_message_text(
         bail!("{label} must not contain control characters");
     }
     Ok(())
+}
+
+fn load_discovery_announcement_cache(
+    path: Option<&Path>,
+) -> Result<HashMap<Uuid, SignedDiscoveryAdvertisement>> {
+    let Some(path) = path else {
+        return Ok(HashMap::new());
+    };
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let input = fs::read_to_string(path)
+        .with_context(|| format!("failed to read discovery cache {}", path.display()))?;
+    let mut announcements = HashMap::new();
+    for (index, line) in input.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let signed: SignedDiscoveryAdvertisement =
+            serde_json::from_str(line).with_context(|| {
+                format!(
+                    "failed to parse discovery cache {} line {}",
+                    path.display(),
+                    index + 1
+                )
+            })?;
+        signed.verify(None).with_context(|| {
+            format!(
+                "invalid discovery announcement in {} line {}",
+                path.display(),
+                index + 1
+            )
+        })?;
+        if validate_discovery_advertisement_time(&signed.advertisement).is_ok() {
+            announcements.insert(signed.advertisement.node_id, signed);
+        }
+    }
+    Ok(announcements)
+}
+
+fn persist_discovery_announcement(
+    path: Option<&Path>,
+    signed: &SignedDiscoveryAdvertisement,
+) -> Result<()> {
+    let Some(path) = path else {
+        return Ok(());
+    };
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create discovery cache directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to open discovery cache {}", path.display()))?;
+    let line = serde_json::to_string(signed)?;
+    writeln!(file, "{line}")
+        .with_context(|| format!("failed to write discovery cache {}", path.display()))
 }
 
 pub struct ZapNode {
@@ -1052,6 +1151,7 @@ pub struct ZapNode {
     peer_ids: Vec<Uuid>,
     capability_advertisement: CapabilityAdvertisement,
     discovery_peers: Vec<DiscoveryPeer>,
+    discovery_announcement_cache: Option<PathBuf>,
     discovery_announcements: Mutex<HashMap<Uuid, SignedDiscoveryAdvertisement>>,
 }
 
@@ -1130,6 +1230,9 @@ impl ZapNode {
         let route_table = RouteTable::new(config.routes.clone())?;
         let capability_advertisement = describe_capabilities(&config)?;
         let message_contracts = load_message_contract_set(&config.message_schema)?;
+        let discovery_announcement_cache = config.discovery.announcement_cache.clone();
+        let discovery_announcements =
+            load_discovery_announcement_cache(discovery_announcement_cache.as_deref())?;
         let endpoint = ZapEndpoint::bind(endpoint_config).await?;
 
         Ok(Self {
@@ -1158,7 +1261,8 @@ impl ZapNode {
             peer_ids,
             capability_advertisement,
             discovery_peers,
-            discovery_announcements: Mutex::new(HashMap::new()),
+            discovery_announcement_cache,
+            discovery_announcements: Mutex::new(discovery_announcements),
         })
     }
 
@@ -1207,6 +1311,7 @@ impl ZapNode {
 
         let message = parse_inbound_message(&inbound.frame.payload)?;
         validate_inbound_message(&message)?;
+        validate_agent_message_envelope(&message)?;
         self.validate_message_contracts(&message)?;
         self.apply_message_policy(&inbound.frame, &message)?;
         let output = if message.kind == ZapMessageKind::Control
@@ -1344,7 +1449,9 @@ impl ZapNode {
             .discovery_announcements
             .lock()
             .map_err(|_| anyhow!("discovery announcement mutex poisoned"))?;
-        announcements.insert(announcer_node, signed);
+        announcements.insert(announcer_node, signed.clone());
+        drop(announcements);
+        persist_discovery_announcement(self.discovery_announcement_cache.as_deref(), &signed)?;
         Ok(())
     }
 
@@ -2132,6 +2239,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         capability_requirement_count: advertisement.requirements.len(),
         ungranted_capability_count,
         capability_cache_enabled: config.capability_cache.path.is_some(),
+        discovery_cache_enabled: config.discovery.announcement_cache.is_some(),
         message_policy_rule_count: config.message_policy.rules.len(),
         message_schema_contract_count: message_contracts.contracts.len(),
         message_schema_require_match: message_contracts.require_match,
@@ -3566,6 +3674,7 @@ mod tests {
             memory: MemoryConfig::default(),
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
+            discovery: DiscoveryConfig::default(),
             message_policy,
             message_schema,
             routes: Vec::new(),
@@ -3628,6 +3737,7 @@ mod tests {
             memory: MemoryConfig::default(),
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
+            discovery: DiscoveryConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
@@ -4775,6 +4885,7 @@ path = "logs/receipts.jsonl"
             },
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
+            discovery: DiscoveryConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
@@ -5100,6 +5211,7 @@ path = "logs/receipts.jsonl"
             memory: MemoryConfig::default(),
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
+            discovery: DiscoveryConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: vec![RouteRule {
@@ -5598,6 +5710,7 @@ required_json_fields = ["message"]
             memory: MemoryConfig::default(),
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
+            discovery: DiscoveryConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),

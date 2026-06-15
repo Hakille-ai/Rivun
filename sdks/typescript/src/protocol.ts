@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createSocket, type Socket } from "node:dgram";
 
 export const MAGIC = "ZENV";
 export const VERSION = 1;
@@ -201,6 +202,80 @@ export class ControlFrame {
       correlationId: envelope.correlationId,
       causationId: envelope.causationId,
     });
+  }
+}
+
+export type UdpTarget = {
+  host: string;
+  port: number;
+};
+
+export class ZapUdpClient {
+  #socket: Socket;
+
+  constructor(socket: Socket = createSocket("udp4")) {
+    this.#socket = socket;
+  }
+
+  bind(port = 0, host = "127.0.0.1"): Promise<UdpTarget> {
+    return new Promise((resolve) => {
+      this.#socket.bind(port, host, () => {
+        const address = this.#socket.address();
+        if (typeof address === "string") {
+          throw new Error(`unexpected unix datagram address ${address}`);
+        }
+        resolve({ host: address.address, port: address.port });
+      });
+    });
+  }
+
+  sendEnvelope(envelope: ZapEnvelope, target: UdpTarget): Promise<number> {
+    const payload = envelope.encode();
+    return new Promise((resolve, reject) => {
+      this.#socket.send(payload, target.port, target.host, (error, bytes) => {
+        if (error) reject(error);
+        else resolve(bytes);
+      });
+    });
+  }
+
+  sendControl(frame: ControlFrame, target: UdpTarget): Promise<number> {
+    return this.sendEnvelope(frame.toEnvelope(), target);
+  }
+
+  recvEnvelope(timeoutMs = 2000): Promise<ZapEnvelope> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error("timed out waiting for ZAP UDP envelope"));
+      }, timeoutMs);
+      const onMessage = (message: Buffer): void => {
+        cleanup();
+        try {
+          resolve(ZapEnvelope.decode(message));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      const cleanup = (): void => {
+        clearTimeout(timer);
+        this.#socket.off("message", onMessage);
+      };
+      this.#socket.on("message", onMessage);
+    });
+  }
+
+  async requestControl(frame: ControlFrame, target: UdpTarget, timeoutMs = 2000): Promise<ControlFrame> {
+    await this.sendControl(frame, target);
+    const envelope = await this.recvEnvelope(timeoutMs);
+    if (envelope.kind !== ZapMessageKind.control) {
+      throw new Error(`expected control response, got kind ${envelope.kind}`);
+    }
+    return ControlFrame.decode(envelope.encode());
+  }
+
+  close(): void {
+    this.#socket.close();
   }
 }
 

@@ -1,15 +1,18 @@
 //! Hardware-neutral machine connection primitives for ZAP.
 //!
 //! The crate models device profiles, capability mapping, health/state, commands,
-//! and protocol adapters without opening real serial ports, sockets, or fieldbus
-//! connections. The built-in adapters are deterministic placeholders intended
-//! for tests, demos, and future hardware-backed implementations.
+//! and protocol adapters. Mock adapters remain deterministic for tests, while
+//! stream-backed adapters can use real TCP sockets or caller-supplied serial
+//! streams.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     fmt,
+    io::{Read, Write},
+    net::TcpStream,
     str::FromStr,
+    time::Duration,
 };
 use thiserror::Error;
 use zap_capability::{CapabilityId, CapabilitySet};
@@ -45,6 +48,11 @@ pub enum ZapMachineError {
         max: u32,
         actual: usize,
     },
+    #[error("payload for command `{command}` does not match schema `{schema}`")]
+    PayloadSchemaMismatch {
+        command: String,
+        schema: CommandPayloadSchema,
+    },
     #[error("adapter `{adapter}` does not match profile `{profile}` adapter `{expected}`")]
     AdapterMismatch {
         profile: String,
@@ -59,6 +67,10 @@ pub enum ZapMachineError {
     UnknownDevice(String),
     #[error("protocol command `{0}` is not scripted by this adapter")]
     UnknownProtocolCommand(String),
+    #[error("machine `{0}` has no heartbeat command configured")]
+    MissingHeartbeatCommand(String),
+    #[error("I/O error: {0}")]
+    Io(String),
     #[error("protocol error: {0}")]
     Protocol(String),
     #[error("capability error: {0}")]
@@ -348,6 +360,8 @@ pub struct CommandSpec {
     pub name: String,
     pub max_payload_bytes: u32,
     pub idempotent: bool,
+    #[serde(default)]
+    pub payload_schema: CommandPayloadSchema,
 }
 
 impl CommandSpec {
@@ -358,6 +372,7 @@ impl CommandSpec {
             name,
             max_payload_bytes: 4096,
             idempotent: false,
+            payload_schema: CommandPayloadSchema::Bytes,
         })
     }
 
@@ -369,6 +384,56 @@ impl CommandSpec {
     pub const fn idempotent(mut self, idempotent: bool) -> Self {
         self.idempotent = idempotent;
         self
+    }
+
+    pub const fn with_payload_schema(mut self, payload_schema: CommandPayloadSchema) -> Self {
+        self.payload_schema = payload_schema;
+        self
+    }
+
+    fn validate_payload(&self, payload: &[u8]) -> Result<()> {
+        if !self.payload_schema.matches(payload) {
+            return Err(ZapMachineError::PayloadSchemaMismatch {
+                command: self.name.clone(),
+                schema: self.payload_schema,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandPayloadSchema {
+    Empty,
+    #[default]
+    Bytes,
+    Utf8Text,
+    Json,
+    U16Be,
+}
+
+impl CommandPayloadSchema {
+    fn matches(self, payload: &[u8]) -> bool {
+        match self {
+            Self::Empty => payload.is_empty(),
+            Self::Bytes => true,
+            Self::Utf8Text => std::str::from_utf8(payload).is_ok(),
+            Self::Json => serde_json::from_slice::<serde_json::Value>(payload).is_ok(),
+            Self::U16Be => payload.len() == 2,
+        }
+    }
+}
+
+impl fmt::Display for CommandPayloadSchema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Empty => "empty",
+            Self::Bytes => "bytes",
+            Self::Utf8Text => "utf8_text",
+            Self::Json => "json",
+            Self::U16Be => "u16_be",
+        })
     }
 }
 
@@ -596,6 +661,17 @@ impl MachineCommand {
     pub fn payload_u16(name: impl Into<String>, value: u16) -> Result<Self> {
         Self::new(name, value.to_be_bytes().to_vec())
     }
+
+    pub fn payload_text(name: impl Into<String>, value: impl AsRef<str>) -> Result<Self> {
+        Self::new(name, value.as_ref().as_bytes().to_vec())
+    }
+
+    pub fn payload_json(name: impl Into<String>, value: &serde_json::Value) -> Result<Self> {
+        let payload = serde_json::to_vec(value).map_err(|error| {
+            ZapMachineError::Protocol(format!("failed to encode JSON payload: {error}"))
+        })?;
+        Self::new(name, payload)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -632,6 +708,40 @@ pub struct MachineConnection {
     profile: DeviceProfile,
     mapping: CapabilityMapping,
     adapter: Box<dyn ProtocolAdapter>,
+    last_heartbeat_micros: Option<u64>,
+    heartbeat_timer: Option<HeartbeatTimer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HeartbeatTimer {
+    pub interval_micros: u64,
+    pub next_due_micros: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_tick_micros: Option<u64>,
+}
+
+impl HeartbeatTimer {
+    pub fn new(interval_micros: u64, start_micros: u64) -> Result<Self> {
+        if interval_micros == 0 {
+            return Err(ZapMachineError::Protocol(
+                "heartbeat interval must be greater than zero".to_string(),
+            ));
+        }
+        Ok(Self {
+            interval_micros,
+            next_due_micros: start_micros.saturating_add(interval_micros),
+            last_tick_micros: None,
+        })
+    }
+
+    pub fn is_due(&self, now_micros: u64) -> bool {
+        now_micros >= self.next_due_micros
+    }
+
+    pub fn record_tick(&mut self, now_micros: u64) {
+        self.last_tick_micros = Some(now_micros);
+        self.next_due_micros = now_micros.saturating_add(self.interval_micros);
+    }
 }
 
 impl MachineConnection {
@@ -646,6 +756,8 @@ impl MachineConnection {
             profile,
             mapping,
             adapter,
+            last_heartbeat_micros: None,
+            heartbeat_timer: None,
         })
     }
 
@@ -674,12 +786,106 @@ impl MachineConnection {
         self.adapter.open(&self.profile)
     }
 
+    pub async fn connect_async(&mut self) -> Result<MachineHealth> {
+        self.connect()
+    }
+
     pub fn health(&self) -> MachineHealth {
         self.adapter.health()
     }
 
+    pub fn health_at(&self, now_micros: u64) -> MachineHealth {
+        let health = self.adapter.health();
+        if health.status == HealthStatus::Offline {
+            return health;
+        }
+        let Some(last_heartbeat) = self.last_heartbeat_micros else {
+            return health;
+        };
+        let stale_after_micros = self.profile.health.stale_after_ms.saturating_mul(1_000);
+        if stale_after_micros > 0 && now_micros.saturating_sub(last_heartbeat) > stale_after_micros
+        {
+            MachineHealth::degraded(format!(
+                "heartbeat stale for {} micros",
+                now_micros.saturating_sub(last_heartbeat)
+            ))
+        } else {
+            health
+        }
+    }
+
+    pub fn heartbeat_at(&mut self, now_micros: u64) -> Result<CommandOutcome> {
+        let command = self
+            .profile
+            .health
+            .heartbeat_command
+            .clone()
+            .ok_or_else(|| ZapMachineError::MissingHeartbeatCommand(self.device_id.to_string()))?;
+        let outcome = self.execute(MachineCommand::empty(command)?)?;
+        self.last_heartbeat_micros = Some(now_micros);
+        Ok(outcome)
+    }
+
+    pub async fn heartbeat_async_at(&mut self, now_micros: u64) -> Result<CommandOutcome> {
+        self.heartbeat_at(now_micros)
+    }
+
+    pub fn last_heartbeat_micros(&self) -> Option<u64> {
+        self.last_heartbeat_micros
+    }
+
+    pub fn enable_heartbeat_timer(
+        &mut self,
+        interval_micros: u64,
+        start_micros: u64,
+    ) -> Result<()> {
+        if self.profile.health.heartbeat_command.is_none() {
+            return Err(ZapMachineError::MissingHeartbeatCommand(
+                self.device_id.to_string(),
+            ));
+        }
+        self.heartbeat_timer = Some(HeartbeatTimer::new(interval_micros, start_micros)?);
+        Ok(())
+    }
+
+    pub fn disable_heartbeat_timer(&mut self) {
+        self.heartbeat_timer = None;
+    }
+
+    pub fn heartbeat_timer(&self) -> Option<&HeartbeatTimer> {
+        self.heartbeat_timer.as_ref()
+    }
+
+    pub fn tick_heartbeat_timer_at(&mut self, now_micros: u64) -> Result<Option<MachineHealth>> {
+        let Some(mut timer) = self.heartbeat_timer.take() else {
+            return Ok(None);
+        };
+        if !timer.is_due(now_micros) {
+            self.heartbeat_timer = Some(timer);
+            return Ok(None);
+        }
+        if let Err(error) = self.heartbeat_at(now_micros) {
+            self.heartbeat_timer = Some(timer);
+            return Err(error);
+        }
+        timer.record_tick(now_micros);
+        self.heartbeat_timer = Some(timer);
+        Ok(Some(self.health_at(now_micros)))
+    }
+
+    pub async fn tick_heartbeat_timer_async_at(
+        &mut self,
+        now_micros: u64,
+    ) -> Result<Option<MachineHealth>> {
+        self.tick_heartbeat_timer_at(now_micros)
+    }
+
     pub fn read_state(&mut self) -> Result<MachineState> {
         self.adapter.read_state()
+    }
+
+    pub async fn read_state_async(&mut self) -> Result<MachineState> {
+        self.read_state()
     }
 
     pub fn execute(&mut self, command: MachineCommand) -> Result<CommandOutcome> {
@@ -697,11 +903,20 @@ impl MachineConnection {
                 actual: command.payload.len(),
             });
         }
+        spec.validate_payload(&command.payload)?;
         self.adapter.execute(command)
+    }
+
+    pub async fn execute_async(&mut self, command: MachineCommand) -> Result<CommandOutcome> {
+        self.execute(command)
     }
 
     pub fn close(&mut self) -> Result<()> {
         self.adapter.close()
+    }
+
+    pub async fn close_async(&mut self) -> Result<()> {
+        self.close()
     }
 }
 
@@ -732,6 +947,64 @@ impl MachineBus {
         Ok(health)
     }
 
+    pub async fn connect_all_async(&mut self) -> Result<BTreeMap<MachineId, MachineHealth>> {
+        self.connect_all()
+    }
+
+    pub fn heartbeat_all_at(
+        &mut self,
+        now_micros: u64,
+    ) -> Result<BTreeMap<MachineId, MachineHealth>> {
+        let mut health = BTreeMap::new();
+        for (device_id, connection) in &mut self.connections {
+            if connection.profile.health.heartbeat_command.is_some() {
+                connection.heartbeat_at(now_micros)?;
+            }
+            health.insert(device_id.clone(), connection.health_at(now_micros));
+        }
+        Ok(health)
+    }
+
+    pub async fn heartbeat_all_async_at(
+        &mut self,
+        now_micros: u64,
+    ) -> Result<BTreeMap<MachineId, MachineHealth>> {
+        self.heartbeat_all_at(now_micros)
+    }
+
+    pub fn enable_heartbeat_timers(
+        &mut self,
+        interval_micros: u64,
+        start_micros: u64,
+    ) -> Result<()> {
+        for connection in self.connections.values_mut() {
+            if connection.profile.health.heartbeat_command.is_some() {
+                connection.enable_heartbeat_timer(interval_micros, start_micros)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn tick_heartbeat_timers_at(
+        &mut self,
+        now_micros: u64,
+    ) -> Result<BTreeMap<MachineId, MachineHealth>> {
+        let mut health = BTreeMap::new();
+        for (device_id, connection) in &mut self.connections {
+            if let Some(current) = connection.tick_heartbeat_timer_at(now_micros)? {
+                health.insert(device_id.clone(), current);
+            }
+        }
+        Ok(health)
+    }
+
+    pub async fn tick_heartbeat_timers_async_at(
+        &mut self,
+        now_micros: u64,
+    ) -> Result<BTreeMap<MachineId, MachineHealth>> {
+        self.tick_heartbeat_timers_at(now_micros)
+    }
+
     pub fn execute(
         &mut self,
         device_id: &MachineId,
@@ -748,6 +1021,18 @@ impl MachineBus {
             .get_mut(device_id)
             .ok_or_else(|| ZapMachineError::UnknownDevice(device_id.to_string()))?
             .read_state()
+    }
+
+    pub async fn execute_async(
+        &mut self,
+        device_id: &MachineId,
+        command: MachineCommand,
+    ) -> Result<CommandOutcome> {
+        self.execute(device_id, command)
+    }
+
+    pub async fn read_state_async(&mut self, device_id: &MachineId) -> Result<MachineState> {
+        self.read_state(device_id)
     }
 
     pub fn health_snapshot(&self) -> BTreeMap<MachineId, MachineHealth> {
@@ -1022,6 +1307,199 @@ impl ProtocolAdapter for TcpAdapter {
     }
 }
 
+pub struct StreamSerialAdapter<S>
+where
+    S: Read + Write + Send,
+{
+    opened: bool,
+    stream: S,
+    port: String,
+    baud_rate: u32,
+    delimiter: Vec<u8>,
+    health: MachineHealth,
+}
+
+impl<S> StreamSerialAdapter<S>
+where
+    S: Read + Write + Send,
+{
+    pub fn new(stream: S) -> Self {
+        Self {
+            opened: false,
+            stream,
+            port: String::new(),
+            baud_rate: 0,
+            delimiter: b"\n".to_vec(),
+            health: MachineHealth::offline("not connected"),
+        }
+    }
+
+    pub fn into_inner(self) -> S {
+        self.stream
+    }
+}
+
+impl<S> ProtocolAdapter for StreamSerialAdapter<S>
+where
+    S: Read + Write + Send,
+{
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::Serial
+    }
+
+    fn open(&mut self, profile: &DeviceProfile) -> Result<MachineHealth> {
+        if let TransportProfile::Serial { port, baud_rate } = &profile.transport {
+            self.port.clone_from(port);
+            self.baud_rate = *baud_rate;
+        }
+        if let ProtocolProfile::SerialLine { delimiter } = &profile.protocol {
+            self.delimiter = delimiter.as_bytes().to_vec();
+        }
+        self.opened = true;
+        self.health = MachineHealth::online();
+        Ok(self.health.clone())
+    }
+
+    fn health(&self) -> MachineHealth {
+        self.health.clone()
+    }
+
+    fn read_state(&mut self) -> Result<MachineState> {
+        ensure_open(self.opened, AdapterKind::Serial)?;
+        Ok(MachineState::with_health(self.health.clone())
+            .with_value("serial.port", self.port.clone())
+            .with_value("serial.baud_rate", i64::from(self.baud_rate)))
+    }
+
+    fn execute(&mut self, command: MachineCommand) -> Result<CommandOutcome> {
+        ensure_open(self.opened, AdapterKind::Serial)?;
+        let mut frame = Vec::new();
+        frame.extend_from_slice(command.name.as_bytes());
+        if !command.payload.is_empty() {
+            frame.push(b' ');
+            frame.extend_from_slice(&command.payload);
+        }
+        frame.extend_from_slice(&self.delimiter);
+        self.stream.write_all(&frame).map_err(io_error)?;
+        self.stream.flush().map_err(io_error)?;
+        let response = read_until_delimiter(&mut self.stream, &self.delimiter)?;
+        let mut state = self.read_state()?;
+        state.last_command = Some(command.name.clone());
+        Ok(CommandOutcome::accepted(command.name, response, state))
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.opened = false;
+        self.health = MachineHealth::offline("closed");
+        Ok(())
+    }
+}
+
+pub struct TcpStreamAdapter {
+    opened: bool,
+    stream: Option<TcpStream>,
+    host: String,
+    port: u16,
+    max_frame_bytes: u32,
+    read_timeout: Option<Duration>,
+    write_timeout: Option<Duration>,
+    health: MachineHealth,
+}
+
+impl TcpStreamAdapter {
+    pub fn new() -> Self {
+        Self {
+            opened: false,
+            stream: None,
+            host: String::new(),
+            port: 0,
+            max_frame_bytes: 8192,
+            read_timeout: Some(Duration::from_secs(2)),
+            write_timeout: Some(Duration::from_secs(2)),
+            health: MachineHealth::offline("not connected"),
+        }
+    }
+
+    pub fn with_timeouts(
+        mut self,
+        read_timeout: Option<Duration>,
+        write_timeout: Option<Duration>,
+    ) -> Self {
+        self.read_timeout = read_timeout;
+        self.write_timeout = write_timeout;
+        self
+    }
+}
+
+impl Default for TcpStreamAdapter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProtocolAdapter for TcpStreamAdapter {
+    fn kind(&self) -> AdapterKind {
+        AdapterKind::Tcp
+    }
+
+    fn open(&mut self, profile: &DeviceProfile) -> Result<MachineHealth> {
+        if let TransportProfile::Tcp { host, port } = &profile.transport {
+            self.host.clone_from(host);
+            self.port = *port;
+        }
+        if let ProtocolProfile::TcpFrames { max_frame_bytes } = profile.protocol {
+            self.max_frame_bytes = max_frame_bytes;
+        }
+        let stream = TcpStream::connect((self.host.as_str(), self.port)).map_err(io_error)?;
+        stream.set_nodelay(true).map_err(io_error)?;
+        stream
+            .set_read_timeout(self.read_timeout)
+            .map_err(io_error)?;
+        stream
+            .set_write_timeout(self.write_timeout)
+            .map_err(io_error)?;
+        self.stream = Some(stream);
+        self.opened = true;
+        self.health = MachineHealth::online();
+        Ok(self.health.clone())
+    }
+
+    fn health(&self) -> MachineHealth {
+        self.health.clone()
+    }
+
+    fn read_state(&mut self) -> Result<MachineState> {
+        ensure_open(self.opened, AdapterKind::Tcp)?;
+        Ok(MachineState::with_health(self.health.clone())
+            .with_value("tcp.host", self.host.clone())
+            .with_value("tcp.port", i64::from(self.port)))
+    }
+
+    fn execute(&mut self, command: MachineCommand) -> Result<CommandOutcome> {
+        ensure_open(self.opened, AdapterKind::Tcp)?;
+        let frame = encode_tcp_frame(&command, self.max_frame_bytes)?;
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or(ZapMachineError::AdapterNotOpen {
+                adapter: AdapterKind::Tcp,
+            })?;
+        stream.write_all(&frame).map_err(io_error)?;
+        stream.flush().map_err(io_error)?;
+        let response = read_tcp_frame(stream, self.max_frame_bytes)?;
+        let mut state = self.read_state()?;
+        state.last_command = Some(command.name.clone());
+        Ok(CommandOutcome::accepted(command.name, response, state))
+    }
+
+    fn close(&mut self) -> Result<()> {
+        self.stream = None;
+        self.opened = false;
+        self.health = MachineHealth::offline("closed");
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModbusOperation {
@@ -1255,6 +1733,54 @@ fn encode_tcp_frame(command: &MachineCommand, max_frame_bytes: u32) -> Result<Ve
     Ok(frame)
 }
 
+fn read_tcp_frame(stream: &mut TcpStream, max_frame_bytes: u32) -> Result<Vec<u8>> {
+    let mut len = [0_u8; 2];
+    stream.read_exact(&mut len).map_err(io_error)?;
+    let len = u16::from_be_bytes(len) as usize;
+    if len > max_frame_bytes as usize {
+        return Err(ZapMachineError::Protocol(format!(
+            "tcp response body is {len} bytes, above the limit of {max_frame_bytes}"
+        )));
+    }
+    let mut body = vec![0_u8; len];
+    stream.read_exact(&mut body).map_err(io_error)?;
+    Ok(body)
+}
+
+fn read_until_delimiter<S>(stream: &mut S, delimiter: &[u8]) -> Result<Vec<u8>>
+where
+    S: Read,
+{
+    if delimiter.is_empty() {
+        return Err(ZapMachineError::Protocol(
+            "serial delimiter must not be empty".to_string(),
+        ));
+    }
+    let mut response = Vec::new();
+    let mut byte = [0_u8; 1];
+    loop {
+        let read = stream.read(&mut byte).map_err(io_error)?;
+        if read == 0 {
+            if response.is_empty() {
+                return Err(ZapMachineError::Protocol(
+                    "serial stream closed before response".to_string(),
+                ));
+            }
+            return Ok(response);
+        }
+        response.push(byte[0]);
+        if response.ends_with(delimiter) {
+            let end = response.len() - delimiter.len();
+            response.truncate(end);
+            return Ok(response);
+        }
+    }
+}
+
+fn io_error(error: std::io::Error) -> ZapMachineError {
+    ZapMachineError::Io(error.to_string())
+}
+
 fn read_u16_payload(payload: &[u8]) -> Result<u16> {
     if payload.len() != 2 {
         return Err(ZapMachineError::Protocol(format!(
@@ -1268,6 +1794,11 @@ fn read_u16_payload(payload: &[u8]) -> Result<u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{Cursor, Read, Write},
+        net::TcpListener,
+        thread,
+    };
 
     fn mock_profile() -> DeviceProfile {
         DeviceProfile::new(
@@ -1344,6 +1875,38 @@ mod tests {
         .with_capability(DeviceCapability::state("holding.40001").unwrap())
         .with_capability(DeviceCapability::command("plc.speed.read").unwrap())
         .with_capability(DeviceCapability::command("plc.speed.write").unwrap())
+    }
+
+    #[derive(Debug)]
+    struct MemoryDuplex {
+        read: Cursor<Vec<u8>>,
+        written: Vec<u8>,
+    }
+
+    impl MemoryDuplex {
+        fn new(read: impl Into<Vec<u8>>) -> Self {
+            Self {
+                read: Cursor::new(read.into()),
+                written: Vec::new(),
+            }
+        }
+    }
+
+    impl Read for MemoryDuplex {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.read.read(buf)
+        }
+    }
+
+    impl Write for MemoryDuplex {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -1451,6 +2014,121 @@ mod tests {
     }
 
     #[test]
+    fn command_specs_validate_typed_payloads() {
+        let mut profile = mock_profile();
+        profile.capabilities.push(
+            DeviceCapability::command_spec(
+                CommandSpec::new("thermostat.mode.write")
+                    .unwrap()
+                    .with_payload_schema(CommandPayloadSchema::Json),
+            )
+            .unwrap(),
+        );
+        let mut connection = MachineConnection::new(
+            "lab.thermostat.typed",
+            profile,
+            Box::new(MockAdapter::new()),
+        )
+        .unwrap();
+        connection.connect().unwrap();
+
+        connection
+            .execute(
+                MachineCommand::payload_json(
+                    "thermostat.mode.write",
+                    &serde_json::json!({"mode":"eco"}),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let error = connection
+            .execute(MachineCommand::payload_text("thermostat.mode.write", "not-json").unwrap())
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ZapMachineError::PayloadSchemaMismatch { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn async_connection_and_heartbeat_track_staleness() {
+        let profile = mock_profile().with_health_policy(HealthPolicy {
+            heartbeat_command: Some("thermostat.setpoint.write".to_string()),
+            stale_after_ms: 10,
+        });
+        let mut connection = MachineConnection::new(
+            "lab.thermostat.async",
+            profile,
+            Box::new(MockAdapter::new()),
+        )
+        .unwrap();
+
+        connection.connect_async().await.unwrap();
+        connection.heartbeat_async_at(1_000).await.unwrap();
+        assert_eq!(connection.last_heartbeat_micros(), Some(1_000));
+        assert_eq!(connection.health_at(5_000).status, HealthStatus::Online);
+        assert_eq!(connection.health_at(20_000).status, HealthStatus::Degraded);
+    }
+
+    #[test]
+    fn heartbeat_timer_ticks_only_when_due() {
+        let profile = mock_profile().with_health_policy(HealthPolicy {
+            heartbeat_command: Some("thermostat.setpoint.write".to_string()),
+            stale_after_ms: 10,
+        });
+        let mut connection = MachineConnection::new(
+            "lab.thermostat.timer",
+            profile,
+            Box::new(MockAdapter::new()),
+        )
+        .unwrap();
+        connection.connect().unwrap();
+        connection.enable_heartbeat_timer(5_000, 1_000).unwrap();
+
+        assert!(connection.tick_heartbeat_timer_at(5_999).unwrap().is_none());
+        assert_eq!(connection.last_heartbeat_micros(), None);
+        assert!(connection.tick_heartbeat_timer_at(6_000).unwrap().is_some());
+        assert_eq!(connection.last_heartbeat_micros(), Some(6_000));
+        assert_eq!(
+            connection.heartbeat_timer().unwrap().next_due_micros,
+            11_000
+        );
+        assert!(
+            connection
+                .tick_heartbeat_timer_at(10_999)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn bus_ticks_configured_heartbeat_timers() {
+        let profile = mock_profile().with_health_policy(HealthPolicy {
+            heartbeat_command: Some("thermostat.setpoint.write".to_string()),
+            stale_after_ms: 10,
+        });
+        let connection =
+            MachineConnection::new("lab.thermostat.bus", profile, Box::new(MockAdapter::new()))
+                .unwrap();
+        let mut bus = MachineBus::new();
+        bus.attach(connection).unwrap();
+        bus.connect_all().unwrap();
+        bus.enable_heartbeat_timers(1_000, 0).unwrap();
+
+        assert!(bus.tick_heartbeat_timers_at(999).unwrap().is_empty());
+        let health = bus.tick_heartbeat_timers_at(1_000).unwrap();
+
+        assert_eq!(
+            health
+                .get(&MachineId::new("lab.thermostat.bus").unwrap())
+                .unwrap()
+                .status,
+            HealthStatus::Online
+        );
+    }
+
+    #[test]
     fn serial_adapter_scripts_line_frames() {
         let profile = serial_profile();
         let mut adapter = SerialAdapter::scripted("placeholder", 9600, [b"TARED".to_vec()]);
@@ -1466,6 +2144,20 @@ mod tests {
             outcome.state.get("serial.baud_rate"),
             Some(&MachineValue::I64(115_200))
         );
+    }
+
+    #[test]
+    fn stream_serial_adapter_uses_real_read_write_streams() {
+        let stream = MemoryDuplex::new(b"TARED\n".to_vec());
+        let mut adapter = StreamSerialAdapter::new(stream);
+        adapter.open(&serial_profile()).unwrap();
+        let outcome = adapter
+            .execute(MachineCommand::empty("scale.tare").unwrap())
+            .unwrap();
+        let stream = adapter.into_inner();
+
+        assert_eq!(outcome.response, b"TARED".to_vec());
+        assert_eq!(stream.written, b"scale.tare\n".to_vec());
     }
 
     #[test]
@@ -1485,6 +2177,47 @@ mod tests {
                 0, 11, b'r', b'o', b'b', b'o', b't', b'.', b'h', b'o', b'm', b'e', 0
             ]]
         );
+    }
+
+    #[test]
+    fn tcp_stream_adapter_talks_to_loopback_socket() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut len = [0_u8; 2];
+            socket.read_exact(&mut len).unwrap();
+            let len = u16::from_be_bytes(len) as usize;
+            let mut body = vec![0_u8; len];
+            socket.read_exact(&mut body).unwrap();
+            assert_eq!(body, b"robot.home\0");
+            socket.write_all(&3_u16.to_be_bytes()).unwrap();
+            socket.write_all(b"ACK").unwrap();
+        });
+
+        let profile = DeviceProfile::new(
+            "cell.robot",
+            "Cell Robot",
+            AdapterKind::Tcp,
+            TransportProfile::Tcp {
+                host: addr.ip().to_string(),
+                port: addr.port(),
+            },
+            ProtocolProfile::TcpFrames {
+                max_frame_bytes: 64,
+            },
+        )
+        .unwrap()
+        .with_capability(DeviceCapability::health("cell.robot").unwrap())
+        .with_capability(DeviceCapability::command("robot.home").unwrap());
+        let mut adapter = TcpStreamAdapter::new();
+        adapter.open(&profile).unwrap();
+        let outcome = adapter
+            .execute(MachineCommand::empty("robot.home").unwrap())
+            .unwrap();
+        server.join().unwrap();
+
+        assert_eq!(outcome.response, b"ACK".to_vec());
     }
 
     #[test]

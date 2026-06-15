@@ -858,6 +858,59 @@ impl Validate for AgentMessage {
     }
 }
 
+pub fn agent_message_subjects() -> &'static [&'static str] {
+    &[
+        AGENT_INTENT_SUBJECT,
+        AGENT_SESSION_SUBJECT,
+        AGENT_DELEGATION_REQUEST_SUBJECT,
+        AGENT_DELEGATION_RESPONSE_SUBJECT,
+        AGENT_CAPABILITY_NEGOTIATION_REQUEST_SUBJECT,
+        AGENT_CAPABILITY_NEGOTIATION_RESPONSE_SUBJECT,
+        AGENT_STATUS_SUBJECT,
+        AGENT_RESULT_SUBJECT,
+        AGENT_ERROR_SUBJECT,
+    ]
+}
+
+pub fn agent_message_json_schema() -> Value {
+    serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://zap.local/schemas/agent-message-v1.json",
+        "title": "ZAP AgentMessage v1",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "payload"],
+        "properties": {
+            "type": {
+                "type": "string",
+                "enum": [
+                    "intent",
+                    "session",
+                    "delegation_request",
+                    "delegation_response",
+                    "capability_negotiation_request",
+                    "capability_negotiation_response",
+                    "status",
+                    "result",
+                    "error"
+                ]
+            },
+            "payload": {
+                "type": "object",
+                "required": ["schema_version"],
+                "properties": {
+                    "schema_version": { "const": AGENT_PROTOCOL_SCHEMA_VERSION }
+                }
+            }
+        },
+        "x-zap": {
+            "content_type": AGENT_CONTENT_TYPE,
+            "subjects": agent_message_subjects(),
+            "schema_version": AGENT_PROTOCOL_SCHEMA_VERSION
+        }
+    })
+}
+
 fn validate_schema(entity: &'static str, version: u8) -> Result<()> {
     if version != AGENT_PROTOCOL_SCHEMA_VERSION {
         return Err(ZapAgentError::UnsupportedSchemaVersion { entity, version });
@@ -1099,6 +1152,24 @@ mod tests {
             AGENT_CAPABILITY_NEGOTIATION_RESPONSE_SUBJECT
         );
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn exports_agent_message_json_schema_metadata() {
+        let schema = agent_message_json_schema();
+
+        assert_eq!(schema["x-zap"]["content_type"], AGENT_CONTENT_TYPE);
+        assert_eq!(
+            schema["x-zap"]["schema_version"],
+            AGENT_PROTOCOL_SCHEMA_VERSION
+        );
+        assert!(
+            schema["x-zap"]["subjects"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|subject| subject == AGENT_INTENT_SUBJECT)
+        );
     }
 
     #[test]

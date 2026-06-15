@@ -1,4 +1,6 @@
 import json
+import socket
+import threading
 import unittest
 from uuid import UUID
 
@@ -10,7 +12,12 @@ from zap_sdk import (
     RegistryBundleManifest,
     RegistryBundleManifestRequest,
     RegistryBundleManifestResponse,
+    DriverRegistryEntry,
+    DriverRegistryMigration,
+    RegistryInstallPlanEntry,
+    RegistryInstallPlanRequest,
     ZapStoreClient,
+    ZapUdpClient,
     registry_bundle_manifest_request_frame,
     validate_artifact_hash,
     verify_signature_placeholder,
@@ -75,6 +82,69 @@ class ProtocolTests(unittest.TestCase):
         status = verify_signature_placeholder("registry")
         self.assertFalse(status.supported)
         self.assertIn("Ed25519", status.reason)
+
+    def test_install_plan_types_carry_abi_requirements_and_migrations(self):
+        migration = DriverRegistryMigration(
+            from_version_requirement="<2.0.0",
+            from_abi_requirement=">=1,<=2",
+            requires_operator_approval=True,
+            migration_driver_action="echo.migrate",
+            migration_driver_version="1.0.0",
+            notes="requires device drain",
+        )
+        request = RegistryInstallPlanRequest(
+            action="echo",
+            requirement="^2.0.0",
+            abi_requirement=">=2,<4",
+        )
+        entry = RegistryInstallPlanEntry(
+            action="echo",
+            requirement="^2.0.0",
+            requested_abi_requirement=">=2,<4",
+            selected_version="2.1.0",
+            name="echo-driver",
+            abi_version=2,
+            wasm_hash=HASH,
+            author_node_id=UUID(int=2),
+            migrations=[migration],
+        )
+        registry_entry = DriverRegistryEntry(
+            name="echo-driver",
+            version="2.1.0",
+            action="echo",
+            abi_version=2,
+            wasm_hash=HASH,
+            author_node_id=UUID(int=2),
+            migrations=[migration],
+        )
+
+        self.assertEqual(request.to_dict()["abi_requirement"], ">=2,<4")
+        self.assertEqual(entry.migrations[0].migration_driver_action, "echo.migrate")
+        self.assertEqual(registry_entry.migrations[0].from_abi_requirement, ">=1,<=2")
+
+    def test_udp_client_sends_control_envelopes(self):
+        server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        server.bind(("127.0.0.1", 0))
+        received: list[bytes] = []
+
+        def serve() -> None:
+            payload, addr = server.recvfrom(65535)
+            received.append(payload)
+            server.sendto(payload, addr)
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        with ZapUdpClient(timeout=2.0) as client:
+            response = client.request_control(
+                registry_bundle_manifest_request_frame(require_drivers=True),
+                server.getsockname(),
+            )
+        thread.join(timeout=2.0)
+        server.close()
+
+        self.assertEqual(response.subject, REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT)
+        self.assertTrue(response.json_body()["require_drivers"])
+        self.assertTrue(received)
 
 
 if __name__ == "__main__":

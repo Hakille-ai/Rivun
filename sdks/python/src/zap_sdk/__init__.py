@@ -12,6 +12,7 @@ from .protocol import (
     ControlFrame,
     ZapEnvelope,
     ZapMessageKind,
+    ZapUdpClient,
 )
 from .zapstore import (
     DRIVER_ABI_VERSION,
@@ -21,6 +22,7 @@ from .zapstore import (
     REGISTRY_INSTALL_PLAN_SCHEMA_VERSION,
     DriverRegistry,
     DriverRegistryEntry,
+    DriverRegistryMigration,
     RegistryBundleEntry,
     RegistryBundleManifest,
     RegistryBundleManifestRequest,
@@ -37,6 +39,7 @@ from .zapstore import (
     registry_hash,
     registry_index_request_frame,
     validate_artifact_hash,
+    verify_ed25519_signature,
     verify_signature_placeholder,
 )
 
@@ -59,6 +62,7 @@ __all__ = [
     "ControlFrame",
     "DriverRegistry",
     "DriverRegistryEntry",
+    "DriverRegistryMigration",
     "RegistryBundleEntry",
     "RegistryBundleManifest",
     "RegistryBundleManifestRequest",
@@ -72,10 +76,12 @@ __all__ = [
     "ZapStoreClient",
     "ZapEnvelope",
     "ZapMessageKind",
+    "ZapUdpClient",
     "artifact_hash",
     "registry_bundle_manifest_request_frame",
     "registry_hash",
     "registry_index_request_frame",
     "validate_artifact_hash",
+    "verify_ed25519_signature",
     "verify_signature_placeholder",
 ]

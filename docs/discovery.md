@@ -5,9 +5,10 @@ capability, and peer inventory data without editing the local config for every
 service change.
 
 Discovery is intentionally layered on top of the existing encrypted ZAP
-transport. A node can only exchange discovery messages with peers that already
-have a trust contract and transport key in `[[peers]]`. Discovery does not
-silently enroll new transport keys or persist peer config changes.
+transport. A node can exchange discovery messages with configured seed peers,
+learn signed service announcements relayed by those peers, and optionally keep
+those announcements on disk. It does not silently trust or activate unknown
+transport keys.
 
 ## Control Subjects
 
@@ -34,9 +35,10 @@ This gives two checks:
 - The embedded advertisement remains independently verifiable if relayed,
   logged, or printed by the CLI.
 
-Nodes keep received announcements in memory only. Operators should still use
-the peer enrollment flow when a discovered node should become a configured
-transport peer.
+Nodes keep received announcements in memory and can persist them with
+`[discovery].announcement_cache = "discovery-announcements.jsonl"`. Operators
+should still use the peer enrollment flow when a discovered node should become
+a configured transport peer.
 
 ## CLI
 
@@ -63,6 +65,13 @@ zap discovery query --config zap.toml --target <peer-node-id> --service remote.s
 zap discovery query --config zap.toml --target <peer-node-id> --no-peers --no-known
 ```
 
+Enable durable announcement cache in node config:
+
+```toml
+[discovery]
+announcement_cache = "state/discovery-announcements.jsonl"
+```
+
 The JSON response includes:
 
 - `response.advertisement`: the queried peer's signed local advertisement.
@@ -76,7 +85,8 @@ The JSON response includes:
 - Discovery respects peer trust. If `allow_send = false`, local queries and
   announcements to that target are rejected.
 - Responses never expose `transport_key`.
-- Dynamic announcements are not durable. Restarting a node clears them.
+- Dynamic announcements are durable when `discovery.announcement_cache` is set;
+  expired announcements are ignored on reload.
 - `advertised_addr` is informational. It does not override the transport
   address in config.
 - Use `zap peer invite` / `zap peer accept` for durable peer enrollment, then

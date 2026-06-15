@@ -1,10 +1,10 @@
 # ZAP Go SDK
 
-Pure-standard-library Go helpers for ZAP `ZENV` control envelopes and ZapStore
+Go helpers for ZAP `ZENV` control envelopes, local UDP requests, and ZapStore
 registry payloads.
 
-The SDK is network-free: it prepares bytes and JSON that can be handed to a ZAP
-transport, CLI bridge, or integration test.
+The SDK prepares bytes and JSON that can be handed to any ZAP transport, and it
+includes `UDPClient` for loopback/dev peer integration.
 
 ## Build a registry bundle manifest request
 
@@ -33,13 +33,11 @@ func main() {
 ## Integrity helpers
 
 `ValidateArtifactHash` checks the canonical `blake3:<64 hex chars>` shape.
-Go's standard library does not provide BLAKE3, so `ArtifactHash` returns an
-explicit error. Use `zap-cli`, the Rust SDK, or inject a vetted BLAKE3
-implementation in the application layer.
+`ArtifactHash` computes canonical BLAKE3 values through
+`lukechampine.com/blake3`.
 
-Signature verification is represented by `SignatureVerificationPlaceholder`
-until this package grows a vetted Ed25519 implementation over the exact ZAP
-domain-separated payloads.
+`VerifyEd25519Signature` verifies base64/base64-no-pad Ed25519 signatures with
+Go's standard `crypto/ed25519` package.
 
 ## Test
 

@@ -5,6 +5,8 @@ import {
   REGISTRY_INDEX_CONTENT_TYPE,
   REGISTRY_INDEX_REQUEST_SUBJECT,
 } from "./protocol.ts";
+import { verify as verifyEd25519 } from "@noble/ed25519";
+import { blake3 } from "@noble/hashes/blake3";
 
 export const REGISTRY_INDEX_SYNC_SCHEMA_VERSION = 1;
 export const REGISTRY_BUNDLE_SCHEMA_VERSION = 1;
@@ -13,6 +15,15 @@ export const DRIVER_ABI_VERSION = 1;
 export const DRIVER_HASH_PREFIX = "blake3:";
 
 export type DriverRegistryStatus = "active" | "deprecated" | "revoked";
+
+export type DriverRegistryMigration = {
+  from_version_requirement: string;
+  from_abi_requirement?: string;
+  requires_operator_approval?: boolean;
+  migration_driver_action?: string;
+  migration_driver_version?: string;
+  notes?: string;
+};
 
 export type RegistryIndexRequest = {
   schema_version: number;
@@ -36,6 +47,7 @@ export type DriverRegistryEntry = {
   status?: DriverRegistryStatus;
   revoked_reason?: string;
   deprecated_reason?: string;
+  migrations?: DriverRegistryMigration[];
 };
 
 export type DriverRegistry = {
@@ -89,18 +101,21 @@ export type RegistryInstallPlanRequest = {
   action: string;
   requirement: string;
   abi_version?: number;
+  abi_requirement?: string;
 };
 
 export type RegistryInstallPlanEntry = {
   action: string;
   requirement: string;
   requested_abi_version?: number;
+  requested_abi_requirement?: string;
   selected_version: string;
   name: string;
   abi_version: number;
   wasm_hash: string;
   manifest_path?: string;
   author_node_id: string;
+  migrations?: DriverRegistryMigration[];
 };
 
 export type RegistryInstallPlan = {
@@ -228,16 +243,22 @@ export function validateArtifactHash(value: string): boolean {
   return /^blake3:[0-9a-f]{64}$/.test(value);
 }
 
-export function artifactHash(_bytes: Uint8Array): never {
-  throw new Error(
-    "canonical ZAP artifact hashes use BLAKE3; Node standard crypto does not expose BLAKE3. Use zap-cli, the Rust SDK, or a caller-provided BLAKE3 backend.",
-  );
+export function artifactHash(bytes: Uint8Array): string {
+  return `${DRIVER_HASH_PREFIX}${Buffer.from(blake3(bytes)).toString("hex")}`;
+}
+
+export async function verifyEd25519Signature(
+  message: Uint8Array,
+  signatureBase64: string,
+  publicKeyBase64: string,
+): Promise<boolean> {
+  return verifyEd25519(decodeBase64NoPad(signatureBase64), message, decodeBase64NoPad(publicKeyBase64));
 }
 
 export function signatureVerificationPlaceholder(kind: string): SignatureVerificationStatus {
   return {
     supported: false,
-    reason: `${kind} signatures are Ed25519 signatures over ZAP domain-separated payloads. This dependency-free TypeScript SDK does not verify them yet; use zap-cli or the Rust SDK.`,
+    reason: `${kind} signatures are Ed25519 signatures over ZAP domain-separated payloads. Build the exact canonical message and call verifyEd25519Signature(), or use zap-cli/Rust for canonical registry verification.`,
   };
 }
 
@@ -249,4 +270,9 @@ function validateRelativePath(path: string): void {
   if (parts.some((part) => part === "" || part === "." || part === "..")) {
     throw new Error(`bundle path ${path} is not a safe relative path`);
   }
+}
+
+function decodeBase64NoPad(value: string): Uint8Array {
+  const padding = (4 - (value.length % 4)) % 4;
+  return Buffer.from(`${value}${"=".repeat(padding)}`, "base64");
 }

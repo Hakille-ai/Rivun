@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
+	"time"
 )
 
 const (
@@ -283,6 +285,86 @@ func DecodeControlFrame(input []byte) (ControlFrame, error) {
 		CorrelationID: env.CorrelationID,
 		CausationID:   env.CausationID,
 	}, nil
+}
+
+type UDPClient struct {
+	conn *net.UDPConn
+}
+
+func NewUDPClient(localAddr string) (*UDPClient, error) {
+	addr, err := net.ResolveUDPAddr("udp", localAddr)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := net.ListenUDP("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return &UDPClient{conn: conn}, nil
+}
+
+func (client *UDPClient) LocalAddr() net.Addr {
+	return client.conn.LocalAddr()
+}
+
+func (client *UDPClient) SendEnvelope(env Envelope, target string) (int, error) {
+	addr, err := net.ResolveUDPAddr("udp", target)
+	if err != nil {
+		return 0, err
+	}
+	payload, err := env.Encode()
+	if err != nil {
+		return 0, err
+	}
+	return client.conn.WriteToUDP(payload, addr)
+}
+
+func (client *UDPClient) SendControl(frame ControlFrame, target string) (int, error) {
+	env, err := frame.ToEnvelope()
+	if err != nil {
+		return 0, err
+	}
+	return client.SendEnvelope(env, target)
+}
+
+func (client *UDPClient) RecvEnvelope(maxBytes int, timeout time.Duration) (Envelope, *net.UDPAddr, error) {
+	if maxBytes <= 0 {
+		maxBytes = 65535
+	}
+	if timeout > 0 {
+		if err := client.conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return Envelope{}, nil, err
+		}
+	}
+	buf := make([]byte, maxBytes)
+	n, addr, err := client.conn.ReadFromUDP(buf)
+	if err != nil {
+		return Envelope{}, nil, err
+	}
+	env, err := DecodeEnvelope(buf[:n])
+	return env, addr, err
+}
+
+func (client *UDPClient) RequestControl(frame ControlFrame, target string, timeout time.Duration) (ControlFrame, error) {
+	if _, err := client.SendControl(frame, target); err != nil {
+		return ControlFrame{}, err
+	}
+	env, _, err := client.RecvEnvelope(65535, timeout)
+	if err != nil {
+		return ControlFrame{}, err
+	}
+	if env.Kind != KindControl {
+		return ControlFrame{}, fmt.Errorf("expected control response, got kind %d", env.Kind)
+	}
+	encoded, err := env.Encode()
+	if err != nil {
+		return ControlFrame{}, err
+	}
+	return DecodeControlFrame(encoded)
+}
+
+func (client *UDPClient) Close() error {
+	return client.conn.Close()
 }
 
 func validateLengths(kind MessageKind, subjectLen int, contentTypeLen int, metadataLen int, bodyLen int) error {

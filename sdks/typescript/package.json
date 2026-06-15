@@ -4,11 +4,21 @@
   "description": "Lightweight TypeScript SDK for ZAP control envelopes and ZapStore payloads",
   "type": "module",
   "license": "Apache-2.0",
+  "types": "./dist/src/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./src/index.ts"
+    }
   },
   "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:types": "tsc -p tsconfig.declarations.json",
     "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.3.0",
+    "@noble/hashes": "^1.8.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

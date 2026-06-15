@@ -1,15 +1,15 @@
 # Machine Connections
 
-`zap-machine` adds a hardware-neutral layer for machine profiles and protocol adapters. It is designed so roadmap work can build against stable concepts now while real serial, TCP, PLC, or fieldbus drivers arrive later behind the same trait.
+`zap-machine` adds a hardware-neutral layer for machine profiles and protocol adapters. It is designed so roadmap work can build against stable concepts while mock, stream-backed serial, TCP, and industrial-bus style adapters all share the same trait.
 
 ## Scope
 
 - Device profiles declare a profile id, transport, protocol, health policy, and capabilities.
 - Capability mapping converts profile commands, health, and state keys into ZAP `CapabilityId` values.
-- `MachineConnection` validates declared commands and payload limits before dispatch.
+- `MachineConnection` validates declared commands, typed payload schemas, and payload limits before dispatch.
 - `MachineBus` owns multiple device connections and routes commands by device id.
-- Built-in adapters are deterministic placeholders: mock, serial-line, TCP length-prefixed frames, and Modbus-like register operations.
-- No adapter in this crate opens a real hardware port or socket.
+- Built-in adapters cover mock, scripted serial-line, stream-backed serial, scripted TCP, real TCP length-prefixed frames, and Modbus-like register operations.
+- Health can be polled explicitly or driven by deterministic heartbeat timers.
 
 ## Profile Shape
 
@@ -71,7 +71,9 @@ Use `MockAdapter` for business logic tests. It records command history, stores t
 
 Use `SerialAdapter::scripted` to verify line framing and response handling without touching a COM device. It writes outbound frames into memory.
 
-Use `TcpAdapter::scripted` to verify length-prefixed command frames without opening a socket.
+Use `StreamSerialAdapter` with any `Read + Write + Send` serial-like stream when an OS-specific serial library owns the actual port.
+
+Use `TcpAdapter::scripted` to verify length-prefixed command frames without opening a socket, or `TcpStreamAdapter` for real loopback/LAN TCP sockets.
 
 Use `ModbusLikeAdapter` to model register reads/writes with explicit command-to-operation mappings:
 
@@ -86,7 +88,7 @@ let adapter = ModbusLikeAdapter::new(7)
 
 ## Current Limits
 
-- Real OS serial ports, TCP sockets, Modbus RTU/TCP, and OPC UA are intentionally out of scope for this crate.
-- Adapter execution is synchronous.
-- Payloads are opaque bytes. Higher-level command schemas can be layered on top once registry/device manifests need them.
-- Health is explicit adapter state, not yet backed by timers or automatic heartbeat polling.
+- Native OS serial-port discovery/opening is delegated to caller-supplied `Read + Write + Send` streams.
+- Modbus-like operations are deterministic register mappings, not a full Modbus RTU/TCP stack.
+- Async methods are convenience APIs over the same adapter trait; adapters do not spawn background worker threads by themselves.
+- Heartbeat timers are deterministic and ticked by the caller or bus loop, so deployments can use their own scheduler/runtime.

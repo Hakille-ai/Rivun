@@ -19,14 +19,14 @@ pub use zap_envelope::{
     ZapMessageKind,
 };
 pub use zap_store::{
-    DRIVER_ABI_VERSION, DRIVER_HASH_PREFIX, DriverManifest, DriverRegistry, DriverRegistryEntry,
-    DriverRegistryStatus, REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
-    REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT, REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT,
-    REGISTRY_BUNDLE_SCHEMA_VERSION, REGISTRY_INDEX_CONTENT_TYPE, REGISTRY_INDEX_REQUEST_SUBJECT,
-    REGISTRY_INDEX_RESPONSE_SUBJECT, REGISTRY_INDEX_SYNC_SCHEMA_VERSION,
-    REGISTRY_INSTALL_PLAN_SCHEMA_VERSION, RegistryBundleEntry, RegistryBundleManifest,
-    RegistryBundleManifestRequest, RegistryBundleManifestResponse, RegistryIndexRequest,
-    RegistryIndexResponse, RegistryInstallPlan, RegistryInstallPlanEntry,
+    DRIVER_ABI_VERSION, DRIVER_HASH_PREFIX, DriverAbiRequirement, DriverManifest, DriverRegistry,
+    DriverRegistryEntry, DriverRegistryMigration, DriverRegistryStatus,
+    REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE, REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+    REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT, REGISTRY_BUNDLE_SCHEMA_VERSION,
+    REGISTRY_INDEX_CONTENT_TYPE, REGISTRY_INDEX_REQUEST_SUBJECT, REGISTRY_INDEX_RESPONSE_SUBJECT,
+    REGISTRY_INDEX_SYNC_SCHEMA_VERSION, REGISTRY_INSTALL_PLAN_SCHEMA_VERSION, RegistryBundleEntry,
+    RegistryBundleManifest, RegistryBundleManifestRequest, RegistryBundleManifestResponse,
+    RegistryIndexRequest, RegistryIndexResponse, RegistryInstallPlan, RegistryInstallPlanEntry,
     RegistryInstallPlanRequest, RegistryPublication, artifact_hash, driver_hash, registry_hash,
 };
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createSocket } from "node:dgram";
 import test from "node:test";
 
 import {
@@ -6,11 +7,14 @@ import {
   REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
   REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
   ZapStoreClient,
+  ZapUdpClient,
+  artifactHash,
   registryBundleManifestRequestFrame,
   signatureVerificationPlaceholder,
   validateArtifactHash,
   validateRegistryBundleManifestResponse,
 } from "../src/index.ts";
+import type { DriverRegistryEntry, RegistryInstallPlanEntry, RegistryInstallPlanRequest } from "../src/index.ts";
 
 const HASH = `blake3:${"0".repeat(64)}`;
 
@@ -65,7 +69,71 @@ test("bundle manifest response validation honors required driver metadata", () =
 test("hash and signature helpers are explicit", () => {
   assert.equal(validateArtifactHash(HASH), true);
   assert.equal(validateArtifactHash(`sha256:${"0".repeat(64)}`), false);
+  assert.match(artifactHash(Buffer.from("driver")), /^blake3:[0-9a-f]{64}$/);
   const status = signatureVerificationPlaceholder("registry");
   assert.equal(status.supported, false);
   assert.match(status.reason, /Ed25519/);
+});
+
+test("install plan types carry ABI requirements and migrations", () => {
+  const request: RegistryInstallPlanRequest = {
+    action: "echo",
+    requirement: "^2.0.0",
+    abi_requirement: ">=2,<4",
+  };
+  const entry: RegistryInstallPlanEntry = {
+    action: "echo",
+    requirement: "^2.0.0",
+    requested_abi_requirement: ">=2,<4",
+    selected_version: "2.1.0",
+    name: "echo-driver",
+    abi_version: 2,
+    wasm_hash: HASH,
+    author_node_id: "00000000-0000-0000-0000-000000000002",
+    migrations: [
+      {
+        from_version_requirement: "<2.0.0",
+        from_abi_requirement: ">=1,<=2",
+        requires_operator_approval: true,
+        migration_driver_action: "echo.migrate",
+        migration_driver_version: "1.0.0",
+      },
+    ],
+  };
+  const registryEntry: DriverRegistryEntry = {
+    name: "echo-driver",
+    version: "2.1.0",
+    action: "echo",
+    abi_version: 2,
+    wasm_hash: HASH,
+    author_node_id: "00000000-0000-0000-0000-000000000002",
+    migrations: entry.migrations,
+  };
+
+  assert.equal(request.abi_requirement, ">=2,<4");
+  assert.equal(entry.migrations?.[0]?.migration_driver_action, "echo.migrate");
+  assert.equal(registryEntry.migrations?.[0]?.from_abi_requirement, ">=1,<=2");
+});
+
+test("UDP client sends and receives control envelopes", async () => {
+  const server = createSocket("udp4");
+  await new Promise<void>((resolve) => server.bind(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.notEqual(typeof address, "string");
+  const target = address as { address: string; port: number };
+  server.once("message", (message, remote) => {
+    server.send(message, remote.port, remote.address);
+  });
+
+  const client = new ZapUdpClient();
+  await client.bind();
+  const response = await client.requestControl(
+    registryBundleManifestRequestFrame({ requireDrivers: true }),
+    { host: target.address, port: target.port },
+  );
+  client.close();
+  server.close();
+
+  assert.equal(response.subject, REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT);
+  assert.equal((response.jsonBody() as { require_drivers: boolean }).require_drivers, true);
 });

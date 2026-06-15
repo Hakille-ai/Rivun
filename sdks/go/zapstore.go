@@ -1,11 +1,15 @@
 package zap
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"lukechampine.com/blake3"
 )
 
 const (
@@ -25,6 +29,15 @@ const (
 	DriverRegistryStatusDeprecated DriverRegistryStatus = "deprecated"
 	DriverRegistryStatusRevoked    DriverRegistryStatus = "revoked"
 )
+
+type DriverRegistryMigration struct {
+	FromVersionRequirement   string `json:"from_version_requirement"`
+	FromABIRequirement       string `json:"from_abi_requirement,omitempty"`
+	RequiresOperatorApproval bool   `json:"requires_operator_approval,omitempty"`
+	MigrationDriverAction    string `json:"migration_driver_action,omitempty"`
+	MigrationDriverVersion   string `json:"migration_driver_version,omitempty"`
+	Notes                    string `json:"notes,omitempty"`
+}
 
 type RegistryIndexRequest struct {
 	SchemaVersion    uint8 `json:"schema_version"`
@@ -62,6 +75,7 @@ type DriverRegistryEntry struct {
 	Status           DriverRegistryStatus `json:"status,omitempty"`
 	RevokedReason    string               `json:"revoked_reason,omitempty"`
 	DeprecatedReason string               `json:"deprecated_reason,omitempty"`
+	Migrations       []DriverRegistryMigration `json:"migrations,omitempty"`
 }
 
 type DriverRegistry struct {
@@ -98,21 +112,24 @@ type RegistryBundleEntry struct {
 }
 
 type RegistryInstallPlanRequest struct {
-	Action      string  `json:"action"`
-	Requirement string  `json:"requirement"`
-	ABIVersion  *uint16 `json:"abi_version,omitempty"`
+	Action         string  `json:"action"`
+	Requirement    string  `json:"requirement"`
+	ABIVersion     *uint16 `json:"abi_version,omitempty"`
+	ABIRequirement string  `json:"abi_requirement,omitempty"`
 }
 
 type RegistryInstallPlanEntry struct {
-	Action              string  `json:"action"`
-	Requirement         string  `json:"requirement"`
-	RequestedABIVersion *uint16 `json:"requested_abi_version,omitempty"`
-	SelectedVersion     string  `json:"selected_version"`
-	Name                string  `json:"name"`
-	ABIVersion          uint16  `json:"abi_version"`
-	WASMHash            string  `json:"wasm_hash"`
-	ManifestPath        string  `json:"manifest_path,omitempty"`
-	AuthorNodeID        UUID    `json:"author_node_id"`
+	Action                  string                    `json:"action"`
+	Requirement             string                    `json:"requirement"`
+	RequestedABIVersion     *uint16                   `json:"requested_abi_version,omitempty"`
+	RequestedABIRequirement string                    `json:"requested_abi_requirement,omitempty"`
+	SelectedVersion         string                    `json:"selected_version"`
+	Name                    string                    `json:"name"`
+	ABIVersion              uint16                    `json:"abi_version"`
+	WASMHash                string                    `json:"wasm_hash"`
+	ManifestPath            string                    `json:"manifest_path,omitempty"`
+	AuthorNodeID            UUID                      `json:"author_node_id"`
+	Migrations              []DriverRegistryMigration `json:"migrations,omitempty"`
 }
 
 type RegistryInstallPlan struct {
@@ -270,8 +287,9 @@ func ValidateArtifactHash(value string) bool {
 	return artifactHashPattern.MatchString(value)
 }
 
-func ArtifactHash(_ []byte) (string, error) {
-	return "", errors.New("canonical ZAP artifact hashes use BLAKE3; Go standard library does not expose BLAKE3. Use zap-cli, the Rust SDK, or a vetted BLAKE3 backend")
+func ArtifactHash(input []byte) (string, error) {
+	sum := blake3.Sum256(input)
+	return DriverHashPrefix + fmt.Sprintf("%x", sum[:]), nil
 }
 
 func RegistryHash(registry DriverRegistry) (string, error) {
@@ -285,8 +303,33 @@ func RegistryHash(registry DriverRegistry) (string, error) {
 func SignatureVerificationPlaceholder(kind string) SignatureVerificationStatus {
 	return SignatureVerificationStatus{
 		Supported: false,
-		Reason:    kind + " signatures are Ed25519 signatures over ZAP domain-separated payloads. This dependency-free Go SDK does not verify them yet; use zap-cli or the Rust SDK.",
+		Reason:    kind + " signatures are Ed25519 signatures over ZAP domain-separated payloads. Build the exact canonical message and call VerifyEd25519Signature, or use zap-cli/Rust for canonical registry verification.",
 	}
+}
+
+func VerifyEd25519Signature(message []byte, signatureBase64 string, publicKeyBase64 string) (bool, error) {
+	signature, err := decodeBase64NoPad(signatureBase64)
+	if err != nil {
+		return false, err
+	}
+	publicKey, err := decodeBase64NoPad(publicKeyBase64)
+	if err != nil {
+		return false, err
+	}
+	if len(publicKey) != ed25519.PublicKeySize {
+		return false, fmt.Errorf("invalid public key length: got %d", len(publicKey))
+	}
+	if len(signature) != ed25519.SignatureSize {
+		return false, fmt.Errorf("invalid signature length: got %d", len(signature))
+	}
+	return ed25519.Verify(ed25519.PublicKey(publicKey), message, signature), nil
+}
+
+func decodeBase64NoPad(value string) ([]byte, error) {
+	if decoded, err := base64.StdEncoding.WithPadding(base64.NoPadding).DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	return base64.StdEncoding.DecodeString(value)
 }
 
 func validateRelativePath(path string) error {
