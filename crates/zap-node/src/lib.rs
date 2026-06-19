@@ -1184,6 +1184,7 @@ pub struct ZapNode {
     registry_bundle_path: Option<PathBuf>,
     registry_require_signature: bool,
     capability_cache_path: Option<PathBuf>,
+    capability_cache_max_age_micros: Option<u64>,
     memory: MemoryConfig,
     route_table: RouteTable,
     message_policy: MessagePolicyConfig,
@@ -1236,6 +1237,94 @@ pub struct ZapNodeMetricsSnapshot {
     pub capability_cache_age_seconds: Option<u64>,
     pub receipt_log_verify_failures_total: u64,
     pub poa_attestation_failures_total: u64,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ZapNodeHealthStatus {
+    Healthy,
+    Degraded,
+    Critical,
+}
+
+impl ZapNodeHealthStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            ZapNodeHealthStatus::Healthy => "healthy",
+            ZapNodeHealthStatus::Degraded => "degraded",
+            ZapNodeHealthStatus::Critical => "critical",
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        match (self, other) {
+            (ZapNodeHealthStatus::Critical, _) | (_, ZapNodeHealthStatus::Critical) => {
+                ZapNodeHealthStatus::Critical
+            }
+            (ZapNodeHealthStatus::Degraded, _) | (_, ZapNodeHealthStatus::Degraded) => {
+                ZapNodeHealthStatus::Degraded
+            }
+            _ => ZapNodeHealthStatus::Healthy,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ZapNodeHealthCheck {
+    pub name: String,
+    pub status: ZapNodeHealthStatus,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl ZapNodeHealthCheck {
+    fn new(
+        name: impl Into<String>,
+        status: ZapNodeHealthStatus,
+        summary: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            status,
+            summary: summary.into(),
+            detail: None,
+        }
+    }
+
+    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ZapNodeHealthSnapshot {
+    pub node_id: Uuid,
+    pub status: ZapNodeHealthStatus,
+    pub checks: Vec<ZapNodeHealthCheck>,
+}
+
+impl ZapNodeHealthSnapshot {
+    pub fn to_json(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
+    }
+
+    pub fn to_healthz_text(&self) -> String {
+        let mut output = format!(
+            "status={}\nnode_id={}\n",
+            self.status.as_str(),
+            self.node_id
+        );
+        for check in &self.checks {
+            output.push_str(&format!(
+                "check{{name=\"{}\"}}={}\n",
+                health_text_escape(&check.name),
+                check.status.as_str()
+            ));
+        }
+        output
+    }
 }
 
 impl ZapNodeMetricsSnapshot {
@@ -1377,6 +1466,13 @@ fn prometheus_escape(value: &str) -> String {
         .collect()
 }
 
+fn health_text_escape(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        .collect()
+}
+
 fn classify_processing_error(error: &anyhow::Error) -> &'static str {
     let details = format!("{error:#}");
     if details.contains("anti-replay") || details.contains("stale frame timestamp") {
@@ -1474,6 +1570,7 @@ impl ZapNode {
         let registry_bundle_path = config.registry.bundle_path.clone();
         let registry_require_signature = config.registry.require_signature;
         let capability_cache_path = config.capability_cache.path.clone();
+        let capability_cache_max_age_micros = config.capability_cache.max_age_micros;
         let registry = load_driver_registry_optional(&config.registry)?;
         let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
         let route_table = RouteTable::new(config.routes.clone())?;
@@ -1509,6 +1606,7 @@ impl ZapNode {
             registry_bundle_path,
             registry_require_signature,
             capability_cache_path,
+            capability_cache_max_age_micros,
             memory: config.memory,
             route_table,
             message_policy: config.message_policy,
@@ -1698,6 +1796,303 @@ impl ZapNode {
 
     pub fn metrics_prometheus_text(&self) -> String {
         self.metrics_snapshot().to_prometheus_text()
+    }
+
+    pub fn health_snapshot(&self) -> ZapNodeHealthSnapshot {
+        let metrics = self.metrics_snapshot();
+        let checks = self.health_checks_from_metrics(&metrics);
+        let status = checks
+            .iter()
+            .fold(ZapNodeHealthStatus::Healthy, |status, check| {
+                status.merge(check.status)
+            });
+        ZapNodeHealthSnapshot {
+            node_id: self.keypair.node_id(),
+            status,
+            checks,
+        }
+    }
+
+    pub fn health_json(&self) -> Result<String> {
+        self.health_snapshot().to_json()
+    }
+
+    pub fn healthz_text(&self) -> String {
+        self.health_snapshot().to_healthz_text()
+    }
+
+    fn health_checks_from_metrics(
+        &self,
+        metrics: &ZapNodeMetricsSnapshot,
+    ) -> Vec<ZapNodeHealthCheck> {
+        let mut checks = Vec::new();
+        checks.push(match self.local_addr() {
+            Ok(addr) => ZapNodeHealthCheck::new(
+                "endpoint_bound",
+                ZapNodeHealthStatus::Healthy,
+                "node UDP endpoint is bound",
+            )
+            .with_detail(addr.to_string()),
+            Err(error) => ZapNodeHealthCheck::new(
+                "endpoint_bound",
+                ZapNodeHealthStatus::Critical,
+                "node UDP endpoint is not reachable",
+            )
+            .with_detail(format!("{error:#}")),
+        });
+
+        checks.push(self.registry_health_check());
+        checks.push(self.registry_bundle_health_check());
+        checks.push(self.receipt_log_health_check(metrics.receipt_log_verify_failures_total));
+        checks.push(self.capability_cache_health_check(metrics.capability_cache_age_seconds));
+        checks.push(self.message_policy_health_check());
+        checks.push(self.peer_trust_health_check());
+        checks.push(self.runtime_error_health_check(metrics));
+        checks
+    }
+
+    fn registry_health_check(&self) -> ZapNodeHealthCheck {
+        let Some(path) = &self.registry_path else {
+            return ZapNodeHealthCheck::new(
+                "registry_signature",
+                ZapNodeHealthStatus::Healthy,
+                "driver registry is not configured",
+            );
+        };
+        match self.registry_signature_valid() {
+            Some(1) => ZapNodeHealthCheck::new(
+                "registry_signature",
+                ZapNodeHealthStatus::Healthy,
+                "driver registry signature verifies",
+            )
+            .with_detail(path.display().to_string()),
+            Some(_) => ZapNodeHealthCheck::new(
+                "registry_signature",
+                ZapNodeHealthStatus::Critical,
+                "driver registry signature verification failed",
+            )
+            .with_detail(path.display().to_string()),
+            None => ZapNodeHealthCheck::new(
+                "registry_signature",
+                ZapNodeHealthStatus::Critical,
+                "driver registry signature status is unavailable",
+            )
+            .with_detail(path.display().to_string()),
+        }
+    }
+
+    fn registry_bundle_health_check(&self) -> ZapNodeHealthCheck {
+        let Some(path) = &self.registry_bundle_path else {
+            return ZapNodeHealthCheck::new(
+                "registry_bundle",
+                ZapNodeHealthStatus::Healthy,
+                "registry bundle manifest is not configured",
+            );
+        };
+        match load_registry_bundle_manifest_optional(
+            path,
+            &RegistryBundleManifestRequest::default(),
+        ) {
+            Ok(Some(_)) => ZapNodeHealthCheck::new(
+                "registry_bundle",
+                ZapNodeHealthStatus::Healthy,
+                "registry bundle manifest loads",
+            )
+            .with_detail(path.display().to_string()),
+            Ok(None) => ZapNodeHealthCheck::new(
+                "registry_bundle",
+                ZapNodeHealthStatus::Critical,
+                "registry bundle manifest is configured but unavailable",
+            )
+            .with_detail(path.display().to_string()),
+            Err(error) => ZapNodeHealthCheck::new(
+                "registry_bundle",
+                ZapNodeHealthStatus::Critical,
+                "registry bundle manifest failed validation",
+            )
+            .with_detail(format!("{error:#}")),
+        }
+    }
+
+    fn receipt_log_health_check(&self, verify_failures: u64) -> ZapNodeHealthCheck {
+        if verify_failures > 0 {
+            return ZapNodeHealthCheck::new(
+                "receipt_log",
+                ZapNodeHealthStatus::Critical,
+                "receipt verification failures were observed",
+            )
+            .with_detail(format!("verify_failures={verify_failures}"));
+        }
+        let Some(path) = &self.receipt_log_path else {
+            return ZapNodeHealthCheck::new(
+                "receipt_log",
+                ZapNodeHealthStatus::Degraded,
+                "receipt log is not configured",
+            );
+        };
+        if !path.exists() {
+            return ZapNodeHealthCheck::new(
+                "receipt_log",
+                ZapNodeHealthStatus::Healthy,
+                "receipt log is configured and will be created on first receipt",
+            )
+            .with_detail(path.display().to_string());
+        }
+        match load_verified_receipt_log(path) {
+            Ok(_) => ZapNodeHealthCheck::new(
+                "receipt_log",
+                ZapNodeHealthStatus::Healthy,
+                "receipt log verifies",
+            )
+            .with_detail(path.display().to_string()),
+            Err(error) => ZapNodeHealthCheck::new(
+                "receipt_log",
+                ZapNodeHealthStatus::Critical,
+                "receipt log verification failed",
+            )
+            .with_detail(format!("{error:#}")),
+        }
+    }
+
+    fn capability_cache_health_check(&self, age_seconds: Option<u64>) -> ZapNodeHealthCheck {
+        let Some(path) = &self.capability_cache_path else {
+            let status = if self
+                .route_table
+                .routes
+                .iter()
+                .any(|route| route.requires_peer_grant.is_some())
+            {
+                ZapNodeHealthStatus::Critical
+            } else {
+                ZapNodeHealthStatus::Healthy
+            };
+            return ZapNodeHealthCheck::new(
+                "capability_cache",
+                status,
+                "capability cache is not configured",
+            );
+        };
+
+        let Some(age_seconds) = age_seconds else {
+            return ZapNodeHealthCheck::new(
+                "capability_cache",
+                ZapNodeHealthStatus::Critical,
+                "capability cache is configured but cannot be read",
+            )
+            .with_detail(path.display().to_string());
+        };
+
+        if let Some(max_age_micros) = self.capability_cache_max_age_micros {
+            let age_micros = age_seconds.saturating_mul(1_000_000);
+            if age_micros > max_age_micros {
+                return ZapNodeHealthCheck::new(
+                    "capability_cache",
+                    ZapNodeHealthStatus::Degraded,
+                    "capability cache is stale",
+                )
+                .with_detail(format!(
+                    "path={} age_seconds={} max_age_seconds={}",
+                    path.display(),
+                    age_seconds,
+                    max_age_micros / 1_000_000
+                ));
+            }
+        }
+
+        ZapNodeHealthCheck::new(
+            "capability_cache",
+            ZapNodeHealthStatus::Healthy,
+            "capability cache is fresh enough",
+        )
+        .with_detail(format!("path={} age_seconds={age_seconds}", path.display()))
+    }
+
+    fn message_policy_health_check(&self) -> ZapNodeHealthCheck {
+        if self.message_policy.default_decision == MessagePolicyDecision::Allow {
+            return ZapNodeHealthCheck::new(
+                "message_policy",
+                ZapNodeHealthStatus::Degraded,
+                "message policy default decision is allow",
+            )
+            .with_detail(format!("rules={}", self.message_policy.rules.len()));
+        }
+        ZapNodeHealthCheck::new(
+            "message_policy",
+            ZapNodeHealthStatus::Healthy,
+            "message policy default decision is fail-closed",
+        )
+        .with_detail(format!(
+            "default_decision={:?} rules={}",
+            self.message_policy.default_decision,
+            self.message_policy.rules.len()
+        ))
+    }
+
+    fn peer_trust_health_check(&self) -> ZapNodeHealthCheck {
+        let quarantined = self
+            .peer_trust
+            .values()
+            .filter(|trust| trust.status == PeerTrustStatus::Quarantined)
+            .count();
+        let revoked = self
+            .peer_trust
+            .values()
+            .filter(|trust| trust.status == PeerTrustStatus::Revoked)
+            .count();
+        let status = if revoked > 0 {
+            ZapNodeHealthStatus::Critical
+        } else if quarantined > 0 {
+            ZapNodeHealthStatus::Degraded
+        } else {
+            ZapNodeHealthStatus::Healthy
+        };
+        ZapNodeHealthCheck::new("peer_trust", status, "peer trust table evaluated").with_detail(
+            format!(
+                "peers={} quarantined={} revoked={}",
+                self.peer_trust.len(),
+                quarantined,
+                revoked
+            ),
+        )
+    }
+
+    fn runtime_error_health_check(&self, metrics: &ZapNodeMetricsSnapshot) -> ZapNodeHealthCheck {
+        let rejected_total: u64 = metrics
+            .frames_rejected_total
+            .iter()
+            .map(|counter| counter.value)
+            .sum();
+        let driver_errors_total: u64 = metrics
+            .driver_execution_errors_total
+            .iter()
+            .map(|counter| counter.value)
+            .sum();
+        if metrics.poa_attestation_failures_total > 0 {
+            return ZapNodeHealthCheck::new(
+                "runtime_errors",
+                ZapNodeHealthStatus::Critical,
+                "PoA attestation failures were observed",
+            )
+            .with_detail(format!(
+                "poa_attestation_failures={}",
+                metrics.poa_attestation_failures_total
+            ));
+        }
+        if driver_errors_total > 0 || rejected_total > 0 {
+            return ZapNodeHealthCheck::new(
+                "runtime_errors",
+                ZapNodeHealthStatus::Degraded,
+                "runtime rejection or driver error counters are nonzero",
+            )
+            .with_detail(format!(
+                "rejected_frames={rejected_total} driver_errors={driver_errors_total}"
+            ));
+        }
+        ZapNodeHealthCheck::new(
+            "runtime_errors",
+            ZapNodeHealthStatus::Healthy,
+            "runtime error counters are clear",
+        )
     }
 
     fn record_sent_frame(&self, peer: Uuid) {
@@ -5394,6 +5789,84 @@ fsync = "always"
                 value: 1
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn node_health_snapshot_reports_healthy_embedding_surface() {
+        let mut harness = node_harness_with_poa_and_message_policy(
+            SecurityConfig::default(),
+            PoaConfig::default(),
+            MessagePolicyConfig {
+                default_decision: MessagePolicyDecision::Deny,
+                rules: Vec::new(),
+            },
+        )
+        .await;
+        harness.node.receipt_log_path = Some(harness._temp.path().join("receipts.jsonl"));
+
+        let snapshot = harness.node.health_snapshot();
+        assert_eq!(snapshot.status, ZapNodeHealthStatus::Healthy);
+        assert!(snapshot.checks.iter().any(|check| {
+            check.name == "endpoint_bound" && check.status == ZapNodeHealthStatus::Healthy
+        }));
+        assert!(snapshot.checks.iter().any(|check| {
+            check.name == "message_policy" && check.status == ZapNodeHealthStatus::Healthy
+        }));
+
+        let json = harness.node.health_json().unwrap();
+        assert!(json.contains("\"status\": \"healthy\""));
+        let healthz = harness.node.healthz_text();
+        assert!(healthz.contains("status=healthy"));
+        assert!(healthz.contains("check{name=\"endpoint_bound\"}=healthy"));
+    }
+
+    #[tokio::test]
+    async fn node_health_snapshot_reports_degraded_runtime_signals() {
+        let mut harness = node_harness_with_poa_and_message_policy(
+            SecurityConfig::default(),
+            PoaConfig::default(),
+            MessagePolicyConfig {
+                default_decision: MessagePolicyDecision::Deny,
+                rules: Vec::new(),
+            },
+        )
+        .await;
+        harness.node.receipt_log_path = Some(harness._temp.path().join("receipts.jsonl"));
+        harness.node.record_rejected_frame("anti_replay");
+
+        let snapshot = harness.node.health_snapshot();
+        assert_eq!(snapshot.status, ZapNodeHealthStatus::Degraded);
+        assert!(snapshot.checks.iter().any(|check| {
+            check.name == "runtime_errors" && check.status == ZapNodeHealthStatus::Degraded
+        }));
+    }
+
+    #[tokio::test]
+    async fn node_health_snapshot_reports_critical_trust_and_audit_failures() {
+        let mut harness = node_harness_with_poa_and_message_policy(
+            SecurityConfig::default(),
+            PoaConfig::default(),
+            MessagePolicyConfig {
+                default_decision: MessagePolicyDecision::Deny,
+                rules: Vec::new(),
+            },
+        )
+        .await;
+        let registry_path = harness._temp.path().join("registry.index.toml");
+        let receipt_path = harness._temp.path().join("receipts.jsonl");
+        std::fs::write(&registry_path, "not = [valid").unwrap();
+        std::fs::write(&receipt_path, "not-json\n").unwrap();
+        harness.node.registry_path = Some(registry_path);
+        harness.node.receipt_log_path = Some(receipt_path);
+
+        let snapshot = harness.node.health_snapshot();
+        assert_eq!(snapshot.status, ZapNodeHealthStatus::Critical);
+        assert!(snapshot.checks.iter().any(|check| {
+            check.name == "registry_signature" && check.status == ZapNodeHealthStatus::Critical
+        }));
+        assert!(snapshot.checks.iter().any(|check| {
+            check.name == "receipt_log" && check.status == ZapNodeHealthStatus::Critical
+        }));
     }
 
     #[tokio::test]

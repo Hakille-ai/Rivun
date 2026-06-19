@@ -6,8 +6,13 @@ from pathlib import Path
 from uuid import UUID
 
 from zap_sdk import (
+    AGENT_CONTENT_TYPE,
+    AGENT_INTENT_SUBJECT,
     REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
     REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+    RECEIPT_REPLICATION_CONTENT_TYPE,
+    RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+    RECEIPT_SIGNATURE_DOMAIN,
     ControlFrame,
     RegistryBundleEntry,
     RegistryBundleManifest,
@@ -23,8 +28,13 @@ from zap_sdk import (
     ZapUdpClient,
     registry_index_request_frame,
     registry_bundle_manifest_request_frame,
+    receipt_body_hash,
+    receipt_signing_message,
     validate_artifact_hash,
+    validate_receipt_response_shape,
+    validate_receipt_shape,
     verify_signature_placeholder,
+    zap_domain_message,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -182,6 +192,41 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(receipt["outcome"], "accepted")
         self.assertTrue(validate_artifact_hash(receipt["body_hash"]))
         self.assertGreaterEqual(receipt["finished_at_unix_micros"], receipt["started_at_unix_micros"])
+
+    def test_receipt_helpers_validate_fixture_and_build_signing_message(self):
+        fixture = load_fixture("protocol/receipt-sample-v1.json")
+        body = fixture["body_json"]
+        receipt = body["receipts"][0]
+
+        validate_receipt_response_shape(body)
+        validate_receipt_shape(receipt)
+
+        message = receipt_signing_message(receipt)
+        self.assertTrue(message.startswith(RECEIPT_SIGNATURE_DOMAIN + b'{"receipt":'))
+        self.assertIn(b'"signer_node_id":"11111111-1111-4111-8111-111111111111"', message)
+        self.assertNotIn(b'"signature"', message)
+        self.assertEqual(
+            zap_domain_message(b"ZAP-TEST-v1", b"payload"),
+            b"ZAP-TEST-v1\x00payload",
+        )
+        try:
+            self.assertRegex(receipt_body_hash(b"receipt-body"), r"^blake3:[0-9a-f]{64}$")
+        except RuntimeError as exc:
+            self.assertIn("BLAKE3", str(exc))
+        self.assertEqual(fixture["subject"], RECEIPT_REPLICATION_RESPONSE_SUBJECT)
+        self.assertEqual(fixture["content_type"], RECEIPT_REPLICATION_CONTENT_TYPE)
+        self.assertEqual(AGENT_INTENT_SUBJECT, "zap.agent.intent")
+        self.assertEqual(AGENT_CONTENT_TYPE, "application/zap-agent+json")
+
+    def test_receipt_response_shape_rejects_invalid_body_hash(self):
+        fixture = load_fixture("protocol/receipt-sample-v1.json")
+        body = dict(fixture["body_json"])
+        receipt = dict(body["receipts"][0])
+        receipt["body_hash"] = "sha256:" + "0" * 64
+        body["receipts"] = [receipt]
+
+        with self.assertRaisesRegex(ValueError, "invalid receipt body hash"):
+            validate_receipt_response_shape(body)
 
     def test_hash_and_signature_helpers_are_explicit(self):
         self.assertTrue(validate_artifact_hash(HASH))

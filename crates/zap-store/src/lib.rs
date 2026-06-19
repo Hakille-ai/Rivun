@@ -20,6 +20,7 @@ pub const REGISTRY_INDEX_SYNC_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_PUBLICATION_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_BUNDLE_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_INSTALL_PLAN_SCHEMA_VERSION: u8 = 1;
+pub const DOMAIN_PACK_REGISTRY_SCHEMA_VERSION: u8 = 1;
 pub const DRIVER_ABI_VERSION: u16 = 1;
 pub const DRIVER_HASH_PREFIX: &str = "blake3:";
 pub const REGISTRY_INDEX_CONTENT_TYPE: &str = "application/zap-registry-index+json";
@@ -34,6 +35,7 @@ const MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-MANIFEST-v1";
 const REGISTRY_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-v1";
 const REGISTRY_PUBLICATION_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-PUBLICATION-v1";
 const REGISTRY_INSTALL_PLAN_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DRIVER-REGISTRY-INSTALL-PLAN-v1";
+const DOMAIN_PACK_REGISTRY_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DOMAIN-PACK-REGISTRY-v1";
 const PUBLIC_KEY_LEN: usize = 32;
 const SIGNATURE_LEN: usize = 64;
 
@@ -55,8 +57,12 @@ pub enum ZapStoreError {
     UnsupportedRegistryBundleSchemaVersion(u8),
     #[error("driver registry install plan schema version {0} is unsupported")]
     UnsupportedRegistryInstallPlanSchemaVersion(u8),
+    #[error("domain pack registry schema version {0} is unsupported")]
+    UnsupportedDomainPackRegistrySchemaVersion(u8),
     #[error("driver registry entry `{action}` version `{version}` is duplicated")]
     DuplicateRegistryEntry { action: String, version: String },
+    #[error("domain pack registry entry `{id}` version `{version}` is duplicated")]
+    DuplicateDomainPackRegistryEntry { id: String, version: String },
     #[error("driver registry entry version `{0}` is not a MAJOR.MINOR.PATCH version")]
     InvalidDriverVersion(String),
     #[error("driver registry version requirement `{0}` is invalid")]
@@ -143,6 +149,26 @@ pub enum ZapStoreError {
     },
     #[error("registry install plan signature verification failed")]
     InvalidRegistryInstallPlanSignature,
+    #[error("domain pack id must not be empty")]
+    EmptyDomainPackId,
+    #[error("domain pack registry is not signed")]
+    MissingDomainPackRegistrySignature,
+    #[error(
+        "domain pack registry operator public key derives node_id {derived}, but registry declares {declared}"
+    )]
+    DomainPackRegistryOperatorNodeMismatch { declared: Uuid, derived: Uuid },
+    #[error("domain pack registry signature verification failed")]
+    InvalidDomainPackRegistrySignature,
+    #[error("domain pack registry operator mismatch: expected node_id {expected}, actual {actual}")]
+    DomainPackRegistryOperatorPublicKeyMismatch { expected: Uuid, actual: Uuid },
+    #[error("domain pack artifact path `{0}` is invalid")]
+    InvalidDomainPackArtifactPath(String),
+    #[error("domain pack artifact `{path}` hash mismatch: expected {expected}, actual {actual}")]
+    DomainPackArtifactHashMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
     #[error("registry bundle path `{0}` is invalid")]
     InvalidRegistryBundlePath(String),
     #[error("registry bundle publication path/hash metadata is incomplete")]
@@ -454,6 +480,90 @@ pub struct RegistryBundleEntry {
     pub driver_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub driver_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DomainPackStatus {
+    #[default]
+    Active,
+    Deprecated,
+    Revoked,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DomainPackRisk {
+    #[default]
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DomainPackCompatibility {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_zap_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_zap_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtimes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abi_versions: Vec<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DomainPackArtifact {
+    pub path: String,
+    pub hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DomainPackRegistryEntry {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub status: DomainPackStatus,
+    pub risk: DomainPackRisk,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked_reason: Option<String>,
+    #[serde(default)]
+    pub compatibility: DomainPackCompatibility,
+    pub manifest: DomainPackArtifact,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<DomainPackArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policies: Vec<DomainPackArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schemas: Vec<DomainPackArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DomainPackRegistry {
+    pub schema_version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_node_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_public_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub entries: Vec<DomainPackRegistryEntry>,
 }
 
 impl DriverManifest {
@@ -1953,6 +2063,228 @@ impl RegistryBundleEntry {
     }
 }
 
+impl DomainPackRegistry {
+    pub fn empty(generated_by: Option<String>) -> Self {
+        Self {
+            schema_version: DOMAIN_PACK_REGISTRY_SCHEMA_VERSION,
+            generated_by,
+            channel: None,
+            operator_node_id: None,
+            operator_public_key: None,
+            signature: None,
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn from_json_str(input: &str) -> Result<Self> {
+        Ok(serde_json::from_str(input)?)
+    }
+
+    pub fn to_json_string(&self) -> Result<String> {
+        Ok(serde_json::to_string_pretty(self)?)
+    }
+
+    pub fn from_toml_str(input: &str) -> Result<Self> {
+        Ok(toml::from_str(input)?)
+    }
+
+    pub fn to_toml_string(&self) -> Result<String> {
+        Ok(toml::to_string_pretty(self)?)
+    }
+
+    pub fn add_entry(&mut self, entry: DomainPackRegistryEntry) -> Result<()> {
+        self.validate()?;
+        entry.validate()?;
+        self.clear_signature();
+        self.entries
+            .retain(|existing| !(existing.id == entry.id && existing.version == entry.version));
+        self.entries.push(entry);
+        self.entries.sort_by(|left, right| {
+            left.id
+                .cmp(&right.id)
+                .then_with(|| left.version.cmp(&right.version))
+        });
+        self.validate()
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != DOMAIN_PACK_REGISTRY_SCHEMA_VERSION {
+            return Err(ZapStoreError::UnsupportedDomainPackRegistrySchemaVersion(
+                self.schema_version,
+            ));
+        }
+
+        let mut seen = std::collections::HashSet::new();
+        for entry in &self.entries {
+            entry.validate()?;
+            if !seen.insert((entry.id.clone(), entry.version.clone())) {
+                return Err(ZapStoreError::DuplicateDomainPackRegistryEntry {
+                    id: entry.id.clone(),
+                    version: entry.version.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn sign(&mut self, operator: &Keypair) -> Result<()> {
+        self.validate()?;
+        self.operator_node_id = Some(operator.node_id());
+        self.operator_public_key =
+            Some(STANDARD_NO_PAD.encode(operator.verifying_key().to_bytes()));
+        self.signature = None;
+
+        let signing_key = SigningKey::from_bytes(&operator.secret_bytes());
+        let signature: Signature = signing_key.sign(&self.signing_message()?);
+        self.signature = Some(STANDARD_NO_PAD.encode(signature.to_bytes()));
+        Ok(())
+    }
+
+    pub fn verify_signature(&self) -> Result<()> {
+        self.validate()?;
+        let operator_node_id = self
+            .operator_node_id
+            .ok_or(ZapStoreError::MissingDomainPackRegistrySignature)?;
+        let operator_public_key = self
+            .operator_public_key
+            .as_deref()
+            .ok_or(ZapStoreError::MissingDomainPackRegistrySignature)?;
+        let signature = self
+            .signature
+            .as_deref()
+            .ok_or(ZapStoreError::MissingDomainPackRegistrySignature)?;
+
+        let public_key_bytes =
+            decode_fixed::<PUBLIC_KEY_LEN>(operator_public_key, "domain_pack_registry_public_key")?;
+        let derived_node_id = node_id_from_public_key(&public_key_bytes);
+        if derived_node_id != operator_node_id {
+            return Err(ZapStoreError::DomainPackRegistryOperatorNodeMismatch {
+                declared: operator_node_id,
+                derived: derived_node_id,
+            });
+        }
+
+        let verifying_key = VerifyingKey::from_bytes(&public_key_bytes)?;
+        let signature_bytes =
+            decode_fixed::<SIGNATURE_LEN>(signature, "domain_pack_registry_signature")?;
+        let signature = Signature::from_bytes(&signature_bytes);
+        verifying_key
+            .verify(&self.signing_message()?, &signature)
+            .map_err(|_| ZapStoreError::InvalidDomainPackRegistrySignature)
+    }
+
+    pub fn verify_signature_for_operator(&self, expected_operator_public_key: &str) -> Result<()> {
+        self.verify_signature()?;
+        let declared_public_key = self
+            .operator_public_key
+            .as_deref()
+            .ok_or(ZapStoreError::MissingDomainPackRegistrySignature)?;
+        let expected_bytes =
+            decode_fixed::<PUBLIC_KEY_LEN>(expected_operator_public_key, "expected_public_key")?;
+        let declared_bytes = decode_fixed::<PUBLIC_KEY_LEN>(
+            declared_public_key,
+            "domain_pack_registry_operator_public_key",
+        )?;
+        if declared_bytes != expected_bytes {
+            return Err(ZapStoreError::DomainPackRegistryOperatorPublicKeyMismatch {
+                expected: node_id_from_public_key(&expected_bytes),
+                actual: node_id_from_public_key(&declared_bytes),
+            });
+        }
+        Ok(())
+    }
+
+    fn signing_message(&self) -> Result<Vec<u8>> {
+        let payload = DomainPackRegistrySigningPayload {
+            schema_version: self.schema_version,
+            generated_by: self.generated_by.as_deref(),
+            channel: self.channel.as_deref(),
+            operator_node_id: self
+                .operator_node_id
+                .ok_or(ZapStoreError::MissingDomainPackRegistrySignature)?,
+            operator_public_key: self
+                .operator_public_key
+                .as_deref()
+                .ok_or(ZapStoreError::MissingDomainPackRegistrySignature)?,
+            entries: &self.entries,
+        };
+        let encoded = serde_json::to_vec(&payload)?;
+        let mut message =
+            Vec::with_capacity(DOMAIN_PACK_REGISTRY_SIGNATURE_DOMAIN.len() + encoded.len());
+        message.extend_from_slice(DOMAIN_PACK_REGISTRY_SIGNATURE_DOMAIN);
+        message.extend_from_slice(&encoded);
+        Ok(message)
+    }
+
+    fn clear_signature(&mut self) {
+        self.operator_node_id = None;
+        self.operator_public_key = None;
+        self.signature = None;
+    }
+}
+
+impl DomainPackRegistryEntry {
+    pub fn validate(&self) -> Result<()> {
+        if self.id.trim().is_empty() {
+            return Err(ZapStoreError::EmptyDomainPackId);
+        }
+        DriverVersion::parse(&self.version)?;
+        self.compatibility.validate()?;
+        self.manifest.validate()?;
+        if let Some(archive) = &self.archive {
+            archive.validate()?;
+        }
+        for policy in &self.policies {
+            policy.validate()?;
+        }
+        for schema in &self.schemas {
+            schema.validate()?;
+        }
+        Ok(())
+    }
+}
+
+impl DomainPackCompatibility {
+    pub fn validate(&self) -> Result<()> {
+        if let Some(version) = &self.min_zap_version {
+            DriverVersion::parse(version)?;
+        }
+        if let Some(version) = &self.max_zap_version {
+            DriverVersion::parse(version)?;
+        }
+        Ok(())
+    }
+}
+
+impl DomainPackArtifact {
+    pub fn new(path: impl Into<String>, bytes: &[u8], content_type: Option<String>) -> Self {
+        Self {
+            path: path.into(),
+            hash: artifact_hash(bytes),
+            content_type,
+            size_bytes: Some(bytes.len() as u64),
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        validate_domain_pack_artifact_path(&self.path)?;
+        validate_driver_hash(&self.hash)
+    }
+
+    pub fn verify_bytes(&self, bytes: &[u8]) -> Result<()> {
+        self.validate()?;
+        let actual = artifact_hash(bytes);
+        if actual != self.hash {
+            return Err(ZapStoreError::DomainPackArtifactHashMismatch {
+                path: self.path.clone(),
+                expected: self.hash.clone(),
+                actual,
+            });
+        }
+        Ok(())
+    }
+}
+
 impl DriverRegistryEntry {
     pub fn from_manifest(manifest: &DriverManifest, manifest_path: Option<String>) -> Self {
         Self {
@@ -1992,6 +2324,16 @@ struct RegistrySigningPayload<'a> {
     operator_node_id: Uuid,
     operator_public_key: &'a str,
     entries: &'a [DriverRegistryEntry],
+}
+
+#[derive(Debug, Serialize)]
+struct DomainPackRegistrySigningPayload<'a> {
+    schema_version: u8,
+    generated_by: Option<&'a str>,
+    channel: Option<&'a str>,
+    operator_node_id: Uuid,
+    operator_public_key: &'a str,
+    entries: &'a [DomainPackRegistryEntry],
 }
 
 #[derive(Debug, Serialize)]
@@ -2035,6 +2377,11 @@ pub fn registry_hash(registry: &DriverRegistry) -> Result<String> {
     Ok(artifact_hash(&serde_json::to_vec(registry)?))
 }
 
+pub fn domain_pack_registry_hash(registry: &DomainPackRegistry) -> Result<String> {
+    registry.validate()?;
+    Ok(artifact_hash(&serde_json::to_vec(registry)?))
+}
+
 fn validate_driver_hash(hash: &str) -> Result<()> {
     if !hash.starts_with(DRIVER_HASH_PREFIX)
         || hash.len() != DRIVER_HASH_PREFIX.len() + 64
@@ -2045,6 +2392,15 @@ fn validate_driver_hash(hash: &str) -> Result<()> {
         return Err(ZapStoreError::InvalidHash(hash.to_string()));
     }
     Ok(())
+}
+
+fn validate_domain_pack_artifact_path(path: &str) -> Result<()> {
+    validate_bundle_path(path).map_err(|error| match error {
+        ZapStoreError::InvalidRegistryBundlePath(path) => {
+            ZapStoreError::InvalidDomainPackArtifactPath(path)
+        }
+        other => other,
+    })
 }
 
 fn compare_registry_field<T>(field: &'static str, expected: T, actual: T) -> Result<()>
@@ -2195,6 +2551,46 @@ mod tests {
 
     fn wasm() -> &'static [u8] {
         b"(module (memory (export \"memory\") 1))"
+    }
+
+    fn domain_pack_entry(id: &str, version: &str) -> DomainPackRegistryEntry {
+        DomainPackRegistryEntry {
+            id: id.to_string(),
+            name: format!("{id} pack"),
+            version: version.to_string(),
+            status: DomainPackStatus::Active,
+            risk: DomainPackRisk::High,
+            description: Some("Domain pack for integration tests".to_string()),
+            deprecated_reason: None,
+            revoked_reason: None,
+            compatibility: DomainPackCompatibility {
+                min_zap_version: Some("1.0.0".to_string()),
+                max_zap_version: None,
+                runtimes: vec!["wasmtime".to_string()],
+                abi_versions: vec![DRIVER_ABI_VERSION],
+            },
+            manifest: DomainPackArtifact::new(
+                format!("{id}/pack.toml"),
+                b"schema_version = 1\nid = \"test\"\n",
+                Some("application/toml".to_string()),
+            ),
+            archive: Some(DomainPackArtifact::new(
+                format!("{id}/{id}-pack.tar.zst"),
+                b"archive",
+                Some("application/zstd".to_string()),
+            )),
+            policies: vec![DomainPackArtifact::new(
+                format!("{id}/policies/action-policy.toml"),
+                b"[[rules]]\neffect = \"allow\"\n",
+                Some("application/toml".to_string()),
+            )],
+            schemas: vec![DomainPackArtifact::new(
+                format!("{id}/schemas/subjects.md"),
+                b"# Subjects\n",
+                Some("text/markdown".to_string()),
+            )],
+            labels: vec!["phase-4".to_string(), "domain-pack".to_string()],
+        }
     }
 
     #[test]
@@ -3037,6 +3433,122 @@ mod tests {
                 artifact: "driver",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn domain_pack_registry_round_trips_json_and_toml() {
+        let mut registry = DomainPackRegistry::empty(Some("test".to_string()));
+        registry.channel = Some("stable".to_string());
+        registry
+            .add_entry(domain_pack_entry("agentic-dev", "1.2.3"))
+            .unwrap();
+
+        let json = registry.to_json_string().unwrap();
+        let from_json = DomainPackRegistry::from_json_str(&json).unwrap();
+        assert_eq!(from_json, registry);
+
+        let toml = registry.to_toml_string().unwrap();
+        let from_toml = DomainPackRegistry::from_toml_str(&toml).unwrap();
+        assert_eq!(from_toml, registry);
+        assert_eq!(
+            domain_pack_registry_hash(&registry).unwrap(),
+            domain_pack_registry_hash(&from_toml).unwrap()
+        );
+    }
+
+    #[test]
+    fn domain_pack_registry_signs_and_detects_tampering() {
+        let operator = Keypair::generate();
+        let mut registry = DomainPackRegistry::empty(Some("test".to_string()));
+        registry
+            .add_entry(domain_pack_entry("cloud-ops", "0.3.0"))
+            .unwrap();
+        registry.sign(&operator).unwrap();
+        let operator_public_key = registry.operator_public_key.clone().unwrap();
+
+        registry.verify_signature().unwrap();
+        registry
+            .verify_signature_for_operator(&operator_public_key)
+            .unwrap();
+
+        registry.entries[0].risk = DomainPackRisk::Critical;
+        assert!(matches!(
+            registry.verify_signature(),
+            Err(ZapStoreError::InvalidDomainPackRegistrySignature)
+        ));
+    }
+
+    #[test]
+    fn domain_pack_registry_add_entry_clears_signature() {
+        let operator = Keypair::generate();
+        let mut registry = DomainPackRegistry::empty(Some("test".to_string()));
+        registry
+            .add_entry(domain_pack_entry("industrial", "1.0.0"))
+            .unwrap();
+        registry.sign(&operator).unwrap();
+        assert!(registry.signature.is_some());
+
+        registry
+            .add_entry(domain_pack_entry("personal-ai", "1.0.0"))
+            .unwrap();
+        assert!(registry.signature.is_none());
+        assert_eq!(registry.entries.len(), 2);
+    }
+
+    #[test]
+    fn domain_pack_registry_rejects_duplicates() {
+        let entry = domain_pack_entry("smart-building", "2.0.0");
+        let registry = DomainPackRegistry {
+            schema_version: DOMAIN_PACK_REGISTRY_SCHEMA_VERSION,
+            generated_by: None,
+            channel: None,
+            operator_node_id: None,
+            operator_public_key: None,
+            signature: None,
+            entries: vec![entry.clone(), entry],
+        };
+
+        assert!(matches!(
+            registry.validate(),
+            Err(ZapStoreError::DuplicateDomainPackRegistryEntry {
+                id,
+                version
+            }) if id == "smart-building" && version == "2.0.0"
+        ));
+    }
+
+    #[test]
+    fn domain_pack_registry_rejects_path_traversal() {
+        let mut entry = domain_pack_entry("healthcare", "1.0.0");
+        entry.manifest.path = "../pack.toml".to_string();
+
+        assert!(matches!(
+            entry.validate(),
+            Err(ZapStoreError::InvalidDomainPackArtifactPath(_))
+        ));
+    }
+
+    #[test]
+    fn domain_pack_artifact_verifies_hash() {
+        let artifact = DomainPackArtifact::new("packs/finance/pack.toml", b"expected", None);
+        artifact.verify_bytes(b"expected").unwrap();
+
+        assert!(matches!(
+            artifact.verify_bytes(b"tampered"),
+            Err(ZapStoreError::DomainPackArtifactHashMismatch { path, .. })
+                if path == "packs/finance/pack.toml"
+        ));
+    }
+
+    #[test]
+    fn domain_pack_registry_validates_compatibility_versions() {
+        let mut entry = domain_pack_entry("finance", "1.0.0");
+        entry.compatibility.min_zap_version = Some("v1".to_string());
+
+        assert!(matches!(
+            entry.validate(),
+            Err(ZapStoreError::InvalidDriverVersion(version)) if version == "v1"
         ));
     }
 

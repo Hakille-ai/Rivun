@@ -311,6 +311,45 @@ required_json_fields = ["message"]
 }
 
 #[test]
+fn schema_export_includes_protocol_constants_and_fixture_catalog() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args(["schema", "export"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["agent"]["content_type"], "application/zap-agent+json");
+    assert!(
+        json["agent"]["subjects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|subject| subject == "zap.agent.intent")
+    );
+    assert!(
+        json["controls"]["receipts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|control| control["subject"] == "zap.receipts.request")
+    );
+    assert!(
+        json["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fixture| fixture["path"] == "fixtures/protocol/receipt-sample-v1.json")
+    );
+}
+
+#[test]
 fn policy_evaluate_strict_enforces_required_poa() {
     let dir = tempdir().unwrap();
     let policy_path = dir.path().join("policy.toml");
@@ -5222,6 +5261,128 @@ fn memory_put_query_and_verify_round_trip() {
     let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
     assert_eq!(report["verified"], true);
     assert_eq!(report["records"], 1);
+}
+
+#[test]
+fn memory_export_evidence_and_incident_snapshot_are_payload_free() {
+    let dir = tempdir().unwrap();
+    let local = Keypair::generate();
+    let peer = Keypair::generate();
+    let memory_path = dir.path().join("memory.jsonl");
+    let receipt_path = dir.path().join("receipts.jsonl");
+
+    let put = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "memory",
+            "put",
+            "--path",
+            memory_path.to_str().unwrap(),
+            "--namespace",
+            "incident",
+            "--subject",
+            "case.note",
+            "--metadata",
+            r#"{"secret":"do-not-export"}"#,
+            "--payload",
+            "secret-payload",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        put.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&put.stdout),
+        String::from_utf8_lossy(&put.stderr)
+    );
+
+    let frame = ZapFrame::with_timestamp(
+        peer.node_id(),
+        local.node_id(),
+        ZapFlags::SIGNED,
+        123,
+        Bytes::from_static(b"receipt-payload"),
+    )
+    .unwrap();
+    let signed = sign_frame(&peer, &frame).unwrap();
+    let receipt =
+        SignedActionReceipt::new(&local, &signed, "case.note", Some(b"ok"), 456, None).unwrap();
+    std::fs::write(&receipt_path, receipt.to_json_line().unwrap()).unwrap();
+
+    let evidence = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "memory",
+            "export-evidence",
+            "--path",
+            memory_path.to_str().unwrap(),
+            "--receipts",
+            receipt_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        evidence.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&evidence.stdout),
+        String::from_utf8_lossy(&evidence.stderr)
+    );
+    let evidence_text = String::from_utf8_lossy(&evidence.stdout);
+    assert!(!evidence_text.contains("secret-payload"));
+    assert!(!evidence_text.contains("do-not-export"));
+    let evidence_json: serde_json::Value = serde_json::from_slice(&evidence.stdout).unwrap();
+    assert_eq!(evidence_json["valid"], true);
+    assert_eq!(evidence_json["memory"]["records"], 1);
+    assert_eq!(
+        evidence_json["memory"]["records_summary"][0]["subject"],
+        "case.note"
+    );
+    assert_eq!(evidence_json["receipts"]["receipts"], 1);
+    assert_eq!(
+        evidence_json["receipts"]["subjects"]["case.note"],
+        serde_json::Value::from(1)
+    );
+
+    let config_path = write_config(&dir, &local, &peer, public_key_string(&peer));
+    let mut config = std::fs::read_to_string(&config_path).unwrap();
+    config.push_str(&format!(
+        r#"
+[receipts]
+path = '{}'
+
+[memory]
+path = '{}'
+"#,
+        receipt_path.display(),
+        memory_path.display()
+    ));
+    std::fs::write(&config_path, config).unwrap();
+
+    let snapshot = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "incident",
+            "snapshot",
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        snapshot.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&snapshot.stdout),
+        String::from_utf8_lossy(&snapshot.stderr)
+    );
+    let snapshot_text = String::from_utf8_lossy(&snapshot.stdout);
+    assert!(!snapshot_text.contains("secret-payload"));
+    assert!(!snapshot_text.contains("do-not-export"));
+    assert!(!snapshot_text.contains("receipt-payload"));
+    let snapshot_json: serde_json::Value = serde_json::from_slice(&snapshot.stdout).unwrap();
+    assert_eq!(snapshot_json["valid"], true);
+    assert_eq!(snapshot_json["doctor"]["status"], "needs_attention");
+    assert_eq!(snapshot_json["memory"]["verified"], true);
+    assert_eq!(snapshot_json["receipts"]["verified"], true);
+    assert_eq!(snapshot_json["config_summary"]["receipt_log_enabled"], true);
+    assert_eq!(snapshot_json["config_summary"]["memory_enabled"], true);
 }
 
 #[test]

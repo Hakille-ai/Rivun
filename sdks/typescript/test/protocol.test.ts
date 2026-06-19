@@ -3,16 +3,26 @@ import { createSocket } from "node:dgram";
 import test from "node:test";
 
 import {
+  AGENT_CONTENT_TYPE,
+  AGENT_INTENT_SUBJECT,
   ControlFrame,
   REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
   REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+  RECEIPT_REPLICATION_CONTENT_TYPE,
+  RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+  RECEIPT_SIGNATURE_DOMAIN,
   ZapStoreClient,
   ZapUdpClient,
   artifactHash,
   registryBundleManifestRequestFrame,
+  receiptBodyHash,
+  receiptSigningMessage,
   signatureVerificationPlaceholder,
   validateArtifactHash,
+  validateReceiptResponseShape,
+  validateReceiptShape,
   validateRegistryBundleManifestResponse,
+  zapDomainMessage,
 } from "../src/index.ts";
 import type { DriverRegistryEntry, RegistryInstallPlanEntry, RegistryInstallPlanRequest } from "../src/index.ts";
 
@@ -73,6 +83,42 @@ test("hash and signature helpers are explicit", () => {
   const status = signatureVerificationPlaceholder("registry");
   assert.equal(status.supported, false);
   assert.match(status.reason, /Ed25519/);
+});
+
+test("receipt crypto helpers validate shape and build exact messages", () => {
+  const receipt = {
+    schema_version: 1,
+    receipt_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    node_id: "11111111-1111-4111-8111-111111111111",
+    frame_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    subject: "zap.registry.index.request",
+    content_type: "application/zap-registry-index+json",
+    body_hash: HASH,
+    policy_decision: "allow",
+    outcome: "accepted",
+    started_at_unix_micros: 1893456000000000,
+    finished_at_unix_micros: 1893456000000100,
+    signer_public_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    signature: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  };
+
+  validateReceiptShape(receipt);
+  validateReceiptResponseShape({
+    schema_version: 1,
+    request_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    truncated: false,
+    receipts: [receipt],
+  });
+  const message = Buffer.from(receiptSigningMessage(receipt)).toString("utf8");
+  assert.equal(message.startsWith(`${RECEIPT_SIGNATURE_DOMAIN}{"receipt":`), true);
+  assert.match(message, /"signer_node_id":"11111111-1111-4111-8111-111111111111"/);
+  assert.doesNotMatch(message, /"signature"/);
+  assert.deepEqual(zapDomainMessage("ZAP-TEST-v1", Buffer.from("payload")), Buffer.from("ZAP-TEST-v1\0payload"));
+  assert.match(receiptBodyHash(Buffer.from("receipt-body")), /^blake3:[0-9a-f]{64}$/);
+  assert.equal(RECEIPT_REPLICATION_RESPONSE_SUBJECT, "zap.receipts.response");
+  assert.equal(RECEIPT_REPLICATION_CONTENT_TYPE, "application/zap-receipts+json");
+  assert.equal(AGENT_INTENT_SUBJECT, "zap.agent.intent");
+  assert.equal(AGENT_CONTENT_TYPE, "application/zap-agent+json");
 });
 
 test("install plan types carry ABI requirements and migrations", () => {

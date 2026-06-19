@@ -54,17 +54,16 @@ for example `policy_default_allow`, `registry_signature_invalid`,
 incident id in logs and receipt metadata rather than metric labels.
 
 Prometheus `up{job="zap-node"}` is the scrapeability signal used by the
-production rules. Health-check details are still produced by the ops health
-configuration and `zap doctor`, but `zap-node` does not currently emit a
-dedicated node-health status gauge. Driver latency histograms are also not
-emitted yet; use driver error rate and receipt/PoA failures for production
-paging.
+production rules. Driver latency histograms are not emitted yet; use driver
+error rate and receipt/PoA failures for production paging.
 
 `zap-node` exposes this contract as an in-process readiness surface through
-`ZapNode::metrics_snapshot()` and `ZapNode::metrics_prometheus_text()`. The
-daemon does not open a metrics HTTP endpoint by itself; deployments that need
-Prometheus scraping should mount the text output behind their existing sidecar,
-supervisor, or embedding service and apply the bind/path policy from
+`ZapNode::metrics_snapshot()`, `ZapNode::metrics_prometheus_text()`,
+`ZapNode::health_snapshot()`, `ZapNode::health_json()`, and
+`ZapNode::healthz_text()`. The daemon does not open a metrics or health HTTP
+endpoint by itself; deployments that need Prometheus scraping or `/healthz`
+should mount the text/JSON output behind their existing sidecar, supervisor, or
+embedding service and apply the bind/path policy from
 `crates/zap-ops/config/observability/production.toml`.
 
 ## Health Checks
@@ -79,6 +78,17 @@ shape. The minimum production set is:
 
 Health reports should be stale after 60 seconds unless the deployment uses a
 slower control loop.
+
+`ZapNode::health_snapshot()` returns `healthy`, `degraded`, or `critical` plus
+named checks for endpoint bind status, registry signature validity, registry
+bundle loadability, receipt log verification, capability cache freshness,
+message policy posture, peer trust, and runtime error counters. `critical`
+means the node has lost a trust or audit invariant, such as invalid registry
+signature, invalid receipt log, unreadable required capability cache, revoked
+peer, or PoA attestation failures. `degraded` means traffic can continue while
+operators investigate weaker posture, such as default-allow message policy,
+missing receipt log configuration, quarantined peers, stale capability cache, or
+nonzero runtime rejection/driver error counters.
 
 ## Alerts
 

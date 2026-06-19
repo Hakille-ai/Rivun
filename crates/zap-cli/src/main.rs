@@ -43,9 +43,10 @@ use zap_envelope::{
 use zap_ledger::{
     DEFAULT_RECEIPT_REPLICATION_LIMIT, RECEIPT_REPLICATION_CONTENT_TYPE,
     RECEIPT_REPLICATION_REQUEST_SUBJECT, RECEIPT_REPLICATION_RESPONSE_SUBJECT,
-    ReceiptReplicationRequest, ReceiptReplicationResponse, SignedActionReceipt,
+    RECEIPT_SCHEMA_VERSION, ReceiptReplicationRequest, ReceiptReplicationResponse,
+    SignedActionReceipt,
 };
-use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
+use zap_memory::{JsonlMemoryStore, MEMORY_SCHEMA_VERSION, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
     DISCOVERY_ANNOUNCE_SUBJECT, DISCOVERY_CONTENT_TYPE, DISCOVERY_QUERY_SUBJECT,
@@ -242,6 +243,11 @@ enum Commands {
     Receipts {
         #[command(subcommand)]
         command: ReceiptsCommand,
+    },
+    /// Capture bounded incident evidence without raw secrets or payloads.
+    Incident {
+        #[command(subcommand)]
+        command: IncidentCommand,
     },
     /// Create or sign Proof-of-Action attestation messages.
     Poa {
@@ -667,6 +673,18 @@ enum MemoryCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Export a payload-free evidence bundle from memory and optional receipts.
+    ExportEvidence {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        receipts: Option<PathBuf>,
+        /// Write the bundle to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -818,6 +836,37 @@ enum SchemaCommand {
         contract: PathBuf,
         #[arg(long)]
         json: bool,
+    },
+    /// Export machine-readable protocol constants and known schema contracts.
+    Export {
+        /// Write the schema source to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IncidentCommand {
+    /// Write a bounded JSON snapshot for incident triage and postmortems.
+    Snapshot {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        /// Override or provide a memory JSONL path. Defaults to [memory].path when configured.
+        #[arg(long)]
+        memory: Option<PathBuf>,
+        /// Override or provide a receipt JSONL path. Defaults to [receipts].path when configured.
+        #[arg(long)]
+        receipts: Option<PathBuf>,
+        /// Include a capability cache verification summary.
+        #[arg(long)]
+        capability_cache: Option<PathBuf>,
+        /// Write the snapshot to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -1544,6 +1593,7 @@ async fn async_main() -> Result<()> {
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command).await,
         Commands::Receipts { command } => receipts(command).await,
+        Commands::Incident { command } => incident(command),
         Commands::Poa { command } => poa(command).await,
         Commands::Bench { command } => bench(command),
     }
@@ -3124,6 +3174,201 @@ fn normalize_path_for_comparison(path: &Path) -> Result<PathBuf> {
     Ok(path.components().collect())
 }
 
+fn incident(command: IncidentCommand) -> Result<()> {
+    match command {
+        IncidentCommand::Snapshot {
+            config,
+            memory,
+            receipts,
+            capability_cache,
+            out,
+            force,
+        } => incident_snapshot(IncidentSnapshotOptions {
+            config_path: &config,
+            memory_path: memory.as_deref(),
+            receipts_path: receipts.as_deref(),
+            capability_cache_path: capability_cache.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
+    }
+}
+
+struct IncidentSnapshotOptions<'a> {
+    config_path: &'a Path,
+    memory_path: Option<&'a Path>,
+    receipts_path: Option<&'a Path>,
+    capability_cache_path: Option<&'a Path>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct IncidentSnapshot {
+    schema_version: u8,
+    generated_at_micros: u64,
+    config: String,
+    valid: bool,
+    doctor: DoctorReport,
+    config_summary: Option<IncidentConfigSummary>,
+    memory: Option<EvidenceMemorySummary>,
+    receipts: Option<EvidenceReceiptSummary>,
+    capability_cache: Option<IncidentCapabilityCacheSummary>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct IncidentConfigSummary {
+    node_id: String,
+    bind: String,
+    peers: usize,
+    drivers: usize,
+    routes: usize,
+    require_signed: bool,
+    registry_enabled: bool,
+    registry_signature_required: bool,
+    receipt_log_enabled: bool,
+    memory_enabled: bool,
+    capability_cache_enabled: bool,
+    message_policy_default_decision: &'static str,
+    message_policy_rules: usize,
+    message_schema_contracts: usize,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct IncidentCapabilityCacheSummary {
+    path: String,
+    verified: bool,
+    entries: Option<usize>,
+    errors: Vec<String>,
+}
+
+fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
+    let loaded = ZapNodeConfig::from_path(options.config_path);
+    let (config, validation, doctor) = match loaded {
+        Ok(config) => match config.validate() {
+            Ok(validation) => {
+                let doctor = build_doctor_report(options.config_path, &validation);
+                (Some(config), Some(validation), doctor)
+            }
+            Err(error) => (
+                Some(config),
+                None,
+                DoctorReport {
+                    config: options.config_path.display().to_string(),
+                    status: "failed".to_string(),
+                    score: 0,
+                    summary: "configuration validation failed".to_string(),
+                    checks: vec![DoctorCheck::fail("config validation", format!("{error:#}"))],
+                    warnings: Vec::new(),
+                    error: Some(format!("{error:#}")),
+                },
+            ),
+        },
+        Err(error) => (
+            None,
+            None,
+            DoctorReport {
+                config: options.config_path.display().to_string(),
+                status: "failed".to_string(),
+                score: 0,
+                summary: "configuration could not be loaded".to_string(),
+                checks: vec![DoctorCheck::fail("config load", format!("{error:#}"))],
+                warnings: Vec::new(),
+                error: Some(format!("{error:#}")),
+            },
+        ),
+    };
+
+    let memory_path = options.memory_path.map(Path::to_path_buf).or_else(|| {
+        config
+            .as_ref()
+            .and_then(|config| config.memory.path.clone())
+    });
+    let receipts_path = options.receipts_path.map(Path::to_path_buf).or_else(|| {
+        config
+            .as_ref()
+            .and_then(|config| config.receipts.path.clone())
+    });
+    let capability_cache_path = options
+        .capability_cache_path
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            config
+                .as_ref()
+                .and_then(|config| config.capability_cache.path.clone())
+        });
+
+    let config_summary = validation.as_ref().map(|report| IncidentConfigSummary {
+        node_id: report.node_id.to_string(),
+        bind: report.bind.to_string(),
+        peers: report.peer_count,
+        drivers: report.driver_count,
+        routes: report.route_count,
+        require_signed: report.require_signed,
+        registry_enabled: report.registry_enabled,
+        registry_signature_required: report.registry_signature_required,
+        receipt_log_enabled: report.receipt_log_enabled,
+        memory_enabled: report.memory_enabled,
+        capability_cache_enabled: report.capability_cache_enabled,
+        message_policy_default_decision: policy_decision_name(
+            report.message_policy_default_decision,
+        ),
+        message_policy_rules: report.message_policy_rule_count,
+        message_schema_contracts: report.message_schema_contract_count,
+        warnings: report.warnings.clone(),
+    });
+    let memory = memory_path.as_deref().map(summarize_memory_evidence);
+    let receipts = receipts_path.as_deref().map(summarize_receipt_evidence);
+    let capability_cache = capability_cache_path
+        .as_deref()
+        .map(summarize_capability_cache_for_incident);
+    let valid = doctor.status != "failed"
+        && memory
+            .as_ref()
+            .is_none_or(|memory| memory.verified && memory.errors.is_empty())
+        && receipts
+            .as_ref()
+            .is_none_or(|receipts| receipts.verified && receipts.errors.is_empty())
+        && capability_cache
+            .as_ref()
+            .is_none_or(|cache| cache.verified && cache.errors.is_empty());
+    let snapshot = IncidentSnapshot {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        config: options.config_path.display().to_string(),
+        valid,
+        doctor,
+        config_summary,
+        memory,
+        receipts,
+        capability_cache,
+        limitations: vec![
+            "snapshot omits key material, transport keys, raw payloads, memory metadata, and raw receipt signatures".to_string(),
+            "runtime process state, network captures, and live /metrics HTTP output are not collected by this bounded CLI snapshot".to_string(),
+        ],
+    };
+    write_json_output(&snapshot, options.out, options.force)
+}
+
+fn summarize_capability_cache_for_incident(path: &Path) -> IncidentCapabilityCacheSummary {
+    match JsonlCapabilityCache::open(path).verify() {
+        Ok(report) => IncidentCapabilityCacheSummary {
+            path: path.display().to_string(),
+            verified: true,
+            entries: Some(report.entries),
+            errors: Vec::new(),
+        },
+        Err(error) => IncidentCapabilityCacheSummary {
+            path: path.display().to_string(),
+            verified: false,
+            entries: None,
+            errors: vec![format!("{error:#}")],
+        },
+    }
+}
+
 async fn certify_frame_with_network_poa(
     config: &ZapNodeConfig,
     endpoint: &ZapEndpoint,
@@ -4354,6 +4599,12 @@ fn memory(command: MemoryCommand) -> Result<()> {
             force,
             json,
         } => memory_prune(&path, before_created_at_micros, &out, force, json),
+        MemoryCommand::ExportEvidence {
+            path,
+            receipts,
+            out,
+            force,
+        } => memory_export_evidence(&path, receipts.as_deref(), out.as_deref(), force),
     }
 }
 
@@ -4492,6 +4743,274 @@ fn memory_prune(
         println!("pruned_entries={pruned}");
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceBundle {
+    schema_version: u8,
+    generated_at_micros: u64,
+    valid: bool,
+    memory: EvidenceMemorySummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipts: Option<EvidenceReceiptSummary>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceMemorySummary {
+    path: String,
+    verified: bool,
+    entries: usize,
+    records: usize,
+    tombstones: usize,
+    records_summary: Vec<EvidenceMemoryRecordSummary>,
+    tombstones_summary: Vec<EvidenceMemoryTombstoneSummary>,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceMemoryRecordSummary {
+    id: String,
+    namespace: String,
+    subject: String,
+    content_type: String,
+    body_hash: String,
+    previous_entry_hash: Option<String>,
+    entry_hash: Option<String>,
+    source_node: Option<String>,
+    frame_hash: Option<String>,
+    created_at_micros: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceMemoryTombstoneSummary {
+    id: String,
+    record_id: String,
+    namespace: String,
+    previous_entry_hash: Option<String>,
+    entry_hash: Option<String>,
+    reason_hash: Option<String>,
+    created_at_micros: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceReceiptSummary {
+    path: String,
+    verified: bool,
+    receipts: usize,
+    first_processed_at_micros: Option<u64>,
+    last_processed_at_micros: Option<u64>,
+    subjects: BTreeMap<String, usize>,
+    signers: BTreeMap<String, usize>,
+    receipt_hashes: Vec<String>,
+    errors: Vec<String>,
+}
+
+fn memory_export_evidence(
+    path: &Path,
+    receipts: Option<&Path>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let memory = summarize_memory_evidence(path);
+    let receipts = receipts.map(summarize_receipt_evidence);
+    let valid = memory.verified
+        && memory.errors.is_empty()
+        && receipts
+            .as_ref()
+            .is_none_or(|receipts| receipts.verified && receipts.errors.is_empty());
+    let bundle = EvidenceBundle {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        valid,
+        memory,
+        receipts,
+        limitations: vec![
+            "memory payload bytes, metadata values, key material, and raw receipt signatures are not embedded".to_string(),
+            "re-verify the referenced memory JSONL with `zap memory verify` and receipts with `zap receipts verify`".to_string(),
+        ],
+    };
+    write_json_output(&bundle, out, force)
+}
+
+fn summarize_memory_evidence(path: &Path) -> EvidenceMemorySummary {
+    let store = JsonlMemoryStore::open(path);
+    let verification = store.verify();
+    let mut summary = EvidenceMemorySummary {
+        path: path.display().to_string(),
+        verified: verification.is_ok(),
+        entries: 0,
+        records: 0,
+        tombstones: 0,
+        records_summary: Vec::new(),
+        tombstones_summary: Vec::new(),
+        errors: Vec::new(),
+    };
+
+    match verification {
+        Ok(report) => {
+            summary.entries = report.entries;
+            summary.records = report.records;
+            summary.tombstones = report.tombstones;
+        }
+        Err(error) => {
+            summary.errors.push(format!("{error:#}"));
+            return summary;
+        }
+    }
+
+    let input = match fs::read_to_string(path) {
+        Ok(input) => input,
+        Err(error) => {
+            summary.errors.push(format!(
+                "failed to read memory JSONL {}: {error}",
+                path.display()
+            ));
+            return summary;
+        }
+    };
+
+    for (index, line) in input.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(error) => {
+                summary
+                    .errors
+                    .push(format!("line {} is invalid JSON: {error}", index + 1));
+                continue;
+            }
+        };
+        if value.get("record_id").is_some() {
+            summary
+                .tombstones_summary
+                .push(memory_tombstone_summary(&value));
+        } else {
+            summary.records_summary.push(memory_record_summary(&value));
+        }
+    }
+    summary
+}
+
+fn memory_record_summary(value: &serde_json::Value) -> EvidenceMemoryRecordSummary {
+    EvidenceMemoryRecordSummary {
+        id: json_string_field(value, "id"),
+        namespace: json_string_field(value, "namespace"),
+        subject: json_string_field(value, "subject"),
+        content_type: json_string_field(value, "content_type"),
+        body_hash: json_string_field(value, "body_hash"),
+        previous_entry_hash: json_optional_string_field(value, "previous_entry_hash"),
+        entry_hash: json_optional_string_field(value, "entry_hash"),
+        source_node: json_optional_string_field(value, "source_node"),
+        frame_hash: json_optional_string_field(value, "frame_hash"),
+        created_at_micros: value
+            .get("created_at_micros")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default(),
+    }
+}
+
+fn memory_tombstone_summary(value: &serde_json::Value) -> EvidenceMemoryTombstoneSummary {
+    EvidenceMemoryTombstoneSummary {
+        id: json_string_field(value, "id"),
+        record_id: json_string_field(value, "record_id"),
+        namespace: json_string_field(value, "namespace"),
+        previous_entry_hash: json_optional_string_field(value, "previous_entry_hash"),
+        entry_hash: json_optional_string_field(value, "entry_hash"),
+        reason_hash: json_optional_string_field(value, "reason").map(|reason| hash_text(&reason)),
+        created_at_micros: value
+            .get("created_at_micros")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default(),
+    }
+}
+
+fn summarize_receipt_evidence(path: &Path) -> EvidenceReceiptSummary {
+    let mut summary = EvidenceReceiptSummary {
+        path: path.display().to_string(),
+        verified: false,
+        receipts: 0,
+        first_processed_at_micros: None,
+        last_processed_at_micros: None,
+        subjects: BTreeMap::new(),
+        signers: BTreeMap::new(),
+        receipt_hashes: Vec::new(),
+        errors: Vec::new(),
+    };
+    let receipts = match load_verified_receipts(path) {
+        Ok(receipts) => receipts,
+        Err(error) => {
+            summary.errors.push(format!("{error:#}"));
+            return summary;
+        }
+    };
+    summary.verified = true;
+    summary.receipts = receipts.len();
+    for receipt in receipts {
+        let processed_at = receipt.receipt.processed_at_micros;
+        summary.first_processed_at_micros = Some(
+            summary
+                .first_processed_at_micros
+                .map_or(processed_at, |current| current.min(processed_at)),
+        );
+        summary.last_processed_at_micros = Some(
+            summary
+                .last_processed_at_micros
+                .map_or(processed_at, |current| current.max(processed_at)),
+        );
+        *summary
+            .subjects
+            .entry(receipt.receipt.subject.clone())
+            .or_insert(0) += 1;
+        *summary
+            .signers
+            .entry(receipt.signer_node_id.to_string())
+            .or_insert(0) += 1;
+        match serde_json::to_vec(&receipt.receipt) {
+            Ok(bytes) => summary.receipt_hashes.push(hash_bytes_for_report(&bytes)),
+            Err(error) => summary
+                .errors
+                .push(format!("failed to hash receipt summary: {error}")),
+        }
+    }
+    summary
+}
+
+fn json_string_field(value: &serde_json::Value, field: &str) -> String {
+    value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn json_optional_string_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
+fn hash_text(input: &str) -> String {
+    hash_bytes_for_report(input.as_bytes())
+}
+
+fn hash_bytes_for_report(input: &[u8]) -> String {
+    artifact_hash(input)
+}
+
+fn write_json_output<T: Serialize>(value: &T, out: Option<&Path>, force: bool) -> Result<()> {
+    let output = format!("{}\n", serde_json::to_string_pretty(value)?);
+    match out {
+        Some(path) => write_text_file(path, &output, force),
+        None => {
+            print!("{output}");
+            Ok(())
+        }
+    }
 }
 
 fn parse_metadata(metadata: Option<String>) -> Result<serde_json::Value> {
@@ -5781,7 +6300,223 @@ fn schema(command: SchemaCommand) -> Result<()> {
             json,
         } => schema_validate(&contract, &envelope, json),
         SchemaCommand::Inspect { contract, json } => schema_inspect(&contract, json),
+        SchemaCommand::Export { out, force } => schema_export(out.as_deref(), force),
     }
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaExport {
+    schema_version: u8,
+    generated_at_micros: u64,
+    protocol: SchemaProtocolExport,
+    envelope: SchemaEnvelopeExport,
+    agent: SchemaAgentExport,
+    controls: SchemaControlsExport,
+    fixtures: Vec<SchemaFixtureExport>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaProtocolExport {
+    ed25519_signature_len: usize,
+    poa_validator_set_schema_version: u8,
+    receipt_schema_version: u8,
+    memory_schema_version: u8,
+    discovery_schema_version: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaEnvelopeExport {
+    default_content_type: &'static str,
+    kinds: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaAgentExport {
+    content_type: &'static str,
+    protocol_schema_version: u8,
+    subjects: Vec<&'static str>,
+    json_schema: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaControlsExport {
+    capability: Vec<SchemaControlSubjectExport>,
+    discovery: Vec<SchemaControlSubjectExport>,
+    registry: Vec<SchemaControlSubjectExport>,
+    receipts: Vec<SchemaControlSubjectExport>,
+    poa: Vec<SchemaControlSubjectExport>,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaControlSubjectExport {
+    subject: &'static str,
+    content_type: &'static str,
+    direction: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaFixtureExport {
+    path: &'static str,
+    purpose: &'static str,
+}
+
+fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
+    let export = SchemaExport {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        protocol: SchemaProtocolExport {
+            ed25519_signature_len: ED25519_SIGNATURE_LEN,
+            poa_validator_set_schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            receipt_schema_version: RECEIPT_SCHEMA_VERSION,
+            memory_schema_version: MEMORY_SCHEMA_VERSION,
+            discovery_schema_version: DISCOVERY_SCHEMA_VERSION,
+        },
+        envelope: SchemaEnvelopeExport {
+            default_content_type: DEFAULT_ENVELOPE_CONTENT_TYPE,
+            kinds: vec![
+                "data",
+                "event",
+                "command",
+                "query",
+                "response",
+                "stream_chunk",
+                "action",
+                "control",
+            ],
+        },
+        agent: SchemaAgentExport {
+            content_type: AGENT_CONTENT_TYPE,
+            protocol_schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            subjects: vec![
+                "zap.agent.session",
+                "zap.agent.intent",
+                "zap.agent.status",
+                "zap.agent.result",
+                "zap.agent.delegation.request",
+                "zap.agent.delegation.response",
+                "zap.agent.capability.negotiation.request",
+                "zap.agent.capability.negotiation.response",
+            ],
+            json_schema: agent_message_json_schema(),
+        },
+        controls: SchemaControlsExport {
+            capability: vec![
+                SchemaControlSubjectExport {
+                    subject: CAPABILITY_QUERY_SUBJECT,
+                    content_type: CAPABILITY_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: CAPABILITY_RESPONSE_SUBJECT,
+                    content_type: CAPABILITY_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            discovery: vec![
+                SchemaControlSubjectExport {
+                    subject: DISCOVERY_ANNOUNCE_SUBJECT,
+                    content_type: DISCOVERY_CONTENT_TYPE,
+                    direction: "announce",
+                },
+                SchemaControlSubjectExport {
+                    subject: DISCOVERY_QUERY_SUBJECT,
+                    content_type: DISCOVERY_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: DISCOVERY_RESPONSE_SUBJECT,
+                    content_type: DISCOVERY_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            registry: vec![
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_INDEX_REQUEST_SUBJECT,
+                    content_type: REGISTRY_INDEX_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_INDEX_RESPONSE_SUBJECT,
+                    content_type: REGISTRY_INDEX_CONTENT_TYPE,
+                    direction: "response",
+                },
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+                    content_type: REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT,
+                    content_type: REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            receipts: vec![
+                SchemaControlSubjectExport {
+                    subject: RECEIPT_REPLICATION_REQUEST_SUBJECT,
+                    content_type: RECEIPT_REPLICATION_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+                    content_type: RECEIPT_REPLICATION_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            poa: vec![
+                SchemaControlSubjectExport {
+                    subject: POA_ATTESTATION_REQUEST_SUBJECT,
+                    content_type: POA_ATTESTATION_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: POA_ATTESTATION_RESPONSE_SUBJECT,
+                    content_type: POA_ATTESTATION_CONTENT_TYPE,
+                    direction: "response",
+                },
+                SchemaControlSubjectExport {
+                    subject: POA_VALIDATOR_SET_REQUEST_SUBJECT,
+                    content_type: POA_VALIDATOR_SET_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: POA_VALIDATOR_SET_RESPONSE_SUBJECT,
+                    content_type: POA_VALIDATOR_SET_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+        },
+        fixtures: vec![
+            SchemaFixtureExport {
+                path: "fixtures/agent-intent-message-v1.json",
+                purpose: "agent intent message contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/control-subjects-v1.json",
+                purpose: "control subject registry",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/zenv-control-registry-bundle-manifest-request.json",
+                purpose: "registry bundle manifest request envelope",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/protocol/zenv-unsigned-control-frame-v1.json",
+                purpose: "unsigned control frame shape",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/protocol/receipt-sample-v1.json",
+                purpose: "signed action receipt sample",
+            },
+        ],
+        limitations: vec![
+            "this export is a bounded protocol source derived from compiled CLI constants"
+                .to_string(),
+            "domain-pack schemas and user-provided MessageContract files remain external artifacts"
+                .to_string(),
+        ],
+    };
+    write_json_output(&export, out, force)
 }
 
 fn schema_validate(contract_path: &Path, envelope_path: &Path, json: bool) -> Result<()> {

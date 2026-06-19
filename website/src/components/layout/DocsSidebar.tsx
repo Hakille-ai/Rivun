@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Key, Shield, Terminal, Cpu, Activity, Network, Database, Lock, HelpCircle, Milestone, Compass, Server, Archive, Info, Download, Package, Bot, FileCheck2 } from 'lucide-react';
+import { BookOpen, Key, Shield, Terminal, Cpu, Activity, Network, Database, Lock, HelpCircle, Milestone, Compass, Server, Archive, Info, Download, Package, Bot, FileCheck2, GitBranch } from 'lucide-react';
 const groups = [
   {
     title: "Getting Started",
@@ -26,6 +26,7 @@ const groups = [
       { title: "Signed Receipts", href: "/docs/receipts", icon: Archive },
       { title: "Benchmarks", href: "/docs/benchmarks", icon: Activity },
       { title: "Roadmap", href: "/docs/roadmap", icon: Milestone },
+      { title: "Roadmap Status", href: "/docs/roadmap-status", icon: GitBranch },
     ]
   },
   {
@@ -50,6 +51,7 @@ const groups = [
       { title: "Observability", href: "/docs/observability", icon: Activity },
       { title: "CLI Operations", href: "/docs/operations", icon: Terminal },
       { title: "Versioning Policy", href: "/docs/versioning", icon: Info },
+      { title: "Release Readiness", href: "/docs/release", icon: Archive },
     ]
   }
 ];

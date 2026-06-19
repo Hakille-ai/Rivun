@@ -173,13 +173,17 @@ Current preview packs in `examples/domain-packs/`:
 - `zap-pack-smart-building`: smart building sensors and actuators;
 - `zap-pack-cloud-ops`: deployment and incident automation;
 - `zap-pack-industrial`: industrial control with simulation and PoA defaults;
-- `zap-pack-personal-ai`: personal assistant actions with approval gates.
-
-Recommended next packs:
-
+- `zap-pack-personal-ai`: personal assistant actions with approval gates;
 - `zap-pack-healthcare`: privacy-first care coordination and strict audit;
 - `zap-pack-finance`: proposal, risk check, approval, execute, and
   reconciliation flows.
+
+Recommended next packs:
+
+- `zap-pack-robotics`: robot motion, task planning, perception, and safety
+  envelopes;
+- `zap-pack-data-platform`: pipelines, data quality, access grants, and
+  lineage receipts.
 
 These packs should start as docs and examples, then become signed ZapStore
 artifacts once pack installation exists.

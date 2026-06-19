@@ -1,0 +1,58 @@
+schema_version = 1
+id = "zap-pack-healthcare"
+name = "Healthcare"
+version = "0.1.0"
+status = "preview"
+description = "Auditable healthcare coordination workflows for records, alerts, care tasks, devices, privacy, and strict evidence trails."
+
+[compatibility]
+zap_protocol = ">=0.1.0,<1.0.0"
+driver_abi = ">=1,<=2"
+
+[[capabilities]]
+id = "patient.record.read"
+risk = "low"
+description = "Read bounded patient record metadata, demographics, care plans, and non-sensitive summaries from approved systems."
+
+[[capabilities]]
+id = "clinical.alert.route"
+risk = "medium"
+requires = ["patient.record.read"]
+description = "Route clinical alerts, escalation notices, or care-team notifications with audit metadata."
+
+[[capabilities]]
+id = "care.task.propose"
+risk = "medium"
+requires = ["patient.record.read"]
+description = "Propose care tasks, reminders, follow-ups, or documentation changes without committing clinical orders."
+
+[[capabilities]]
+id = "record.note.write"
+risk = "high"
+requires = ["patient.record.read"]
+description = "Write or amend clinical notes, care summaries, or patient-record documentation."
+
+[[capabilities]]
+id = "device.command.propose"
+risk = "high"
+requires = ["patient.record.read"]
+description = "Prepare a medical-device command proposal for clinician approval, simulation, or PoA review."
+
+[[capabilities]]
+id = "clinical.order.place"
+risk = "critical"
+requires = ["patient.record.read"]
+description = "Place, modify, discontinue, or execute medication, procedure, lab, imaging, or device orders."
+
+[[capabilities]]
+id = "privacy.export"
+risk = "critical"
+description = "Export, share, de-identify, or transmit protected health information outside the local trust boundary."
+
+[[policies]]
+path = "policies/action-policy.toml"
+description = "Baseline fail-closed policy for healthcare workflows and privacy-sensitive automation."
+
+[[schemas]]
+path = "schemas/subjects.md"
+description = "Pack subject catalog and expected payload shape."

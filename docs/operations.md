@@ -596,6 +596,25 @@ index, capability cache, validator-set file, driver manifest, and the last
 operator command output. Do not prune or rewrite evidence while an incident is
 open.
 
+Capture a bounded local snapshot before remediation when the node host is still
+reachable:
+
+```bash
+cargo run -p zap-cli -- incident snapshot --config /etc/zap/zap.toml --out incidents/$(date +%Y%m%d-%H%M%S)-snapshot.json
+```
+
+The snapshot embeds `doctor` output, redacted config readiness counts, memory
+verification summaries, receipt summaries, and capability-cache verification
+when those paths are configured or passed explicitly. It omits key material,
+transport keys, raw memory payloads, memory metadata, raw receipt signatures,
+and live packet captures; archive the referenced source files separately.
+
+Embedding services can expose the node health surface directly from
+`ZapNode::health_snapshot()`, `ZapNode::health_json()`, or
+`ZapNode::healthz_text()`. Treat `critical` as a traffic-freeze signal and use
+the named check to choose the runbook below. Treat `degraded` as an operator
+investigation signal unless the same check is rising across the fleet.
+
 ### Policy Default Allow In Production
 
 Trigger:

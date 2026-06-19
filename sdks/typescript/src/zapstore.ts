@@ -13,6 +13,16 @@ export const REGISTRY_BUNDLE_SCHEMA_VERSION = 1;
 export const REGISTRY_INSTALL_PLAN_SCHEMA_VERSION = 1;
 export const DRIVER_ABI_VERSION = 1;
 export const DRIVER_HASH_PREFIX = "blake3:";
+export const RECEIPT_SCHEMA_VERSION = 1;
+export const RECEIPT_REPLICATION_SCHEMA_VERSION = 1;
+export const RECEIPT_REPLICATION_CONTENT_TYPE = "application/zap-receipts+json";
+export const RECEIPT_REPLICATION_REQUEST_SUBJECT = "zap.receipts.request";
+export const RECEIPT_REPLICATION_RESPONSE_SUBJECT = "zap.receipts.response";
+export const RECEIPT_SIGNATURE_DOMAIN = "ZAP-ACTION-RECEIPT-v1";
+export const AGENT_CONTENT_TYPE = "application/zap-agent+json";
+export const AGENT_INTENT_SUBJECT = "zap.agent.intent";
+export const AGENT_STATUS_SUBJECT = "zap.agent.status";
+export const AGENT_RESULT_SUBJECT = "zap.agent.result";
 
 export type DriverRegistryStatus = "active" | "deprecated" | "revoked";
 
@@ -138,6 +148,30 @@ export type SignatureVerificationStatus = {
   reason: string;
 };
 
+export type ReceiptSample = {
+  schema_version: number;
+  receipt_id: string;
+  node_id: string;
+  frame_id: string;
+  subject: string;
+  content_type: string;
+  body_hash: string;
+  policy_decision: string;
+  outcome: string;
+  started_at_unix_micros: number;
+  finished_at_unix_micros: number;
+  metadata?: Record<string, unknown>;
+  signer_public_key: string;
+  signature: string;
+};
+
+export type ReceiptReplicationResponseBody = {
+  schema_version: number;
+  request_id: string;
+  truncated: boolean;
+  receipts: ReceiptSample[];
+};
+
 export class ZapStoreClient {
   registryIndexRequest(requireSignature = false): ControlFrame {
     return registryIndexRequestFrame(requireSignature);
@@ -243,8 +277,80 @@ export function validateArtifactHash(value: string): boolean {
   return /^blake3:[0-9a-f]{64}$/.test(value);
 }
 
+export function receiptBodyHash(bytes: Uint8Array): string {
+  return artifactHash(bytes);
+}
+
 export function artifactHash(bytes: Uint8Array): string {
   return `${DRIVER_HASH_PREFIX}${Buffer.from(blake3(bytes)).toString("hex")}`;
+}
+
+export function zapDomainMessage(domain: Uint8Array | string, message: Uint8Array): Uint8Array {
+  const domainBytes = typeof domain === "string" ? Buffer.from(domain, "utf8") : Buffer.from(domain);
+  return Buffer.concat([domainBytes, Buffer.from([0]), Buffer.from(message)]);
+}
+
+export function receiptSigningMessage(receipt: ReceiptSample | Record<string, unknown>): Uint8Array {
+  const record = receipt as Record<string, unknown>;
+  const signerPublicKey = requiredString(record, "signer_public_key");
+  const signerNodeId = optionalString(record, "signer_node_id") ?? optionalString(record, "node_id");
+  if (!signerNodeId) throw new Error("receipt signer_node_id or node_id is required");
+
+  const unsignedReceipt =
+    typeof record.receipt === "object" && record.receipt !== null
+      ? record.receipt
+      : Object.fromEntries(
+          Object.entries(record).filter(([key]) => key !== "signature" && key !== "signer_public_key"),
+        );
+  const payload = {
+    receipt: unsignedReceipt,
+    signer_node_id: signerNodeId,
+    signer_public_key: signerPublicKey,
+  };
+  return Buffer.concat([Buffer.from(RECEIPT_SIGNATURE_DOMAIN, "utf8"), Buffer.from(JSON.stringify(payload), "utf8")]);
+}
+
+export function validateReceiptShape(receipt: ReceiptSample | Record<string, unknown>): void {
+  const record = receipt as Record<string, unknown>;
+  if (record.schema_version !== RECEIPT_SCHEMA_VERSION) {
+    throw new Error(`unsupported receipt schema version ${String(record.schema_version)}`);
+  }
+  for (const field of [
+    "receipt_id",
+    "node_id",
+    "frame_id",
+    "subject",
+    "content_type",
+    "body_hash",
+    "policy_decision",
+    "outcome",
+    "signer_public_key",
+    "signature",
+  ]) {
+    requiredString(record, field);
+  }
+  validateUuid(requiredString(record, "receipt_id"), "receipt_id");
+  validateUuid(requiredString(record, "node_id"), "node_id");
+  validateUuid(requiredString(record, "frame_id"), "frame_id");
+  const bodyHash = requiredString(record, "body_hash");
+  if (!validateArtifactHash(bodyHash)) throw new Error(`invalid receipt body hash ${bodyHash}`);
+  const started = requiredNumber(record, "started_at_unix_micros");
+  const finished = requiredNumber(record, "finished_at_unix_micros");
+  if (finished < started) throw new Error("receipt finished_at_unix_micros is before started_at_unix_micros");
+}
+
+export function validateReceiptResponseShape(response: ReceiptReplicationResponseBody | Record<string, unknown>): void {
+  const record = response as Record<string, unknown>;
+  if (record.schema_version !== RECEIPT_REPLICATION_SCHEMA_VERSION) {
+    throw new Error(`unsupported receipt replication schema version ${String(record.schema_version)}`);
+  }
+  validateUuid(requiredString(record, "request_id"), "request_id");
+  if (typeof record.truncated !== "boolean") throw new Error("receipt response truncated must be a boolean");
+  if (!Array.isArray(record.receipts)) throw new Error("receipt response receipts must be a list");
+  for (const receipt of record.receipts) {
+    if (typeof receipt !== "object" || receipt === null) throw new Error("receipt response entries must be objects");
+    validateReceiptShape(receipt as Record<string, unknown>);
+  }
 }
 
 export async function verifyEd25519Signature(
@@ -275,4 +381,27 @@ function validateRelativePath(path: string): void {
 function decodeBase64NoPad(value: string): Uint8Array {
   const padding = (4 - (value.length % 4)) % 4;
   return Buffer.from(`${value}${"=".repeat(padding)}`, "base64");
+}
+
+function requiredString(data: Record<string, unknown>, key: string): string {
+  const value = data[key];
+  if (typeof value !== "string" || value.length === 0) throw new Error(`${key} is required`);
+  return value;
+}
+
+function optionalString(data: Record<string, unknown>, key: string): string | undefined {
+  const value = data[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function requiredNumber(data: Record<string, unknown>, key: string): number {
+  const value = data[key];
+  if (typeof value !== "number") throw new Error(`${key} is required`);
+  return value;
+}
+
+function validateUuid(value: string, field: string): void {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) {
+    throw new Error(`${field} is not a valid UUID`);
+  }
 }

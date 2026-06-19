@@ -4,7 +4,7 @@ import base64
 import json
 import re
 from dataclasses import dataclass, field, fields, is_dataclass
-from typing import Any
+from typing import Any, Mapping
 from uuid import UUID
 
 from .protocol import (
@@ -20,6 +20,16 @@ REGISTRY_BUNDLE_SCHEMA_VERSION = 1
 REGISTRY_INSTALL_PLAN_SCHEMA_VERSION = 1
 DRIVER_ABI_VERSION = 1
 DRIVER_HASH_PREFIX = "blake3:"
+RECEIPT_SCHEMA_VERSION = 1
+RECEIPT_REPLICATION_SCHEMA_VERSION = 1
+RECEIPT_REPLICATION_CONTENT_TYPE = "application/zap-receipts+json"
+RECEIPT_REPLICATION_REQUEST_SUBJECT = "zap.receipts.request"
+RECEIPT_REPLICATION_RESPONSE_SUBJECT = "zap.receipts.response"
+RECEIPT_SIGNATURE_DOMAIN = b"ZAP-ACTION-RECEIPT-v1"
+AGENT_CONTENT_TYPE = "application/zap-agent+json"
+AGENT_INTENT_SUBJECT = "zap.agent.intent"
+AGENT_STATUS_SUBJECT = "zap.agent.status"
+AGENT_RESULT_SUBJECT = "zap.agent.result"
 
 _HASH_RE = re.compile(r"^blake3:[0-9a-f]{64}$")
 
@@ -366,6 +376,10 @@ def validate_artifact_hash(value: str) -> bool:
     return bool(_HASH_RE.fullmatch(value))
 
 
+def receipt_body_hash(body: bytes) -> str:
+    return artifact_hash(body)
+
+
 def artifact_hash(data: bytes) -> str:
     try:
         import blake3  # type: ignore[import-not-found]
@@ -391,6 +405,73 @@ def verify_signature_placeholder(kind: str) -> SignatureVerificationStatus:
             "or use zap-cli/Rust for canonical registry verification."
         ),
     )
+
+
+def zap_domain_message(domain: bytes, message: bytes) -> bytes:
+    return domain + b"\0" + message
+
+
+def receipt_signing_message(receipt: Mapping[str, Any]) -> bytes:
+    signer_public_key = _required_str(receipt, "signer_public_key")
+    signer_node_id = str(receipt.get("signer_node_id") or receipt.get("node_id") or "")
+    if not signer_node_id:
+        raise ValueError("receipt signer_node_id or node_id is required")
+
+    if "receipt" in receipt:
+        unsigned_receipt = receipt["receipt"]
+    else:
+        unsigned_receipt = {key: value for key, value in receipt.items() if key not in ("signature", "signer_public_key")}
+
+    payload = {
+        "receipt": unsigned_receipt,
+        "signer_node_id": signer_node_id,
+        "signer_public_key": signer_public_key,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return RECEIPT_SIGNATURE_DOMAIN + encoded
+
+
+def validate_receipt_shape(receipt: Mapping[str, Any]) -> None:
+    if receipt.get("schema_version") != RECEIPT_SCHEMA_VERSION:
+        raise ValueError(f"unsupported receipt schema version {receipt.get('schema_version')!r}")
+    for field_name in (
+        "receipt_id",
+        "node_id",
+        "frame_id",
+        "subject",
+        "content_type",
+        "body_hash",
+        "policy_decision",
+        "outcome",
+        "signer_public_key",
+        "signature",
+    ):
+        _required_str(receipt, field_name)
+    UUID(str(receipt["receipt_id"]))
+    UUID(str(receipt["node_id"]))
+    UUID(str(receipt["frame_id"]))
+    if not validate_artifact_hash(str(receipt["body_hash"])):
+        raise ValueError(f"invalid receipt body hash {receipt['body_hash']!r}")
+    started = _required_int(receipt, "started_at_unix_micros")
+    finished = _required_int(receipt, "finished_at_unix_micros")
+    if finished < started:
+        raise ValueError("receipt finished_at_unix_micros is before started_at_unix_micros")
+
+
+def validate_receipt_response_shape(response: Mapping[str, Any]) -> None:
+    if response.get("schema_version") != RECEIPT_REPLICATION_SCHEMA_VERSION:
+        raise ValueError(f"unsupported receipt replication schema version {response.get('schema_version')!r}")
+    UUID(_required_str(response, "request_id"))
+    truncated = response.get("truncated")
+    if not isinstance(truncated, bool):
+        raise ValueError("receipt response truncated must be a boolean")
+    receipts = response.get("receipts")
+    if not isinstance(receipts, list):
+        raise ValueError("receipt response receipts must be a list")
+    for receipt in receipts:
+        if not isinstance(receipt, Mapping):
+            raise ValueError("receipt response entries must be objects")
+        validate_receipt_shape(receipt)
 
 
 def verify_ed25519_signature(message: bytes, signature: str, public_key: str) -> bool:
@@ -430,6 +511,20 @@ def _to_plain(value: Any) -> Any:
 
 def _pad_base64(value: str) -> str:
     return value + "=" * (-len(value) % 4)
+
+
+def _required_str(data: Mapping[str, Any], key: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{key} is required")
+    return value
+
+
+def _required_int(data: Mapping[str, Any], key: str) -> int:
+    value = data.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"{key} is required")
+    return value
 
 
 def _validate_relative_path(path: str) -> None:

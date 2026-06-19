@@ -38,7 +38,7 @@ Status values:
 | Shared fixtures | partial | `fixtures/`, `fixtures/protocol/`, Rust/Python/TypeScript/Go tests | Add signature, PoA, capability, and datagram golden vectors |
 | `zap fixtures verify` | done | CLI command and tests | Add SDK-path conformance mode |
 | SDK matrix | partial | `docs/sdks.md`, SDK README updates | Expand SDKs to signing, receipt verification, and capability helpers |
-| `zap schema export` | planned | Schema validate/inspect exists | Add export workflow for protocol constants and contracts |
+| `zap schema export` | partial | CLI export of compiled protocol constants, agent schema, control subjects, fixture catalog | Add external domain-pack schema registry and SDK-generated schema parity |
 
 ## Phase 3: Agent Gateway
 
@@ -47,7 +47,7 @@ Status values:
 | Agent intent/status/result | done | `zap-agent`, `zap agent intent/status/result`, tests, docs | Keep SDK fixture coverage in sync |
 | Agent session/delegate/negotiate | partial | `zap agent session/delegate/negotiate`, CLI tests | Add fixtures, receipt links, storage, and persistent orchestration |
 | Agent receipt linkage | partial | Receipts record message kind/subject and PoA | Link intent/session/capabilities/output artifacts explicitly |
-| Evidence export | planned | Memory and receipts exist | Add `zap memory export-evidence` bundle workflow |
+| Evidence export | partial | `zap memory export-evidence` emits payload-free memory and receipt summaries | Add signed bundle manifest and optional encrypted raw evidence archive |
 | Agent framework adapters | planned | Architecture docs only | Add adapters outside the wire protocol core |
 
 ## Phase 4: Domain Packs and Marketplace
@@ -55,7 +55,7 @@ Status values:
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
 | Domain pack manifest | done | `docs/domain-packs.md`, `zap pack validate/inspect/list` | Add signing/build/install workflows |
-| Preview packs | done | agentic-dev, smart-building, cloud-ops, industrial, personal-ai | Add healthcare and finance packs |
+| Preview packs | done | agentic-dev, smart-building, cloud-ops, industrial, personal-ai, healthcare, finance | Add robotics and data-platform packs |
 | Pack catalog | done | `zap pack list --root ... --json` | Expose catalog in website or ZapStore |
 | Pack marketplace | planned | ZapStore driver registry exists | Extend ZapStore to signed domain-pack registry |
 
@@ -66,7 +66,7 @@ Status values:
 | Static peers | done | Config, trust, peer invite/accept/rotate/revoke | Add live enrollment and revocation propagation |
 | Fleet doctor | planned | `doctor --strict` local checks | Add fleet topology inspection across peers |
 | Stream/gateway transports | planned | UDP transport and control messages | Add HTTP, WebSocket, gRPC, MQTT/NATS/Kafka/ROS2/OPC UA/Modbus bridges |
-| Incident snapshot | planned | Runbooks and receipt/memory tools | Add `zap incident snapshot` command |
+| Incident snapshot | partial | `zap incident snapshot` captures doctor/config/memory/receipt/cache summaries | Add live process metrics, network state, and fleet-wide peer snapshots |
 
 ## Phase 6: Architecture Modularization
 

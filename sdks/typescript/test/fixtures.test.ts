@@ -12,12 +12,16 @@ import {
   REGISTRY_INDEX_CONTENT_TYPE,
   REGISTRY_INDEX_REQUEST_SUBJECT,
   REGISTRY_INDEX_RESPONSE_SUBJECT,
+  RECEIPT_REPLICATION_CONTENT_TYPE,
+  RECEIPT_REPLICATION_RESPONSE_SUBJECT,
   VERSION,
   ZapEnvelope,
   ZapMessageKind,
+  receiptSigningMessage,
   registryBundleManifestRequestFrame,
   registryIndexRequestFrame,
   validateArtifactHash,
+  validateReceiptResponseShape,
 } from "../src/index.ts";
 
 type RegistryBundleManifestRequestFixture = {
@@ -255,10 +259,11 @@ test("receipt sample fixture can be carried in a control envelope", async () => 
   const receipt = fixture.body_json.receipts[0];
 
   assert.equal(fixture.fixture_schema_version, 1);
-  assert.equal(fixture.subject, "zap.receipts.response");
-  assert.equal(fixture.content_type, "application/zap-receipts+json");
+  assert.equal(fixture.subject, RECEIPT_REPLICATION_RESPONSE_SUBJECT);
+  assert.equal(fixture.content_type, RECEIPT_REPLICATION_CONTENT_TYPE);
   assert.equal(fixture.body_json.schema_version, 1);
   assert.equal(fixture.body_json.truncated, false);
+  validateReceiptResponseShape(fixture.body_json);
   assert.equal(receipt.schema_version, 1);
   assert.equal(receipt.frame_id, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
   assert.equal(receipt.subject, REGISTRY_INDEX_REQUEST_SUBJECT);
@@ -267,6 +272,7 @@ test("receipt sample fixture can be carried in a control envelope", async () => 
   assert.equal(receipt.outcome, "accepted");
   assert.equal(validateArtifactHash(receipt.body_hash), true);
   assert.equal(receipt.finished_at_unix_micros >= receipt.started_at_unix_micros, true);
+  assert.equal(Buffer.from(receiptSigningMessage(receipt)).includes(Buffer.from('"signature"')), false);
 
   const frame = ControlFrame.json(fixture.subject, fixture.content_type, fixture.body_json);
   const decoded = ControlFrame.decode(frame.encode());
