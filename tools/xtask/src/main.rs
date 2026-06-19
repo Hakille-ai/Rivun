@@ -99,6 +99,7 @@ fn main() -> Result<()> {
         (Some("bench"), Some("collect")) => bench_collect(CollectOptions::parse(args)?),
         (Some("bench"), Some("compare")) => bench_compare(CompareOptions::parse(args)?),
         (Some("bench"), Some("site")) => bench_site(SiteOptions::parse(args)?),
+        (Some("release"), Some("readiness")) => release_readiness(ReadinessOptions::parse(args)?),
         _ => {
             bail!("{}", usage());
         }
@@ -114,7 +115,8 @@ fn usage() -> &'static str {
      run: [--sample-size <n>] [--warm-up-time <sec>] [--measurement-time <sec>] [--only <package/bench>]\n\
      collect: --out <path> [--input <criterion-dir>] [--label <label>] [--source-sha <sha>]\n\
      compare: --base <path> --head <path> --thresholds <path> [--out <markdown>]\n\
-     site: --current <path> --out <dir> [--history-in <path>]"
+     site: --current <path> --out <dir> [--history-in <path>]\n\
+     release readiness: [--skip-website] [--skip-sdks] [--require-go]"
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -254,6 +256,34 @@ impl SiteOptions {
     }
 }
 
+#[derive(Debug)]
+struct ReadinessOptions {
+    skip_website: bool,
+    skip_sdks: bool,
+    require_go: bool,
+}
+
+impl ReadinessOptions {
+    fn parse(args: impl Iterator<Item = String>) -> Result<Self> {
+        let mut skip_website = false;
+        let mut skip_sdks = false;
+        let mut require_go = false;
+        for arg in args {
+            match arg.as_str() {
+                "--skip-website" => skip_website = true,
+                "--skip-sdks" => skip_sdks = true,
+                "--require-go" => require_go = true,
+                other => bail!("unknown release readiness option `{other}`"),
+            }
+        }
+        Ok(Self {
+            skip_website,
+            skip_sdks,
+            require_go,
+        })
+    }
+}
+
 fn next_value(
     args: &mut std::iter::Peekable<impl Iterator<Item = String>>,
     option: &str,
@@ -267,6 +297,138 @@ fn next_path(
     option: &str,
 ) -> Result<PathBuf> {
     Ok(PathBuf::from(next_value(args, option)?))
+}
+
+fn release_readiness(options: ReadinessOptions) -> Result<()> {
+    println!("running release readiness checks");
+    run_step(
+        "protocol fixtures",
+        ".",
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "-p",
+            "zap-cli",
+            "--",
+            "fixtures",
+            "verify",
+            "--fixtures",
+            "fixtures",
+            "--json",
+        ],
+        &[],
+    )?;
+    run_step(
+        "domain pack catalog",
+        ".",
+        "cargo",
+        &[
+            "run",
+            "--locked",
+            "-p",
+            "zap-cli",
+            "--",
+            "pack",
+            "list",
+            "--root",
+            "examples/domain-packs",
+            "--json",
+        ],
+        &[],
+    )?;
+
+    if options.skip_sdks {
+        println!("skipping SDK conformance checks");
+    } else {
+        run_step(
+            "python SDK conformance",
+            ".",
+            "python",
+            &["-m", "unittest", "discover", "-s", "sdks/python/tests"],
+            &[("PYTHONPATH", "sdks/python/src")],
+        )?;
+        run_step(
+            "typescript SDK install",
+            "sdks/typescript",
+            "npm",
+            &["ci"],
+            &[],
+        )?;
+        run_step(
+            "typescript SDK typecheck",
+            "sdks/typescript",
+            "npm",
+            &["run", "typecheck"],
+            &[],
+        )?;
+        run_step(
+            "typescript SDK tests",
+            "sdks/typescript",
+            "npm",
+            &["test"],
+            &[],
+        )?;
+        run_step(
+            "rust SDK conformance",
+            "sdks/rust",
+            "cargo",
+            &["test", "--locked"],
+            &[],
+        )?;
+        if command_available("go") {
+            run_step(
+                "go SDK conformance",
+                "sdks/go",
+                "go",
+                &["test", "./..."],
+                &[],
+            )?;
+        } else if options.require_go {
+            bail!("go is required for release readiness but was not found in PATH");
+        } else {
+            println!("warning: go not found; skipped Go SDK conformance");
+        }
+    }
+
+    if options.skip_website {
+        println!("skipping website lint");
+    } else {
+        run_step("website install", "website", "npm", &["ci"], &[])?;
+        run_step("website lint", "website", "npm", &["run", "lint"], &[])?;
+    }
+
+    println!("release readiness checks completed");
+    Ok(())
+}
+
+fn run_step(
+    label: &str,
+    cwd: &str,
+    program: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+) -> Result<()> {
+    println!("==> {label}");
+    let mut command = Command::new(program);
+    command.args(args).current_dir(cwd);
+    for (key, value) in envs {
+        command.env(key, value);
+    }
+    let status = command
+        .status()
+        .with_context(|| format!("failed to launch release readiness step `{label}`"))?;
+    if !status.success() {
+        bail!("release readiness step `{label}` failed with status {status}");
+    }
+    Ok(())
+}
+
+fn command_available(program: &str) -> bool {
+    Command::new(program)
+        .arg("--version")
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn bench_run(options: RunOptions) -> Result<()> {
@@ -662,7 +824,8 @@ fn threshold_for<'a>(config: &'a ThresholdConfig, id: &str) -> &'a Threshold {
     config
         .benchmark
         .iter()
-        .find(|entry| id.contains(&entry.pattern))
+        .filter(|entry| id.contains(&entry.pattern))
+        .max_by_key(|entry| entry.pattern.len())
         .map(|entry| &entry.threshold)
         .unwrap_or(&config.default)
 }
@@ -779,4 +942,39 @@ fn write_text(path: &Path, text: &str) -> Result<()> {
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     fs::write(path, text).with_context(|| format!("failed to write {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn threshold(relative_regression: f64, min_absolute_ns: f64) -> Threshold {
+        Threshold {
+            relative_regression,
+            min_absolute_ns,
+            blocking: true,
+        }
+    }
+
+    #[test]
+    fn threshold_matching_prefers_most_specific_pattern() {
+        let config = ThresholdConfig {
+            default: threshold(0.10, 100.0),
+            benchmark: vec![
+                BenchmarkThreshold {
+                    pattern: "zenv".to_string(),
+                    threshold: threshold(0.07, 1.0),
+                },
+                BenchmarkThreshold {
+                    pattern: "node_dispatch".to_string(),
+                    threshold: threshold(0.15, 5000.0),
+                },
+            ],
+        };
+
+        let selected = threshold_for(&config, "node_dispatch_zenv_action");
+
+        assert_eq!(selected.relative_regression, 0.15);
+        assert_eq!(selected.min_absolute_ns, 5000.0);
+    }
 }

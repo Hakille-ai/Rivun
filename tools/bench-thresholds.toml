@@ -28,6 +28,12 @@ min_absolute_ns = 100.0
 blocking = true
 
 [[benchmark]]
+pattern = "ed25519_verify_frame"
+relative_regression = 0.20
+min_absolute_ns = 5000.0
+blocking = true
+
+[[benchmark]]
 pattern = "poa"
 relative_regression = 0.08
 min_absolute_ns = 100.0

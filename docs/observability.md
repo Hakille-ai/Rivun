@@ -30,14 +30,13 @@ contents must not be exported as labels or span attributes.
 
 ## Metrics Contract
 
-Recommended metric names:
+Metrics emitted by `ZapNode::metrics_prometheus_text()`:
 
-- `zap_node_health_status`: gauge where `0=healthy`, `1=degraded`,
-  `2=critical`;
 - `zap_frames_sent_total`, `zap_frames_received_total`,
-  `zap_frames_rejected_total`;
-- `zap_driver_execution_seconds_bucket` and
-  `zap_driver_execution_errors_total`;
+  `zap_frames_rejected_total`: counters labelled by `node_id` and peer or
+  rejection reason;
+- `zap_driver_execution_errors_total`: counter labelled by `node_id` and
+  `action`;
 - `zap_peer_trust_status`: gauge by peer and status;
 - `zap_registry_signature_valid`: gauge, `1` only when local registry signature
   verification succeeds;
@@ -53,6 +52,13 @@ for example `policy_default_allow`, `registry_signature_invalid`,
 `capability_cache_stale`, `receipt_verification_failure`,
 `poa_attestation_failure`, `driver_runtime_errors`, or `replay_spike`. Use the
 incident id in logs and receipt metadata rather than metric labels.
+
+Prometheus `up{job="zap-node"}` is the scrapeability signal used by the
+production rules. Health-check details are still produced by the ops health
+configuration and `zap doctor`, but `zap-node` does not currently emit a
+dedicated node-health status gauge. Driver latency histograms are also not
+emitted yet; use driver error rate and receipt/PoA failures for production
+paging.
 
 `zap-node` exposes this contract as an in-process readiness surface through
 `ZapNode::metrics_snapshot()` and `ZapNode::metrics_prometheus_text()`. The
@@ -82,21 +88,6 @@ Prometheus cannot scrape the node. Check network policy, process status, and
 the metrics bind address. If the daemon is healthy but metrics are unavailable,
 treat this as an observability incident and keep traffic changes frozen until
 scraping is restored.
-
-### ZapHealthCritical
-
-At least one critical health check is failing. Run:
-
-```bash
-cargo run -p zap-cli -- doctor --config /etc/zap/zap.toml --strict --json
-```
-
-Then verify key files, receipt paths, registry signature policy, and capability
-cache freshness.
-
-If the health failure is policy related, run the Policy Default Allow runbook in
-[Operations](operations.md#policy-default-allow-in-production) before allowing
-new production actions.
 
 ### ZapReceiptAuditFailing
 
@@ -154,6 +145,21 @@ driver version through registry deprecation or revocation.
 Rollback to the last manifest and registry entry that verify and have successful
 receipts under the same runtime limits. See
 [Operations](operations.md#driver-runtime-errors).
+
+### ZapFrameRejectRateHigh
+
+Inbound frame rejections are elevated by reason. Start with peer trust,
+configuration drift, signature failures, and schema/policy changes before
+assuming transport loss:
+
+```bash
+cargo run -p zap-cli -- trust inspect --config /etc/zap/zap.toml --json
+cargo run -p zap-cli -- check-config --config /etc/zap/zap.toml --json
+```
+
+Preserve sender and receiver logs plus any receipt entries covering the same
+window. If the reason points at replay, nonce, freshness, or stale-frame
+validation, follow the replay spike runbook below.
 
 ### ZapPoaAttestationFailures
 

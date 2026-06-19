@@ -16,6 +16,10 @@ and body field names.
   intent payload for the `zap.agent.intent` subject.
 - `control-subjects-v1.json` lists the current v1 control subjects and media
   types documented in `docs/protocol.md`.
+- `protocol/zenv-unsigned-control-frame-v1.json` describes a deterministic
+  unsigned v1 control envelope with no auth or PoA trailer.
+- `protocol/receipt-sample-v1.json` contains a deterministic receipts response
+  body that SDKs can load without requiring live signing keys.
 
 ## Conventions
 
@@ -25,3 +29,6 @@ and body field names.
   when constructing a ZENV envelope.
 - Fixtures prefer deterministic UUIDs and compact bodies so every SDK can load
   them without external services or signing keys.
+- Nested `protocol/` fixtures are golden interop samples. They are intentionally
+  shaped for SDK and crate tests, while the top-level fixtures remain the stable
+  set consumed by the current CLI fixture verifier.

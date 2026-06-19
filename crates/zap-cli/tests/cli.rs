@@ -1727,6 +1727,184 @@ fn agent_result_builds_failed_message_with_error() {
 }
 
 #[test]
+fn agent_session_builds_valid_message() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "session",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--root-intent-id",
+            "22222222-2222-4222-8222-222222222222",
+            "--owner-agent",
+            "planner.main",
+            "--status",
+            "running",
+            "--created-at-micros",
+            "10",
+            "--updated-at-micros",
+            "20",
+            "--accepted-capability",
+            "driver.execute:valve.open",
+            "--metadata",
+            r#"{"workflow":"phase3"}"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(message["type"], "session");
+    assert_eq!(message["payload"]["owner_agent"], "planner.main");
+    assert_eq!(message["payload"]["status"], "running");
+    assert_eq!(
+        message["payload"]["accepted_capabilities"][0],
+        "driver.execute:valve.open"
+    );
+}
+
+#[test]
+fn agent_delegate_builds_request_and_response_messages() {
+    let request = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "delegate",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--delegation-id",
+            "33333333-3333-4333-8333-333333333333",
+            "--parent-intent-id",
+            "22222222-2222-4222-8222-222222222222",
+            "--from-agent",
+            "planner.main",
+            "--to-agent",
+            "executor.safety",
+            "--objective",
+            "open valve",
+            "--capability",
+            "driver.execute:valve.open",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        request.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&request.stdout),
+        String::from_utf8_lossy(&request.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&request.stdout).unwrap();
+    assert_eq!(message["type"], "delegation_request");
+    assert_eq!(message["payload"]["from_agent"], "planner.main");
+    assert_eq!(message["payload"]["to_agent"], "executor.safety");
+
+    let response = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "delegate",
+            "--response",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--delegation-id",
+            "33333333-3333-4333-8333-333333333333",
+            "--respondent-agent",
+            "executor.safety",
+            "--decision",
+            "accepted",
+            "--assigned-agent",
+            "executor.safety",
+            "--capability",
+            "driver.execute:valve.open",
+            "--estimated-completion-unix-micros",
+            "99",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        response.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&response.stdout),
+        String::from_utf8_lossy(&response.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&response.stdout).unwrap();
+    assert_eq!(message["type"], "delegation_response");
+    assert_eq!(message["payload"]["decision"], "accepted");
+    assert_eq!(message["payload"]["assigned_agent"], "executor.safety");
+}
+
+#[test]
+fn agent_negotiate_builds_request_and_response_messages() {
+    let request = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "negotiate",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--negotiation-id",
+            "44444444-4444-4444-8444-444444444444",
+            "--requester-agent",
+            "planner.main",
+            "--required-capability",
+            "driver.execute:valve.open",
+            "--optional-capability",
+            "sensor.read:valve.pressure",
+            "--intent-kind",
+            "act",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        request.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&request.stdout),
+        String::from_utf8_lossy(&request.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&request.stdout).unwrap();
+    assert_eq!(message["type"], "capability_negotiation_request");
+    assert_eq!(message["payload"]["requester_agent"], "planner.main");
+    assert_eq!(message["payload"]["desired_intents"][0], "act");
+
+    let response = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "negotiate",
+            "--response",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--negotiation-id",
+            "44444444-4444-4444-8444-444444444444",
+            "--responder-agent",
+            "executor.safety",
+            "--decision",
+            "accepted",
+            "--accepted-capability",
+            "driver.execute:valve.open",
+            "--supported-intent",
+            "act",
+            "--expires-at-unix-micros",
+            "123",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        response.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&response.stdout),
+        String::from_utf8_lossy(&response.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&response.stdout).unwrap();
+    assert_eq!(message["type"], "capability_negotiation_response");
+    assert_eq!(message["payload"]["decision"], "accepted");
+    assert_eq!(
+        message["payload"]["accepted_capabilities"][0],
+        "driver.execute:valve.open"
+    );
+}
+
+#[test]
 fn registry_resolve_selects_highest_compatible_active_entry() {
     let dir = tempdir().unwrap();
     let author = Keypair::generate();

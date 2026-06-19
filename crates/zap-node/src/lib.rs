@@ -336,10 +336,42 @@ impl RuntimeConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+const DEFAULT_RECEIPT_FSYNC_INTERVAL_WRITES: u64 = 64;
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiptFsyncPolicy {
+    Always,
+    Interval,
+    #[default]
+    Off,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptsConfig {
     #[serde(default)]
     pub path: Option<PathBuf>,
+    #[serde(default)]
+    pub fsync: ReceiptFsyncPolicy,
+    #[serde(default)]
+    pub fsync_interval_writes: Option<u64>,
+}
+
+impl Default for ReceiptsConfig {
+    fn default() -> Self {
+        Self {
+            path: None,
+            fsync: ReceiptFsyncPolicy::Off,
+            fsync_interval_writes: None,
+        }
+    }
+}
+
+impl ReceiptsConfig {
+    fn fsync_interval_writes(&self) -> u64 {
+        self.fsync_interval_writes
+            .unwrap_or(DEFAULT_RECEIPT_FSYNC_INTERVAL_WRITES)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1145,6 +1177,9 @@ pub struct ZapNode {
     poa_validator_set_path: Option<PathBuf>,
     poa_validator_set_authority: Option<PublicKey>,
     receipt_log_path: Option<PathBuf>,
+    receipt_fsync: ReceiptFsyncPolicy,
+    receipt_fsync_interval_writes: u64,
+    receipt_durability: Mutex<ReceiptDurabilityState>,
     registry_path: Option<PathBuf>,
     registry_bundle_path: Option<PathBuf>,
     registry_require_signature: bool,
@@ -1164,6 +1199,29 @@ pub struct ZapNode {
 struct DriverRegistration {
     driver: WasmDriver,
     permissions: DriverPermissions,
+}
+
+#[derive(Debug, Default)]
+struct ReceiptDurabilityState {
+    writes_since_sync: u64,
+}
+
+impl ReceiptDurabilityState {
+    fn record_write(&mut self, policy: ReceiptFsyncPolicy, interval_writes: u64) -> bool {
+        match policy {
+            ReceiptFsyncPolicy::Always => true,
+            ReceiptFsyncPolicy::Off => false,
+            ReceiptFsyncPolicy::Interval => {
+                self.writes_since_sync = self.writes_since_sync.saturating_add(1);
+                if self.writes_since_sync >= interval_writes {
+                    self.writes_since_sync = 0;
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1424,6 +1482,8 @@ impl ZapNode {
         let discovery_announcement_cache = config.discovery.announcement_cache.clone();
         let discovery_announcements =
             load_discovery_announcement_cache(discovery_announcement_cache.as_deref())?;
+        let receipt_fsync = config.receipts.fsync;
+        let receipt_fsync_interval_writes = config.receipts.fsync_interval_writes();
         let endpoint = ZapEndpoint::bind(endpoint_config).await?;
 
         Ok(Self {
@@ -1442,6 +1502,9 @@ impl ZapNode {
             poa_validator_set_path,
             poa_validator_set_authority,
             receipt_log_path: config.receipts.path,
+            receipt_fsync,
+            receipt_fsync_interval_writes,
+            receipt_durability: Mutex::new(ReceiptDurabilityState::default()),
             registry_path,
             registry_bundle_path,
             registry_require_signature,
@@ -2513,7 +2576,17 @@ impl ZapNode {
             .open(path)
             .with_context(|| format!("failed to open receipt log {}", path.display()))?;
         file.write_all(receipt.to_json_line()?.as_bytes())
-            .with_context(|| format!("failed to write receipt log {}", path.display()))
+            .with_context(|| format!("failed to write receipt log {}", path.display()))?;
+        let should_sync = self
+            .receipt_durability
+            .lock()
+            .unwrap()
+            .record_write(self.receipt_fsync, self.receipt_fsync_interval_writes);
+        if should_sync {
+            file.sync_data()
+                .with_context(|| format!("failed to fsync receipt log {}", path.display()))?;
+        }
+        Ok(())
     }
 }
 
@@ -2634,6 +2707,11 @@ fn validate_runtime(runtime: RuntimeConfig) -> Result<()> {
 }
 
 fn validate_receipts(config: &ZapNodeConfig) -> Result<()> {
+    if config.receipts.fsync == ReceiptFsyncPolicy::Interval
+        && config.receipts.fsync_interval_writes() == 0
+    {
+        bail!("receipts.fsync_interval_writes must be greater than 0 when receipts.fsync=interval");
+    }
     let Some(receipt_path) = &config.receipts.path else {
         return Ok(());
     };
@@ -4724,6 +4802,7 @@ manifest = "drivers/echo.manifest.toml"
 
 [receipts]
 path = "logs/receipts.jsonl"
+fsync = "always"
 "#,
                 peer.node_id(),
                 public_key_string(&peer),
@@ -4742,6 +4821,7 @@ path = "logs/receipts.jsonl"
             config.receipts.path.as_deref(),
             Some(receipt_path.as_path())
         );
+        assert_eq!(config.receipts.fsync, ReceiptFsyncPolicy::Always);
         let report = config.validate().unwrap();
         assert_eq!(report.node_id, local.node_id());
         assert_eq!(report.driver_count, 1);
@@ -5177,6 +5257,37 @@ path = "logs/receipts.jsonl"
 
         let error = config.validate().unwrap_err();
         assert!(format!("{error:#}").contains("receipts.path must not point at key_file"));
+    }
+
+    #[test]
+    fn config_validation_rejects_zero_receipt_fsync_interval() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.receipts.fsync = ReceiptFsyncPolicy::Interval;
+        config.receipts.fsync_interval_writes = Some(0);
+
+        let error = config.validate().unwrap_err();
+        assert!(
+            format!("{error:#}").contains("receipts.fsync_interval_writes must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn receipt_durability_state_decides_when_to_fsync() {
+        let mut state = ReceiptDurabilityState::default();
+        assert!(!state.record_write(ReceiptFsyncPolicy::Off, 2));
+        assert!(!state.record_write(ReceiptFsyncPolicy::Interval, 2));
+        assert!(state.record_write(ReceiptFsyncPolicy::Interval, 2));
+        assert!(!state.record_write(ReceiptFsyncPolicy::Interval, 2));
+        assert!(state.record_write(ReceiptFsyncPolicy::Always, 2));
     }
 
     #[test]

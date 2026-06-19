@@ -117,3 +117,72 @@ fn registry_bundle_manifest_request_fixture_matches_control_envelope_shape() {
     assert_eq!(envelope["body_json"]["require_publication"], true);
     assert_eq!(envelope["body_json"]["require_drivers"], true);
 }
+
+#[test]
+fn unsigned_control_frame_fixture_documents_absent_security_trailers() {
+    let root = fixture("protocol/zenv-unsigned-control-frame-v1.json");
+    let envelope = &root["envelope"];
+    let security = &root["security"];
+
+    assert_eq!(root["fixture_schema_version"], 1);
+    assert_eq!(envelope["magic"], "ZENV");
+    assert_eq!(envelope["version"], 1);
+    assert_eq!(envelope["kind_name"], "control");
+    assert_eq!(envelope["kind_value"], 8);
+    assert_eq!(envelope["reserved"], 0);
+    assert_eq!(envelope["subject"], "zap.registry.index.request");
+    assert_eq!(
+        envelope["content_type"],
+        "application/zap-registry-index+json"
+    );
+    assert_eq!(envelope["metadata_base64"], "");
+    assert_eq!(envelope["body_json"]["schema_version"], 1);
+    assert_eq!(envelope["body_json"]["require_signature"], false);
+
+    assert_eq!(security["signed"], false);
+    assert_eq!(security["encrypted"], false);
+    assert_eq!(security["signature_hint_hex"], "0000000000000000");
+    assert!(security["auth_trailer"].is_null());
+    assert!(security["poa_trailer"].is_null());
+}
+
+#[test]
+fn receipt_sample_fixture_has_stable_response_shape() {
+    let root = fixture("protocol/receipt-sample-v1.json");
+    let body = &root["body_json"];
+    let receipts = body["receipts"]
+        .as_array()
+        .expect("receipts should be an array");
+
+    assert_eq!(root["fixture_schema_version"], 1);
+    assert_eq!(root["subject"], "zap.receipts.response");
+    assert_eq!(root["content_type"], "application/zap-receipts+json");
+    assert_eq!(body["schema_version"], 1);
+    assert_eq!(body["truncated"], false);
+    assert_eq!(receipts.len(), 1);
+
+    let receipt = &receipts[0];
+    assert_eq!(receipt["schema_version"], 1);
+    assert_eq!(receipt["frame_id"], "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    assert_eq!(receipt["subject"], "zap.registry.index.request");
+    assert_eq!(
+        receipt["content_type"],
+        "application/zap-registry-index+json"
+    );
+    assert_eq!(receipt["policy_decision"], "allow");
+    assert_eq!(receipt["outcome"], "accepted");
+    assert!(
+        receipt["body_hash"]
+            .as_str()
+            .expect("body_hash should be a string")
+            .starts_with("blake3:")
+    );
+    assert!(
+        receipt["finished_at_unix_micros"]
+            .as_i64()
+            .expect("finished timestamp should be numeric")
+            >= receipt["started_at_unix_micros"]
+                .as_i64()
+                .expect("started timestamp should be numeric")
+    );
+}

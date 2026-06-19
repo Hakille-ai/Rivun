@@ -18,8 +18,10 @@ from zap_sdk import (
     RegistryInstallPlanEntry,
     RegistryInstallPlanRequest,
     ZapStoreClient,
+    ZapEnvelope,
     ZapMessageKind,
     ZapUdpClient,
+    registry_index_request_frame,
     registry_bundle_manifest_request_frame,
     validate_artifact_hash,
     verify_signature_placeholder,
@@ -130,6 +132,56 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(decoded_payload["source_agent"], "planner.main")
         self.assertEqual(decoded_payload["target_agent"], "executor.safety")
         self.assertEqual(decoded_payload["required_capabilities"], ["driver.execute:valve.open"])
+
+    def test_unsigned_control_frame_fixture_round_trips_without_trailers(self):
+        fixture = load_fixture("protocol/zenv-unsigned-control-frame-v1.json")
+        envelope = fixture["envelope"]
+        security = fixture["security"]
+
+        frame = registry_index_request_frame(
+            require_signature=envelope["body_json"]["require_signature"],
+        )
+        deterministic = ControlFrame(
+            subject=frame.subject,
+            content_type=frame.content_type,
+            body=frame.body,
+            id=UUID(envelope["id"]),
+        )
+        decoded = ZapEnvelope.decode(deterministic.encode())
+
+        self.assertEqual(fixture["fixture_schema_version"], 1)
+        self.assertEqual(decoded.kind, ZapMessageKind.CONTROL)
+        self.assertEqual(decoded.id, UUID(envelope["id"]))
+        self.assertIsNone(decoded.correlation_id)
+        self.assertIsNone(decoded.causation_id)
+        self.assertEqual(decoded.subject, envelope["subject"])
+        self.assertEqual(decoded.content_type, envelope["content_type"])
+        self.assertEqual(json.loads(decoded.body.decode("utf-8")), envelope["body_json"])
+        self.assertFalse(security["signed"])
+        self.assertFalse(security["encrypted"])
+        self.assertEqual(security["signature_hint_hex"], "0000000000000000")
+        self.assertIsNone(security["auth_trailer"])
+        self.assertIsNone(security["poa_trailer"])
+
+    def test_receipt_sample_fixture_has_stable_response_body(self):
+        fixture = load_fixture("protocol/receipt-sample-v1.json")
+        body = fixture["body_json"]
+        receipt = body["receipts"][0]
+
+        frame = ControlFrame.json(fixture["subject"], fixture["content_type"], body)
+        decoded = ControlFrame.decode(frame.encode())
+
+        self.assertEqual(decoded.subject, "zap.receipts.response")
+        self.assertEqual(decoded.content_type, "application/zap-receipts+json")
+        self.assertEqual(decoded.json_body(), body)
+        self.assertEqual(body["schema_version"], 1)
+        self.assertFalse(body["truncated"])
+        self.assertEqual(receipt["schema_version"], 1)
+        self.assertEqual(UUID(receipt["frame_id"]), UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+        self.assertEqual(receipt["policy_decision"], "allow")
+        self.assertEqual(receipt["outcome"], "accepted")
+        self.assertTrue(validate_artifact_hash(receipt["body_hash"]))
+        self.assertGreaterEqual(receipt["finished_at_unix_micros"], receipt["started_at_unix_micros"])
 
     def test_hash_and_signature_helpers_are_explicit(self):
         self.assertTrue(validate_artifact_hash(HASH))

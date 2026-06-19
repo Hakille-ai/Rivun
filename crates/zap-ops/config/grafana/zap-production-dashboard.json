@@ -18,17 +18,11 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": {
         "defaults": {
-          "mappings": [
-            { "options": { "0": { "text": "healthy" } }, "type": "value" },
-            { "options": { "1": { "text": "degraded" } }, "type": "value" },
-            { "options": { "2": { "text": "critical" } }, "type": "value" }
-          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 1 },
-              { "color": "red", "value": 2 }
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
             ]
           }
         }
@@ -37,9 +31,9 @@
       "id": 1,
       "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "center", "orientation": "auto", "reduceOptions": { "calcs": ["max"], "fields": "", "values": false }, "textMode": "auto" },
       "targets": [
-        { "expr": "max(zap_node_health_status)", "legendFormat": "overall", "refId": "A" }
+        { "expr": "min(up{job=\"zap-node\"})", "legendFormat": "scrapeable", "refId": "A" }
       ],
-      "title": "Overall Health",
+      "title": "Scrape Health",
       "type": "stat"
     },
     {
@@ -57,14 +51,15 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "unit": "s" } },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
       "id": 3,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } },
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum by (le, action) (rate(zap_driver_execution_seconds_bucket[5m])))", "legendFormat": "p95 {{action}}", "refId": "A" }
+        { "expr": "sum by (action) (rate(zap_driver_execution_errors_total[5m]))", "legendFormat": "driver errors {{action}}", "refId": "A" },
+        { "expr": "sum by (reason) (rate(zap_frames_rejected_total[5m]))", "legendFormat": "rejects {{reason}}", "refId": "B" }
       ],
-      "title": "Driver Latency P95",
+      "title": "Driver And Reject Rates",
       "type": "timeseries"
     },
     {
@@ -98,9 +93,10 @@
       "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "none" } },
       "targets": [
         { "expr": "increase(zap_receipt_log_verify_failures_total[1h])", "legendFormat": "receipt verify failures", "refId": "A" },
-        { "expr": "increase(zap_poa_attestation_failures_total[1h])", "legendFormat": "poa failures", "refId": "B" }
+        { "expr": "increase(zap_poa_attestation_failures_total[1h])", "legendFormat": "poa failures", "refId": "B" },
+        { "expr": "min(zap_registry_signature_valid)", "legendFormat": "registry signature valid", "refId": "C" }
       ],
-      "title": "Audit And Consensus Failures",
+      "title": "Audit, Consensus, Registry",
       "type": "timeseries"
     }
   ],

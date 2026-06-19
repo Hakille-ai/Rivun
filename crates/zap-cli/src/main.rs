@@ -16,7 +16,9 @@ use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
 use zap_agent::{
     AGENT_CONTENT_TYPE, AGENT_PROTOCOL_SCHEMA_VERSION, AgentErrorInfo, AgentId, AgentIntent,
-    AgentMessage, AgentResult, AgentStatusUpdate, agent_message_json_schema,
+    AgentMessage, AgentResult, AgentSession, AgentStatusUpdate, CapabilityNegotiationRequest,
+    CapabilityNegotiationResponse, DelegationRequest, DelegationResponse, IntentKind,
+    agent_message_json_schema,
 };
 use zap_capability::{
     CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
@@ -334,6 +336,33 @@ enum CapabilityCacheCommand {
 
 #[derive(Debug, Subcommand)]
 enum AgentCommand {
+    /// Build an agent session JSON message without sending it.
+    Session {
+        #[arg(long)]
+        session_id: Option<Uuid>,
+        #[arg(long)]
+        root_intent_id: Option<Uuid>,
+        #[arg(long)]
+        parent_session_id: Option<Uuid>,
+        #[arg(long)]
+        owner_agent: String,
+        #[arg(long, default_value = "queued")]
+        status: String,
+        #[arg(long)]
+        created_at_micros: Option<u64>,
+        #[arg(long)]
+        updated_at_micros: Option<u64>,
+        #[arg(long = "accepted-capability")]
+        accepted_capabilities: Vec<String>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
     /// Build an agent intent JSON message without sending it.
     Intent {
         #[arg(long)]
@@ -410,6 +439,82 @@ enum AgentCommand {
         error_message: Option<String>,
         #[arg(long)]
         completed_at_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent delegation request or response JSON message without sending it.
+    Delegate {
+        #[arg(long)]
+        response: bool,
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        delegation_id: Option<Uuid>,
+        #[arg(long)]
+        parent_intent_id: Option<Uuid>,
+        #[arg(long)]
+        from_agent: Option<String>,
+        #[arg(long)]
+        to_agent: Option<String>,
+        #[arg(long)]
+        respondent_agent: Option<String>,
+        #[arg(long, default_value = "accepted")]
+        decision: String,
+        #[arg(long)]
+        assigned_agent: Option<String>,
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long = "capability")]
+        required_capabilities: Vec<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        estimated_completion_unix_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent capability negotiation request or response JSON message without sending it.
+    Negotiate {
+        #[arg(long)]
+        response: bool,
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        negotiation_id: Option<Uuid>,
+        #[arg(long)]
+        requester_agent: Option<String>,
+        #[arg(long)]
+        responder_agent: Option<String>,
+        #[arg(long, default_value = "partial")]
+        decision: String,
+        #[arg(long = "required-capability")]
+        required_capabilities: Vec<String>,
+        #[arg(long = "optional-capability")]
+        optional_capabilities: Vec<String>,
+        #[arg(long = "accepted-capability")]
+        accepted_capabilities: Vec<String>,
+        #[arg(long = "unsupported-capability")]
+        unsupported_capabilities: Vec<String>,
+        #[arg(long = "intent-kind")]
+        desired_intents: Vec<String>,
+        #[arg(long = "supported-intent")]
+        supported_intents: Vec<String>,
+        #[arg(long)]
+        expires_at_unix_micros: Option<u64>,
+        #[arg(long)]
+        reason: Option<String>,
         /// JSON object to place in payload.metadata.
         #[arg(long)]
         metadata: Option<String>,
@@ -5115,6 +5220,31 @@ fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
 
 fn agent(command: AgentCommand) -> Result<()> {
     match command {
+        AgentCommand::Session {
+            session_id,
+            root_intent_id,
+            parent_session_id,
+            owner_agent,
+            status,
+            created_at_micros,
+            updated_at_micros,
+            accepted_capabilities,
+            metadata,
+            out,
+            force,
+        } => agent_session(
+            session_id,
+            root_intent_id,
+            parent_session_id,
+            &owner_agent,
+            &status,
+            created_at_micros,
+            updated_at_micros,
+            &accepted_capabilities,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
         AgentCommand::Intent {
             session_id,
             intent_id,
@@ -5192,6 +5322,78 @@ fn agent(command: AgentCommand) -> Result<()> {
             out.as_deref(),
             force,
         ),
+        AgentCommand::Delegate {
+            response,
+            session_id,
+            delegation_id,
+            parent_intent_id,
+            from_agent,
+            to_agent,
+            respondent_agent,
+            decision,
+            assigned_agent,
+            objective,
+            required_capabilities,
+            reason,
+            estimated_completion_unix_micros,
+            metadata,
+            out,
+            force,
+        } => agent_delegate(AgentDelegateOptions {
+            response,
+            session_id,
+            delegation_id,
+            parent_intent_id,
+            from_agent: from_agent.as_deref(),
+            to_agent: to_agent.as_deref(),
+            respondent_agent: respondent_agent.as_deref(),
+            decision: &decision,
+            assigned_agent: assigned_agent.as_deref(),
+            objective,
+            required_capabilities: &required_capabilities,
+            reason,
+            estimated_completion_unix_micros,
+            metadata: metadata.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
+        AgentCommand::Negotiate {
+            response,
+            session_id,
+            negotiation_id,
+            requester_agent,
+            responder_agent,
+            decision,
+            required_capabilities,
+            optional_capabilities,
+            accepted_capabilities,
+            unsupported_capabilities,
+            desired_intents,
+            supported_intents,
+            expires_at_unix_micros,
+            reason,
+            metadata,
+            out,
+            force,
+        } => agent_negotiate(AgentNegotiateOptions {
+            response,
+            session_id,
+            negotiation_id,
+            requester_agent: requester_agent.as_deref(),
+            responder_agent: responder_agent.as_deref(),
+            decision: &decision,
+            required_capabilities: &required_capabilities,
+            optional_capabilities: &optional_capabilities,
+            accepted_capabilities: &accepted_capabilities,
+            unsupported_capabilities: &unsupported_capabilities,
+            desired_intents: &desired_intents,
+            supported_intents: &supported_intents,
+            expires_at_unix_micros,
+            reason,
+            metadata: metadata.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
         AgentCommand::Validate {
             input,
             subject,
@@ -5199,6 +5401,38 @@ fn agent(command: AgentCommand) -> Result<()> {
         } => agent_validate(input.as_deref(), subject.as_deref(), json),
         AgentCommand::Schema { out, force } => agent_schema(out.as_deref(), force),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_session(
+    session_id: Option<Uuid>,
+    root_intent_id: Option<Uuid>,
+    parent_session_id: Option<Uuid>,
+    owner_agent: &str,
+    status: &str,
+    created_at_micros: Option<u64>,
+    updated_at_micros: Option<u64>,
+    accepted_capabilities: &[String],
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let created_at_micros = match created_at_micros {
+        Some(value) => value,
+        None => now_micros()?,
+    };
+    let mut session = AgentSession::new(
+        session_id.unwrap_or_else(Uuid::new_v4),
+        AgentId::new(owner_agent)?,
+        created_at_micros,
+    );
+    session.root_intent_id = root_intent_id;
+    session.parent_session_id = parent_session_id;
+    session.status = parse_agent_enum("status", status)?;
+    session.updated_at_micros = updated_at_micros.unwrap_or(created_at_micros);
+    session.accepted_capabilities = parse_capability_set(accepted_capabilities)?;
+    session.metadata = parse_optional_json_object("metadata", metadata)?;
+    write_agent_message(&AgentMessage::Session(session), out, force)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5306,6 +5540,125 @@ fn agent_result(
     write_agent_message(&AgentMessage::Result(result), out, force)
 }
 
+struct AgentDelegateOptions<'a> {
+    response: bool,
+    session_id: Uuid,
+    delegation_id: Option<Uuid>,
+    parent_intent_id: Option<Uuid>,
+    from_agent: Option<&'a str>,
+    to_agent: Option<&'a str>,
+    respondent_agent: Option<&'a str>,
+    decision: &'a str,
+    assigned_agent: Option<&'a str>,
+    objective: Option<String>,
+    required_capabilities: &'a [String],
+    reason: Option<String>,
+    estimated_completion_unix_micros: Option<u64>,
+    metadata: Option<&'a str>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+fn agent_delegate(options: AgentDelegateOptions<'_>) -> Result<()> {
+    let delegation_id = options.delegation_id.unwrap_or_else(Uuid::new_v4);
+    let metadata = parse_optional_json_object("metadata", options.metadata)?;
+    let message = if options.response {
+        AgentMessage::DelegationResponse(DelegationResponse {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            delegation_id,
+            session_id: options.session_id,
+            respondent_agent: AgentId::new(required_agent_arg(
+                "--respondent-agent",
+                options.respondent_agent,
+            )?)?,
+            decision: parse_agent_enum("decision", options.decision)?,
+            assigned_agent: options.assigned_agent.map(AgentId::new).transpose()?,
+            accepted_capabilities: parse_capability_set(options.required_capabilities)?,
+            reason: options.reason,
+            estimated_completion_unix_micros: options.estimated_completion_unix_micros,
+            metadata,
+        })
+    } else {
+        AgentMessage::DelegationRequest(DelegationRequest {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            delegation_id,
+            session_id: options.session_id,
+            parent_intent_id: options
+                .parent_intent_id
+                .ok_or_else(|| anyhow!("--parent-intent-id is required for delegation requests"))?,
+            from_agent: AgentId::new(required_agent_arg("--from-agent", options.from_agent)?)?,
+            to_agent: options.to_agent.map(AgentId::new).transpose()?,
+            objective: options
+                .objective
+                .ok_or_else(|| anyhow!("--objective is required for delegation requests"))?,
+            required_capabilities: parse_capability_set(options.required_capabilities)?,
+            constraints: Vec::new(),
+            context: Vec::new(),
+            deadline_unix_micros: None,
+            metadata,
+        })
+    };
+    write_agent_message(&message, options.out, options.force)
+}
+
+struct AgentNegotiateOptions<'a> {
+    response: bool,
+    session_id: Uuid,
+    negotiation_id: Option<Uuid>,
+    requester_agent: Option<&'a str>,
+    responder_agent: Option<&'a str>,
+    decision: &'a str,
+    required_capabilities: &'a [String],
+    optional_capabilities: &'a [String],
+    accepted_capabilities: &'a [String],
+    unsupported_capabilities: &'a [String],
+    desired_intents: &'a [String],
+    supported_intents: &'a [String],
+    expires_at_unix_micros: Option<u64>,
+    reason: Option<String>,
+    metadata: Option<&'a str>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+fn agent_negotiate(options: AgentNegotiateOptions<'_>) -> Result<()> {
+    let negotiation_id = options.negotiation_id.unwrap_or_else(Uuid::new_v4);
+    let metadata = parse_optional_json_object("metadata", options.metadata)?;
+    let message = if options.response {
+        AgentMessage::CapabilityNegotiationResponse(CapabilityNegotiationResponse {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            negotiation_id,
+            session_id: options.session_id,
+            responder_agent: AgentId::new(required_agent_arg(
+                "--responder-agent",
+                options.responder_agent,
+            )?)?,
+            decision: parse_agent_enum("decision", options.decision)?,
+            accepted_capabilities: parse_capability_set(options.accepted_capabilities)?,
+            unsupported_capabilities: parse_capability_set(options.unsupported_capabilities)?,
+            supported_intents: parse_intent_kind_set(options.supported_intents)?,
+            expires_at_unix_micros: options.expires_at_unix_micros,
+            reason: options.reason,
+            metadata,
+        })
+    } else {
+        AgentMessage::CapabilityNegotiationRequest(CapabilityNegotiationRequest {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            negotiation_id,
+            session_id: options.session_id,
+            requester_agent: AgentId::new(required_agent_arg(
+                "--requester-agent",
+                options.requester_agent,
+            )?)?,
+            required_capabilities: parse_capability_set(options.required_capabilities)?,
+            optional_capabilities: parse_capability_set(options.optional_capabilities)?,
+            desired_intents: parse_intent_kind_set(options.desired_intents)?,
+            metadata,
+        })
+    };
+    write_agent_message(&message, options.out, options.force)
+}
+
 fn write_agent_message(message: &AgentMessage, out: Option<&Path>, force: bool) -> Result<()> {
     let json = serde_json::to_string_pretty(message)?;
     AgentMessage::from_json_str(&json)?;
@@ -5316,6 +5669,24 @@ fn write_agent_message(message: &AgentMessage, out: Option<&Path>, force: bool) 
             Ok(())
         }
     }
+}
+
+fn required_agent_arg<'a>(name: &str, value: Option<&'a str>) -> Result<&'a str> {
+    value.ok_or_else(|| anyhow!("{name} is required"))
+}
+
+fn parse_capability_set(input: &[String]) -> Result<BTreeSet<CapabilityId>> {
+    input
+        .iter()
+        .map(|capability| CapabilityId::new(capability.clone()).map_err(Into::into))
+        .collect()
+}
+
+fn parse_intent_kind_set(input: &[String]) -> Result<BTreeSet<IntentKind>> {
+    input
+        .iter()
+        .map(|kind| parse_agent_enum("intent-kind", kind))
+        .collect()
 }
 
 fn parse_agent_enum<T>(field: &str, input: &str) -> Result<T>
