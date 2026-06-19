@@ -3,6 +3,8 @@ package zap
 import (
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +43,84 @@ func TestRegistryBundleManifestControlFrameRoundTrips(t *testing.T) {
 	if !body.RequirePublication || !body.RequireDrivers {
 		raw, _ := json.Marshal(body)
 		t.Fatalf("body = %s", raw)
+	}
+}
+
+func TestRegistryBundleManifestRequestFixtureMatchesSDK(t *testing.T) {
+	var fixture struct {
+		Envelope struct {
+			KindName    string `json:"kind_name"`
+			KindValue   uint16 `json:"kind_value"`
+			Subject     string `json:"subject"`
+			ContentType string `json:"content_type"`
+		} `json:"envelope"`
+		BodyJSON RegistryBundleManifestRequest `json:"body_json"`
+	}
+	loadRootFixture(t, "zenv-control-registry-bundle-manifest-request.json", &fixture)
+
+	frame, err := RegistryBundleManifestRequestFrame(
+		fixture.BodyJSON.RequirePublication,
+		fixture.BodyJSON.RequireDrivers,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := frame.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeControlFrame(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.Envelope.KindName != "control" || fixture.Envelope.KindValue != uint16(KindControl) {
+		t.Fatalf("fixture kind mismatch: %+v", fixture.Envelope)
+	}
+	if decoded.Subject != fixture.Envelope.Subject {
+		t.Fatalf("subject = %q, fixture = %q", decoded.Subject, fixture.Envelope.Subject)
+	}
+	if decoded.ContentType != fixture.Envelope.ContentType {
+		t.Fatalf("content_type = %q, fixture = %q", decoded.ContentType, fixture.Envelope.ContentType)
+	}
+	var body RegistryBundleManifestRequest
+	if err := decoded.JSONBody(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body != fixture.BodyJSON {
+		t.Fatalf("body = %+v, fixture = %+v", body, fixture.BodyJSON)
+	}
+}
+
+func TestControlSubjectFixtureContainsSDKRegistrySubjects(t *testing.T) {
+	var fixture struct {
+		Envelope struct {
+			KindValue uint16 `json:"kind_value"`
+		} `json:"envelope"`
+		Subjects []struct {
+			Subject     string `json:"subject"`
+			ContentType string `json:"content_type"`
+		} `json:"subjects"`
+	}
+	loadRootFixture(t, "control-subjects-v1.json", &fixture)
+
+	if fixture.Envelope.KindValue != uint16(KindControl) {
+		t.Fatalf("control fixture kind = %d", fixture.Envelope.KindValue)
+	}
+	subjects := map[string]string{}
+	for _, entry := range fixture.Subjects {
+		subjects[entry.Subject] = entry.ContentType
+	}
+	expected := map[string]string{
+		RegistryIndexRequestSubject:   RegistryIndexContentType,
+		RegistryIndexResponseSubject:  RegistryIndexContentType,
+		BundleManifestRequestSubject:  RegistryBundleContentType,
+		BundleManifestResponseSubject: RegistryBundleContentType,
+	}
+	for subject, contentType := range expected {
+		if subjects[subject] != contentType {
+			t.Fatalf("fixture subject %s content type = %q, want %q", subject, subjects[subject], contentType)
+		}
 	}
 }
 
@@ -176,5 +256,17 @@ func TestUDPClientSendsControlEnvelope(t *testing.T) {
 	}
 	if response.Subject != BundleManifestRequestSubject {
 		t.Fatalf("subject = %q", response.Subject)
+	}
+}
+
+func loadRootFixture(t *testing.T, name string, out any) {
+	t.Helper()
+	path := filepath.Join("..", "..", "fixtures", name)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatalf("parse fixture %s: %v", name, err)
 	}
 }

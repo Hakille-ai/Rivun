@@ -1,0 +1,62 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Current v1 ZENV control subjects and JSON media types.",
+  "envelope": {
+    "magic": "ZENV",
+    "version": 1,
+    "kind_name": "control",
+    "kind_value": 8
+  },
+  "subjects": [
+    {
+      "subject": "zap.capability.query",
+      "content_type": "application/zap-capability+json",
+      "purpose": "Ask a peer for advertised capabilities and grants."
+    },
+    {
+      "subject": "zap.capability.response",
+      "content_type": "application/zap-capability+json",
+      "purpose": "Return a signed peer capability advertisement."
+    },
+    {
+      "subject": "zap.poa.validator_set.request",
+      "content_type": "application/zap-poa-validator-set+json",
+      "purpose": "Request a signed versioned PoA validator set from a peer."
+    },
+    {
+      "subject": "zap.poa.validator_set.response",
+      "content_type": "application/zap-poa-validator-set+json",
+      "purpose": "Return a signed PoA validator set or an unavailable reason."
+    },
+    {
+      "subject": "zap.registry.index.request",
+      "content_type": "application/zap-registry-index+json",
+      "purpose": "Request a peer's ZapStore registry index."
+    },
+    {
+      "subject": "zap.registry.index.response",
+      "content_type": "application/zap-registry-index+json",
+      "purpose": "Return a registry index or an unavailable reason."
+    },
+    {
+      "subject": "zap.registry.bundle.manifest.request",
+      "content_type": "application/zap-registry-bundle-manifest+json",
+      "purpose": "Request a peer's ZapStore bundle manifest."
+    },
+    {
+      "subject": "zap.registry.bundle.manifest.response",
+      "content_type": "application/zap-registry-bundle-manifest+json",
+      "purpose": "Return a bundle manifest or an unavailable reason."
+    },
+    {
+      "subject": "zap.receipts.request",
+      "content_type": "application/zap-receipts+json",
+      "purpose": "Request signed receipts from a peer receipt log."
+    },
+    {
+      "subject": "zap.receipts.response",
+      "content_type": "application/zap-receipts+json",
+      "purpose": "Return verified signed receipts, with a truncation flag."
+    }
+  ]
+}

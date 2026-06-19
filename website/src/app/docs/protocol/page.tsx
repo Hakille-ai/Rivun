@@ -105,7 +105,7 @@ export default function ProtocolPage() {
                 <TableCell className="px-6 py-4 font-mono text-xs text-zinc-400">8</TableCell>
                 <TableCell className="px-6 py-4 font-mono text-xs text-zinc-400">16</TableCell>
                 <TableCell className="px-6 py-4 font-mono text-xs white font-medium">SOURCE_NODE</TableCell>
-                <TableCell className="px-6 py-4 text-sm text-zinc-300">Cryptographic Node UUID derived from sender's public identity</TableCell>
+                <TableCell className="px-6 py-4 text-sm text-zinc-300">Cryptographic Node UUID derived from sender&apos;s public identity</TableCell>
               </TableRow>
               <TableRow className="hover:bg-zinc-950/20">
                 <TableCell className="px-6 py-4 font-mono text-xs text-zinc-400">24</TableCell>

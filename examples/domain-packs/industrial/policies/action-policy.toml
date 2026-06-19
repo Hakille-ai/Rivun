@@ -1,0 +1,57 @@
+[[rules]]
+name = "allow-telemetry-read-with-grant"
+kind = "action"
+subject = "telemetry.read"
+decision = "require_grant"
+required_capability = "telemetry.read"
+reason = "industrial telemetry reads must be scoped to approved assets, protocols, and time windows"
+
+[[rules]]
+name = "require-grant-for-simulation"
+kind = "action"
+subject = "simulation.run"
+decision = "require_grant"
+required_capability = "simulation.run"
+reason = "simulation runs must be attached to an approved asset model, scenario, and bounded plan"
+
+[[rules]]
+name = "human-approval-for-opcua-writes"
+kind = "action"
+subject = "opcua.node.write"
+decision = "human_approval"
+reason = "OPC UA writes can change physical equipment state and require reviewed simulation evidence"
+
+[[rules]]
+name = "human-approval-for-modbus-writes"
+kind = "action"
+subject = "modbus.register.write"
+decision = "human_approval"
+reason = "Modbus register or coil writes can affect live control loops and require operator approval"
+
+[[rules]]
+name = "require-poa-for-robot-motion"
+kind = "action"
+subject = "robot.motion.command"
+decision = "require_poa"
+reason = "robot motion is safety-critical and must carry proof of authority, cell state, and exclusion-zone evidence"
+
+[[rules]]
+name = "require-poa-for-plc-program-update"
+kind = "action"
+subject = "plc.program.update"
+decision = "require_poa"
+reason = "PLC program updates can alter plant behavior and require proof of authority plus change-control evidence"
+
+[[rules]]
+name = "require-poa-for-safety-interlock-override"
+kind = "action"
+subject = "safety.interlock.override"
+decision = "require_poa"
+reason = "safety interlock changes require proof of authority, lockout/tagout evidence, and named human accountability"
+
+[[rules]]
+name = "deny-unlisted-industrial-actions"
+kind = "action"
+subject = "*"
+decision = "deny"
+reason = "industrial automation pack denies unlisted actions by default"

@@ -61,7 +61,7 @@ export default function UseCasesPage() {
               Autonomous AI agents need to orchestrate complex tasks, pass contexts, and request actions from other tools. ZAP secures this loop:
             </p>
             <ul className="space-y-1.5 list-disc pl-5 text-zinc-300">
-              <li><strong>Cryptographic Attribution:</strong> Every instruction carries the agent node's Ed25519 signature, preventing prompt injection or payload tampering.</li>
+              <li><strong>Cryptographic Attribution:</strong> Every instruction carries the agent node&apos;s Ed25519 signature, preventing prompt injection or payload tampering.</li>
               <li><strong>Chain Audits:</strong> Causal correlation IDs chain agent operations. Processing outputs generate signed receipts committed to the hash ledger.</li>
             </ul>
           </CardContent>
@@ -86,7 +86,7 @@ export default function UseCasesPage() {
             </p>
             <ul className="space-y-1.5 list-disc pl-5 text-zinc-300">
               <li><strong>No Head-of-Line Blocking:</strong> Direct UDP datagram routing over ChaCha20-Poly1305 skips the TCP handshake and HOL blocking of TLS tunnels.</li>
-              <li><strong>Validator Consensus Quorum:</strong> High-risk device commands (e.g. <code>"arm.rotate_degrees"</code>) are blocked unless accompanied by threshold validation attestations (Proof-of-Action).</li>
+              <li><strong>Validator Consensus Quorum:</strong> High-risk device commands (e.g. <code>&quot;arm.rotate_degrees&quot;</code>) are blocked unless accompanied by threshold validation attestations (Proof-of-Action).</li>
             </ul>
           </CardContent>
         </Card>

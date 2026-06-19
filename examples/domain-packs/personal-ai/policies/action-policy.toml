@@ -1,0 +1,111 @@
+[[rules]]
+name = "allow-calendar-read-with-explicit-grant"
+kind = "action"
+subject = "calendar.read"
+decision = "require_grant"
+required_capability = "calendar.read"
+reason = "calendar reads must be scoped to an explicit account, time window, and purpose"
+
+[[rules]]
+name = "allow-email-read-with-explicit-grant"
+kind = "action"
+subject = "email.read"
+decision = "require_grant"
+required_capability = "email.read"
+reason = "email reads must be bounded by mailbox, thread, label, search query, or message identifiers"
+
+[[rules]]
+name = "allow-memory-read-with-explicit-grant"
+kind = "action"
+subject = "memory.read"
+decision = "require_grant"
+required_capability = "memory.read"
+reason = "local memory reads must be scoped to a named namespace and explicit user purpose"
+
+[[rules]]
+name = "gate-email-drafts"
+kind = "action"
+subject = "email.draft"
+decision = "require_grant"
+required_capability = "email.draft"
+reason = "draft creation and edits require an explicit mailbox and draft-operation grant"
+
+[[rules]]
+name = "gate-calendar-proposals"
+kind = "action"
+subject = "calendar.propose"
+decision = "require_grant"
+required_capability = "calendar.propose"
+reason = "calendar proposals may affect schedule state and must stay proposal-only under a grant"
+
+[[rules]]
+name = "gate-file-writes"
+kind = "action"
+subject = "file.write"
+decision = "require_grant"
+required_capability = "file.write"
+reason = "file writes must be bounded by an approved path, artifact type, and overwrite policy"
+
+[[rules]]
+name = "gate-memory-writes"
+kind = "action"
+subject = "memory.write"
+decision = "require_grant"
+required_capability = "memory.write"
+reason = "durable memory writes require an explicit namespace, retention scope, and user-visible summary"
+
+[[rules]]
+name = "require-human-approval-for-email-send"
+kind = "action"
+subject = "email.send"
+decision = "human_approval"
+reason = "sending, forwarding, or replying to email can create external commitments and requires human approval"
+
+[[rules]]
+name = "require-human-approval-for-file-share"
+kind = "action"
+subject = "file.share"
+decision = "human_approval"
+reason = "sharing files can expose private data, so recipients, visibility, and content summary must be approved"
+
+[[rules]]
+name = "require-human-approval-for-browser-automation"
+kind = "action"
+subject = "browser.automate"
+decision = "human_approval"
+reason = "browser automation in authenticated or third-party contexts requires human approval before execution"
+
+[[rules]]
+name = "require-human-approval-for-commerce-proposals"
+kind = "action"
+subject = "commerce.propose"
+decision = "human_approval"
+reason = "commerce workflows must remain proposal-only and require approval before carts, quotes, or bookings are prepared"
+
+[[rules]]
+name = "require-poa-for-money-execution"
+kind = "action"
+subject = "money.execute"
+decision = "require_poa"
+reason = "monetary commitments require proof of authority and must never be executed from an implicit assistant request"
+
+[[rules]]
+name = "deny-credential-actions"
+kind = "action"
+subject = "credential.use"
+decision = "deny"
+reason = "credential use, disclosure, rotation, or delegation is denied by default for personal assistant workflows"
+
+[[rules]]
+name = "require-poa-for-destructive-data-actions"
+kind = "action"
+subject = "data.destroy"
+decision = "require_poa"
+reason = "destructive personal data actions require proof of authority, reversible plan review when possible, and audit evidence"
+
+[[rules]]
+name = "deny-unlisted-personal-ai-actions"
+kind = "action"
+subject = "*"
+decision = "deny"
+reason = "personal-ai pack denies unlisted actions by default"

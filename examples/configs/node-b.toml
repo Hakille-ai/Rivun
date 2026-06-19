@@ -1,25 +1,80 @@
 bind = "127.0.0.1:7001"
 key_file = "../../.zap/node-b.key"
 require_signed = true
+routes = []
 
 [[peers]]
-# Replace with node A's generated node_id before running.
-node_id = "11111111-1111-4111-8111-111111111111"
+node_id = "407550da-0728-831c-a40a-d3d733b0c517"
 addr = "127.0.0.1:7000"
-# Replace with node A's generated public_key before running.
-public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+public_key = "Ut+edi9Dv6S3tIcBEZTxSXlFN96A1c+1IkBVP+UR14k"
 transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
+
+[peers.trust]
+status = "trusted"
+allow_send = true
+allow_receive = true
+allow_forward = true
+allow_poa_attestation = true
+labels = []
 
 [[drivers]]
 action = "thermostat.setpoint"
 path = "../wasm-drivers/thermostat/thermostat.wat"
 
 [runtime]
+max_memory_bytes = 16777216
 fuel = 10000000
 timeout_ms = 1000
-max_memory_bytes = 16777216
 max_output_bytes = 1048576
+
+[runtime.permissions]
+network = false
+filesystem = false
+clock = false
+environment = false
+emit_event = false
+memory_read = false
+memory_write = false
+device_call = false
+max_host_call_bytes = 4096
 
 [security]
 max_clock_skew_micros = 300000000
 replay_cache_capacity = 4096
+
+[trust]
+require_peer_expiry = false
+
+[poa]
+required_threshold = 1
+validator_set = "../../.zap/poa-validators.json"
+validator_set_authority = "ub04BmALK4loxSDH2CYepq8cy/qWaJuJQdKeGSkKRzY"
+
+[[poa.validators]]
+node_id = "407550da-0728-831c-a40a-d3d733b0c517"
+public_key = "Ut+edi9Dv6S3tIcBEZTxSXlFN96A1c+1IkBVP+UR14k"
+
+[receipts]
+
+[registry]
+require_signature = false
+
+[memory]
+allow_driver_read = false
+allow_driver_write = false
+
+[capability_policy]
+grants = []
+requirements = []
+require_grants_for_advertised = false
+
+[capability_cache]
+
+[discovery]
+
+[message_policy]
+rules = []
+
+[message_schema]
+require_match = false
+contracts = []

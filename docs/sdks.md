@@ -26,6 +26,47 @@ Each SDK also includes base ZapStore types for registry index entries, bundle
 manifests, bundle entries, install plan requests, install plans, and install
 plan entries.
 
+Shared protocol fixtures live in `fixtures/`. They provide readable JSON
+examples for ZENV control envelopes, agent protocol payloads, and the current
+control subject catalogue so SDK tests can converge on the same field names and
+media types.
+
+## Shared Fixtures
+
+The fixture directory is the SDK conformance source of truth for stable protocol
+examples:
+
+- `zenv-control-registry-bundle-manifest-request.json`: a v1 `ZENV` control
+  envelope carrying `zap.registry.bundle.manifest.request`.
+- `control-subjects-v1.json`: the current v1 control subject catalogue and
+  media types.
+- `agent-intent-message-v1.json`: a v1 `application/zap-agent+json` intent
+  payload that can be carried by SDK control envelope helpers.
+
+When adding a fixture, keep it small, readable, and deterministic. Include a
+`fixture_schema_version`, a short `description`, the protocol subject and media
+type, and a JSON body that can be asserted by at least one SDK test. Prefer
+adding or updating tests in every SDK that can parse the fixture without pulling
+in extra runtime services.
+
+## Conformance Matrix
+
+| SDK | ZENV encode/decode | ZapStore payloads | Shared fixture tests | Integrity helpers | Local test command |
+| --- | --- | --- | --- | --- | --- |
+| Python | Yes | Yes | `zenv`, `control-subjects`, `agent-intent` | Shape validation always; BLAKE3 and Ed25519 with `crypto` extra | `python -m unittest discover -s sdks/python/tests` |
+| TypeScript | Yes | Yes | `zenv`, `control-subjects`, `agent-intent` | BLAKE3 and Ed25519 through Noble packages | `npm --prefix sdks/typescript test` |
+| Go | Yes | Yes | `zenv`, `control-subjects` | BLAKE3 and standard Ed25519 | `go test ./sdks/go/...` |
+| Rust | Yes, via canonical crates | Yes, via canonical crates | Protocol round-trip tests in crate; root fixture tests not yet mirrored | Canonical ZAP crate helpers | `cargo test --manifest-path sdks/rust/Cargo.toml` |
+
+Known limitations:
+
+- Go checks require a local Go toolchain. CI installs Go before running the SDK
+  workflow, but a workstation without `go` cannot run `go test ./sdks/go/...`.
+- Python cryptographic hashing and signature verification require
+  `python -m pip install -e "sdks/python[crypto]"`.
+- Rust intentionally depends on local path crates, so it is the reference SDK
+  for canonical behavior rather than a dependency-free client package.
+
 ## Integrity Helpers
 
 ZapStore artifact hashes are canonical `blake3:<64 hex chars>` values.

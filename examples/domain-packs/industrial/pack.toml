@@ -1,0 +1,59 @@
+schema_version = 1
+id = "zap-pack-industrial"
+name = "Industrial Automation"
+version = "0.1.0"
+status = "preview"
+description = "Auditable industrial automation workflows for PLC, OPC UA, Modbus, robotics, and safety-critical operations."
+
+[compatibility]
+zap_protocol = ">=0.1.0,<1.0.0"
+driver_abi = ">=1,<=2"
+
+[[capabilities]]
+id = "telemetry.read"
+risk = "low"
+description = "Read bounded PLC, OPC UA, Modbus, robot, safety relay, and historian telemetry."
+
+[[capabilities]]
+id = "simulation.run"
+risk = "low"
+requires = ["telemetry.read"]
+description = "Run an offline or digital-twin simulation before any industrial control action."
+
+[[capabilities]]
+id = "opcua.node.write"
+risk = "high"
+requires = ["telemetry.read", "simulation.run"]
+description = "Write a bounded OPC UA node value on an approved asset, namespace, and operating window."
+
+[[capabilities]]
+id = "modbus.register.write"
+risk = "high"
+requires = ["telemetry.read", "simulation.run"]
+description = "Write a bounded Modbus coil or register on an approved device and register range."
+
+[[capabilities]]
+id = "robot.motion.command"
+risk = "critical"
+requires = ["telemetry.read", "simulation.run"]
+description = "Command bounded robot motion, speed, jog, or program-step execution."
+
+[[capabilities]]
+id = "plc.program.update"
+risk = "critical"
+requires = ["telemetry.read", "simulation.run"]
+description = "Update, download, or activate PLC logic, ladder, function block, or structured-text programs."
+
+[[capabilities]]
+id = "safety.interlock.override"
+risk = "critical"
+requires = ["telemetry.read", "simulation.run"]
+description = "Override, bypass, reset, or change a safety interlock, safety relay, guard, or e-stop condition."
+
+[[policies]]
+path = "policies/action-policy.toml"
+description = "Baseline fail-closed policy for industrial automation and safety-critical actions."
+
+[[schemas]]
+path = "schemas/subjects.md"
+description = "Pack subject catalog and expected payload shape."

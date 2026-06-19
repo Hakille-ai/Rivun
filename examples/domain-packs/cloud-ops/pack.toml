@@ -1,0 +1,57 @@
+schema_version = 1
+id = "zap-pack-cloud-ops"
+name = "Cloud Operations"
+version = "0.1.0"
+status = "preview"
+description = "Auditable SRE, cloud operations, and incident response workflows over ZAP."
+
+[compatibility]
+zap_protocol = ">=0.1.0,<1.0.0"
+driver_abi = ">=1,<=2"
+
+[[capabilities]]
+id = "telemetry.read"
+risk = "low"
+description = "Read bounded metrics, traces, logs, events, and health signals from approved cloud systems."
+
+[[capabilities]]
+id = "incident.declare"
+risk = "medium"
+requires = ["telemetry.read"]
+description = "Create, update, or escalate an incident with bounded context and routing metadata."
+
+[[capabilities]]
+id = "service.scale"
+risk = "medium"
+requires = ["telemetry.read"]
+description = "Adjust bounded service replicas, concurrency, or autoscaling limits during operations."
+
+[[capabilities]]
+id = "traffic.shift"
+risk = "high"
+requires = ["telemetry.read"]
+description = "Shift bounded traffic across regions, cells, versions, or failover targets."
+
+[[capabilities]]
+id = "deploy.rollback"
+risk = "high"
+requires = ["telemetry.read", "incident.declare"]
+description = "Rollback a service deployment to a previously approved release artifact."
+
+[[capabilities]]
+id = "secret.rotate"
+risk = "critical"
+description = "Rotate production secrets, credentials, tokens, certificates, or signing keys."
+
+[[capabilities]]
+id = "data.purge"
+risk = "critical"
+description = "Delete, purge, or irreversibly expire cloud data, queues, cache keys, or storage objects."
+
+[[policies]]
+path = "policies/action-policy.toml"
+description = "Baseline fail-closed policy for cloud operations and incident response actions."
+
+[[schemas]]
+path = "schemas/subjects.md"
+description = "Pack subject catalog and expected payload shape."

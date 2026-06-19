@@ -1,142 +1,567 @@
 # Roadmap
 
-## Phase 1: Kernel Alpha
+ZAP is evolving from a secure low-latency message protocol into a universal
+trust fabric for agents, machines, services, and human-supervised automation.
+The goal is not to make ZAP a vague general-purpose platform. The goal is to
+make every important action in a distributed system typed, signed, policy-gated,
+sandboxed when needed, observable, and auditable after the fact.
 
-Implemented in this repository:
+This roadmap is intentionally ambitious. It defines the path from the current
+pre-1.0 foundation to a production-grade protocol and ecosystem that can be used
+across AI agents, robotics, industrial control, edge systems, cloud operations,
+personal automation, healthcare, finance, and other safety-sensitive domains.
 
-- strict ZAP-Wire header;
-- frame signing and verification;
-- encrypted UDP endpoint;
-- static peer discovery;
-- explicit capability discovery;
-- deterministic route planning;
-- auditable local memory store;
-- sandboxed WASM execution;
-- CLI, docs, tests, benches.
+## Product Thesis
 
-## Phase 2: Typed Agent Gateway
+ZAP should become the accountable execution layer for autonomous software and
+real-world automation:
 
-Foundation implemented:
+- typed intent before execution;
+- cryptographic identity for every node and agent;
+- deterministic policy before authority is granted;
+- explicit capability discovery without implicit trust;
+- Proof-of-Action for high-risk operations;
+- sandboxed drivers for untrusted extensions;
+- signed receipts and hash-chained memory for audit;
+- portable SDKs and gateways for broad adoption;
+- domain packs that make ZAP useful in many industries without weakening the
+  core safety model.
 
-- external agents and models emit strict typed `ZENV` messages instead of relying on an in-protocol natural-language compiler;
-- `zap send --kind ... --subject ...` sends typed messages directly;
-- `[message_policy]` rules can allow, deny, or require PoA for matching `kind` and `subject`;
-- `zap send --requires-consensus` marks frames with `REQUIRES_CONSENSUS` and attaches PoA certificates through local validator keys or network validators;
-- receiver-side policy rejects critical messages that arrive without required Proof-of-Action.
+## Current Foundation
 
-Next: publish SDK-friendly schemas for model gateways and richer policy authoring.
+Already implemented:
 
-Progress added:
+- strict `ZAP_` wire frame parsing and encoding;
+- `ZENV` universal envelopes for actions, events, data, commands, queries,
+  responses, streams, and control messages;
+- Ed25519 node identity, frame signing, verification, and PoA certificates;
+- encrypted UDP transport with static peers and replay protection;
+- peer trust contracts for send, receive, forward, expiry, and key rotation;
+- deterministic message policy for allow, deny, PoA, grant, human approval, and
+  simulation gates;
+- Wasmtime driver sandboxing with fuel, memory, timeout, output, and scoped host
+  call limits;
+- signed driver manifests, local ZapStore registries, publications, install
+  plans, and offline bundles;
+- capability advertisements, grants, requirements, route planning, and
+  hash-chained capability cache verification;
+- append-only memory and signed receipt ledgers;
+- CLI workflows for config validation, doctor checks, peers, trust, registry,
+  capabilities, routes, memory, receipts, schemas, policy, and PoA;
+- SDK previews for Rust, TypeScript, Python, and Go;
+- CI, tests, benches, Docker packaging, documentation, and an initial website.
 
-- `zap-schema` provides typed message contracts for agent gateways, machine
-  commands, JSON payload validation, and optional node-side allowlists.
-- `zap-policy` provides deterministic policy evaluation for `allow`, `deny`,
-  `require_poa`, `require_grant`, `human_approval`, and `simulate_first`.
-- `zap schema validate` and `zap policy evaluate` expose operator workflows for
-  preflight validation before messages are signed and sent.
+## North-Star Outcomes
 
-## Phase 3: SDKs and Driver Registry
+ZAP reaches the next maturity level when these outcomes are true:
 
-Foundation implemented:
+- a new developer can install ZAP, run a two-node demo, send a typed action, and
+  verify a receipt in less than five minutes;
+- production operators can run `doctor --strict` and trust that the daemon,
+  policy, registry, receipts, routes, PoA, and observability posture are checked;
+- every official SDK passes the same conformance fixtures for frames, envelopes,
+  signatures, datagrams, control messages, receipts, capabilities, and PoA;
+- high-risk actions are fail-closed by policy and cannot run without explicit
+  grants, PoA, human approval, or simulation when configured;
+- ZAP nodes expose real metrics and health status matching the Prometheus and
+  Grafana assets in the repository;
+- ZapStore can distribute signed drivers and domain packs through online and
+  offline workflows with rollback and revocation;
+- AI agent workflows can express intent, negotiate capabilities, delegate work,
+  execute actions, and produce terminal receipts without relying on hidden
+  natural-language interpretation inside the protocol;
+- domain packs make ZAP practical for concrete verticals such as agentic
+  development, smart buildings, industrial control, cloud operations, personal
+  AI, healthcare, and finance.
 
-- `zap-store` defines signed driver manifests;
-- `zap driver-manifest create` signs local WASM/WAT artifacts;
-- `zap driver-manifest verify` checks manifest signature, hash, ABI, and action;
-- local `registry.index.toml` files track active or revoked manifest versions;
-- `zap registry revoke` marks unsafe manifest versions as revoked;
-- `zap registry deprecate` marks migration-only releases that should not be
-  selected automatically by installers;
-- optional operator signatures can approve registry indexes for deployment gates;
-- `zap registry pull` fetches a peer registry index over signed control messages
-  and can require an expected operator public key;
-- `zap registry mirror` merges compatible signed peer indexes and preserves
-  revocation priority for unsafe driver versions;
-- `zap registry resolve` selects the highest active semantic version compatible
-  with an exact, caret, tilde, wildcard, or comparator requirement plus optional
-  ABI ranges such as `>=1,<=2`;
-- `zap registry migration add` records signed migration metadata on target
-  registry entries, including source version/ABI requirements, approval needs,
-  and optional migration drivers;
-- `zap registry publication create/verify` records a signed publication
-  statement over the canonical registry hash for release audit trails;
-- `zap registry plan create/verify` signs exact install plans from semantic
-  driver requests, ABI requirements, and migration metadata, then rechecks
-  registry hashes before rollout;
-- `zap registry bundle export/verify/import` packages signed registries,
-  publication metadata, manifests, and optional drivers for offline deployment;
-- `zap registry bundle pull-manifest` discovers a peer's published bundle
-  manifest over signed control frames before artifact transfer/import;
-- `zap-node` verifies configured manifests and registry entries before daemon startup;
-- `zap-driver-sdk` provides minimal ABI helpers for driver authors.
+## Execution Model
 
-Next: remote bundle artifact transfer, automated rollout execution, and
-fleet-level installation policy.
+The roadmap is split into delivery tracks so the project can grow without
+turning into one giant rewrite. Each track should ship independently, keep
+tests close to the behavior it changes, and leave operators with something
+usable at the end of every milestone.
 
-## Phase 4: Proof-of-Action Network
+### Track A: Trust Core
 
-Foundation implemented:
+Purpose: keep the protocol secure, deterministic, and auditable.
 
-- `REQUIRES_CONSENSUS` frames can carry `ZPOA` trailers;
-- validators sign a domain-separated digest of the signed frame;
-- `zap-node` verifies configured validator public keys and threshold before dispatch;
-- `zap send --requires-consensus` requires `--poa-validator-key` or `--poa-network` for consensus-protected frames.
-- `zap send --poa-network` can collect attestations from configured validator peers with an operator-controlled timeout;
-- portable PoA request/response JSON can be created with `zap poa request` and `zap poa attest`;
-- signed versioned validator sets can be created, verified, applied to config,
-  and loaded by `zap-node` through `[poa].validator_set`;
-- `zap poa validator-set pull` requests signed validator sets from configured
-  peers over `ZENV` control messages and verifies the nested authority
-  signature before writing JSON.
-- optional signed action receipts record processed actions for audit.
-- `zap receipts verify` checks signed receipt JSONL logs offline.
-- `zap receipts prune` applies verified timestamp-based retention to receipt logs.
-- `zap receipts merge` builds deduplicated verified receipt archives from multiple logs.
-- `zap receipts pull` requests signed receipts from configured peers over
-  `ZENV` control messages, verifies the response, and writes mergeable JSONL.
+Owns:
 
-Next: dynamic validator discovery, quorum policy hardening, and automated validator-set rollout.
+- frame, envelope, datagram, signature, and PoA compatibility;
+- message policy, trust contracts, grants, and fail-closed production defaults;
+- receipts, memory chains, replay windows, and evidence export;
+- protocol fixtures and SDK conformance gates.
 
-## Phase 5: Future Core Interfaces
+Definition of done:
 
-Foundation implemented:
+- every externally visible format has a fixture;
+- every high-risk path has an explicit policy decision and receipt trail;
+- compatibility breaks require a migration note and fixture update;
+- production profiles can prove that no critical action uses ambient authority.
 
-- `zap-capability` defines capability ids, driver permission contracts, local
-  advertisements, and signed query/response control subjects;
-- `zap-router` provides deterministic route rules and `zap route explain`;
-- `zap-node` applies routes before dispatch and can forward non-consensus
-  messages by creating new signed frames;
-- `zap-memory` provides append-only JSONL memory records, tombstones, pruning,
-  body hash verification, and entry-to-entry hash-chain verification;
-- `zap capability`, `zap route`, and `zap memory` expose operator workflows.
-- `zap doctor` provides a score-based readiness gate over config validation,
-  provenance, registry, receipts, PoA, memory, routing, and capability posture.
-- capability advertisements can carry configured policy grants and
-  requirements, with an optional gate requiring every advertised capability to
-  have an explicit grant.
-- remote capability query responses can be persisted in a hash-chained local
-  cache and verified offline before operator review or deployment automation.
-- peer routes can require a verified cached grant before forwarding messages to
-  a remote node.
+### Track B: Runtime and Fleet
 
-Next: live peer enrollment handshakes, distributed revocation propagation,
-package distribution, fleet ops, and stream/mesh transport.
+Purpose: make nodes reliable in real deployments.
 
-Progress added:
+Owns:
 
-- `DriverPermissions` now includes scoped host permissions for event emission,
-  local memory reads/writes, device-call requests, and per-call byte limits.
-- `zap-runtime` exposes deny-by-default `zap` WASM imports and captures host
-  calls as auditable runtime output.
-- `zap-node` commits permitted `memory_write` host calls to the hash-chained
-  memory store, preserving source node and frame hash.
-- peer trust contracts add local machine-communication permissions for send,
-  receive, route forwarding, PoA attestations, trust expiry, and transport-key
-  rotation age.
-- `zap trust enroll` and `zap trust inspect` provide operator workflows for
-  peer onboarding and trust posture review before nodes run.
-- `zap peer invite`, `zap peer accept`, `zap peer rotate`, and
-  `zap peer revoke` provide signed offline machine enrollment, transport-key
-  rotation, and local revocation workflows.
-- `zap capability cache refresh` actively queries configured peers, appends
-  signed advertisements to the verified JSONL cache, and reports skipped or
-  failed peers for strict deployment gates.
+- node orchestration, daemon lifecycle, health, metrics, and tracing;
+- routing, forwarding, capability cache, validators, and fleet topology;
+- driver runtime isolation, host ABI budgets, artifact transfer, and rollback;
+- transport expansion for streams and gateways.
+
+Definition of done:
+
+- `doctor --strict` catches unsafe runtime and fleet posture before launch;
+- metrics dashboards are backed by emitted daemon metrics;
+- staged rollout and rollback paths are tested with receipts;
+- runtime failures are classified, bounded, and visible to operators.
+
+### Track C: Adoption Surface
+
+Purpose: make ZAP easy to install, understand, integrate, and extend.
+
+Owns:
+
+- CLI ergonomics, quickstarts, website docs, and release packaging;
+- SDKs for Rust, TypeScript, Python, Go, and future languages;
+- domain packs, examples, gateways, and marketplace workflows;
+- contributor onboarding, RFC/ZEP process, and release communication.
+
+Definition of done:
+
+- a new user can complete a five-minute demo without reading internals;
+- official examples run in CI and stay linked from docs;
+- domain packs validate before publication;
+- SDK releases are blocked by shared conformance fixtures.
+
+## Priority Ladder
+
+Use this ladder when deciding what to build next:
+
+1. Safety invariants that prevent unsafe authority or broken audit trails.
+2. Conformance fixtures that prevent protocol drift across SDKs.
+3. Install, quickstart, and example flows that reduce adoption friction.
+4. Observability and production checks that make deployments operable.
+5. Domain packs and gateways that prove ZAP works outside the core repo.
+6. Performance work guided by measured bottlenecks and regression budgets.
+7. Developer-experience polish once the underlying workflow is reliable.
+
+This ordering matters. A new feature that expands reach should also strengthen
+identity, policy, receipts, observability, or conformance. If it does not, it
+should be treated as an integration experiment until those guarantees exist.
+
+## Roadmap Phases
+
+### Phase 0: Promise, Packaging, and Adoption Baseline
+
+Goal: make the project immediately understandable, installable, and credible.
+
+Deliverables:
+
+- define one canonical tagline and product explanation across README, website,
+  docs, and release notes;
+- add "Use ZAP when..." and "Do not use ZAP when..." guidance;
+- publish a clear comparison with MQTT, NATS, gRPC, Kafka, and generic service
+  meshes;
+- create a five-minute quickstart with expected terminal output;
+- add binary install instructions, Docker image instructions, and release
+  verification instructions;
+- add website pages for install, security, releases, governance, community, and
+  benchmarks;
+- sync website docs with repository docs to avoid drift;
+- add issue templates, PR template, CODEOWNERS, contributor map, and an RFC/ZEP
+  process for protocol, crypto, and ABI changes.
+
+Success metrics:
+
+- first-run demo works on Linux, macOS, and Windows;
+- website hero includes install command, GitHub link, docs link, and latest
+  release status;
+- docs site links every core repo doc;
+- release artifacts include checksums and verification steps.
+
+### Phase 1: Production Hardening
+
+Goal: convert existing safety primitives into continuous production signals and
+fail-closed deployment gates.
+
+Deliverables:
+
+- add daemon `/metrics` and `/healthz` endpoints;
+- emit metrics for frames sent, received, rejected, policy decisions, route
+  decisions, driver execution, PoA failures, registry status, receipt failures,
+  capability cache age, and replay rejection;
+- ensure every Prometheus rule references a metric that the daemon actually
+  exposes;
+- add structured spans around receive, verify, policy, route, execute, receipt,
+  and response paths without logging payloads;
+- add `message_policy.default_decision = "allow" | "deny"` with compatibility
+  default and production fail-closed profiles;
+- add `doctor --strict` checks for production policy coverage;
+- add receipt durability options: `fsync = always | interval | off`;
+- add receipt segment rotation, signed segment manifests, and indexed bounded
+  pulls;
+- add durable replay protection for post-restart windows where topology allows
+  it;
+- add per-action runtime budgets, `max_host_calls`, and classified runtime error
+  categories;
+- add production profile checks requiring signed manifests, signed registries,
+  receipts, replay protection, and strict policy coverage.
+
+Success metrics:
+
+- Grafana dashboards are non-empty after a smoke test;
+- no critical action can run through a default allow fallback in production mode;
+- pulling 500 receipts from a 1M-line log completes under a defined target;
+- replay after restart is rejected inside a configurable window;
+- runtime errors are classified as timeout, fuel, memory, permission, ABI,
+  host-call, or guest failure.
+
+### Phase 2: Protocol Spec and SDK Conformance
+
+Goal: make ZAP portable, testable, and safe across languages.
+
+Deliverables:
+
+- create a machine-readable protocol source of truth for constants, media types,
+  subjects, schema versions, error codes, frame fields, datagram fields, control
+  messages, and compatibility rules;
+- publish golden fixtures for unsigned frames, signed frames, auth trailers, PoA
+  trailers, `ZENV`, encrypted datagrams, ZapStore messages, capability messages,
+  receipts, and agent messages;
+- generate or validate SDK constants from the source of truth;
+- add SDK conformance tests for Rust, TypeScript, Python, and Go;
+- expand common SDK surfaces:
+  - envelope encode/decode;
+  - frame encode/decode/sign/verify;
+  - datagram encrypt/decrypt where the platform supports it;
+  - control request/response helpers;
+  - ZapStore registry, bundle, and install plan verification;
+  - capability query and verification;
+  - receipt verification and pull helpers;
+  - agent protocol contracts.
+- publish a compatibility matrix in `docs/sdks.md`;
+- add `zap fixtures verify --sdk <path>` and `zap schema export` workflows.
+
+Success metrics:
+
+- every official SDK passes the same fixture suite;
+- no critical protocol constant is hand-maintained differently per language;
+- fixture failures block SDK releases;
+- browser-compatible SDK mode exists for gateway/envelope workflows.
+
+### Phase 3: Agent Gateway and Accountable AI Workflows
+
+Goal: make ZAP the typed trust boundary between AI systems and the real world.
+
+Deliverables:
+
+- integrate `zap-agent` contracts into CLI, node, SDKs, receipts, and memory;
+- add CLI workflows:
+  - `zap agent intent`;
+  - `zap agent session`;
+  - `zap agent delegate`;
+  - `zap agent negotiate`;
+  - `zap agent status`;
+  - `zap agent result`.
+- wrap agent messages in `ZENV` with `application/zap-agent+json`;
+- link receipts to `intent_id`, `session_id`, `capabilities_used`, route
+  decision, policy decision, PoA summary, output hash, and artifact references;
+- define agent memory namespaces such as `agent.session`, `agent.observation`,
+  `agent.plan`, `agent.fact`, `agent.artifact`, and `policy.decision`;
+- add signed memory compaction records that reference source entries;
+- add `zap memory export-evidence` for audit bundles;
+- build adapters for OpenAI tool workflows, MCP, LangGraph, AutoGen, CrewAI, and
+  other agent frameworks without putting model-specific logic in the wire
+  protocol;
+- add an Agent Trace UI or report: intent -> negotiation -> policy -> route ->
+  execution -> receipt -> memory.
+
+Success metrics:
+
+- an agent workflow can be replayed from receipts and memory references;
+- a failed action shows the responsible intent, policy gate, route, and error
+  category;
+- model output is treated as proposed typed intent, never as automatic authority;
+- agent integrations use the same schemas and fixtures as SDKs.
+
+### Phase 4: Domain Packs and Capability Marketplace
+
+Goal: make ZAP universal by packaging safe, reusable domain knowledge.
+
+Domain packs should include:
+
+- capability taxonomy;
+- message schemas;
+- policy templates;
+- route templates;
+- PoA defaults;
+- simulation rules;
+- WASM drivers or gateway adapters;
+- example configs;
+- threat model notes;
+- receipts and dashboard templates;
+- conformance tests;
+- upgrade and migration metadata.
+
+Priority packs:
+
+- `zap-pack-agentic-dev`: repository, patch, test, CI, review, PR, and release
+  capabilities for auditable coding agents;
+- `zap-pack-smart-building`: sensors, thermostats, lighting, locks, alarms,
+  cameras, energy controls, and human/PoA gates for risky actions;
+- `zap-pack-industrial`: PLC, Modbus, OPC UA, robot, valve, motor, emergency
+  stop, safety quorum, and simulation-first defaults;
+- `zap-pack-cloud-ops`: deploy, rollback, restart, scale, secret rotation,
+  incident mitigation, and blast-radius limits;
+- `zap-pack-personal-ai`: calendar, email draft, files, browser actions, local
+  memory, and approval gates;
+- `zap-pack-healthcare`: record queries, alert routing, medical device commands,
+  privacy defaults, and strict audit;
+- `zap-pack-finance`: trade proposal, risk check, simulation, approval, execute,
+  reconciliation, and regulator-friendly evidence export.
+
+Marketplace deliverables:
+
+- add `zap pack init`, `build`, `sign`, `verify`, `publish`, `install`, and
+  `audit`;
+- extend ZapStore from driver registry to signed capability and domain-pack
+  registry;
+- add pack install plans that bind drivers, schemas, policies, routes, PoA
+  defaults, docs, and migrations;
+- support online and offline pack bundles;
+- add revocation and deprecation semantics for packs;
+- publish trust metadata: author, operator signature, test receipts, risk level,
+  required grants, simulator coverage, and compatibility range.
+
+Success metrics:
+
+- two complete packs ship with examples and tests before beta;
+- pack installation can be verified offline;
+- a revoked pack or driver cannot be selected by automatic resolution;
+- domain examples run end-to-end with receipts and policy checks.
+
+### Phase 5: Fleet, Mesh, and Multi-Transport Runtime
+
+Goal: operate ZAP across real fleets while preserving auditability.
+
+Deliverables:
+
+- convert the existing Noise helper into a live enrollment and session protocol;
+- keep static peers as a deterministic air-gapped mode;
+- add signed revocation propagation and trust epoch handling;
+- add dynamic validator discovery and signed validator-set rollout;
+- add quorum policies by subject, risk level, validator class, geography, or
+  operator group;
+- add fleet topology graph: nodes, peers, routes, capabilities, grants,
+  validator sets, registry versions, and receipt health;
+- add `zap fleet doctor`, `zap node health`, and `zap incident snapshot`;
+- add remote bundle artifact transfer with authenticated manifests and external
+  artifact-channel verification;
+- add staged rollout, canary, rollback, and deprecation enforcement;
+- add stream transport for large payloads, status streams, telemetry, and
+  backpressure while keeping UDP datagrams for low-latency messages;
+- add gateway transports:
+  - HTTP for SaaS and simple integrations;
+  - WebSocket for dashboards and browsers;
+  - gRPC for service backends;
+  - MQTT, NATS, Kafka, ROS2, OPC UA, and Modbus bridges for domain use cases.
+
+Success metrics:
+
+- validator set rotation can be performed without hand-editing configs;
+- fleet doctor identifies stale keys, stale capability caches, broken routes,
+  invalid registries, and PoA quorum gaps;
+- stream transport handles long-running agent status and large artifacts without
+  weakening frame-level identity and receipt trails;
+- bridge gateways preserve ZAP identity, policy, and audit semantics.
+
+### Phase 6: Architecture Modularization
+
+Goal: keep the codebase maintainable as the product grows.
+
+Deliverables:
+
+- reduce `zap-node` into a small orchestrator over clearer internal services;
+- split or module-bound these responsibilities:
+  - config model and validation;
+  - control message serving;
+  - discovery and capability cache;
+  - receipt service;
+  - registry and bundle service;
+  - PoA service;
+  - route and forwarding service;
+  - runtime execution service;
+  - observability service.
+- preserve public APIs and CLI behavior while extracting tests per boundary;
+- add stronger property and integration tests around invariants that cross
+  policy, routing, PoA, registry, receipts, and runtime;
+- define the stable extension points for drivers, gateways, domain packs, SDKs,
+  and operator services.
+
+Success metrics:
+
+- core node services can be tested without launching a full daemon;
+- new control subjects can be added with localized changes;
+- policy, route, registry, PoA, and receipt invariants have direct tests;
+- internal boundaries match the docs and threat model.
+
+### Phase 7: 1.0 Readiness
+
+Goal: make ZAP stable enough for serious external adoption.
+
+Release gates:
+
+- protocol compatibility matrix is published;
+- golden fixtures and conformance tests are public;
+- CLI reference is generated and versioned;
+- config schema reference is generated and versioned;
+- driver ABI stability policy is written;
+- threat model is reviewed externally;
+- third-party security audit plan is published;
+- benchmark methodology and baseline are published;
+- deprecation policy is explicit;
+- migration guide exists for every breaking change;
+- all official examples pass `doctor --strict`;
+- website, README, docs, SDKs, and release artifacts agree on version and
+  support status.
+
+Success metrics:
+
+- external users can build integrations using docs and SDKs without reading the
+  Rust internals;
+- protocol and SDK releases are gated by conformance;
+- operators can verify supply chain, runtime, policy, and receipt posture before
+  production rollout.
+
+## Cross-Cutting Workstreams
+
+### Security
+
+- fail-closed production policy;
+- durable replay windows;
+- stricter key rotation and expiry posture;
+- signed revocation propagation;
+- SBOM and provenance for releases;
+- safer defaults for registries, manifests, receipts, and drivers;
+- redacted tracing by default;
+- security advisories and audit process.
+
+### Performance
+
+- publish benchmark baselines per platform;
+- track SLOs for frame parse, sign, verify, route, policy, dispatch, UDP RTT,
+  receipt verification, and runtime execution;
+- add scale benchmarks for 1k peers, 10k routes, 1M receipts, and large payloads;
+- keep regression thresholds blocking in CI;
+- document what benchmarks measure and what they do not measure.
+
+### Observability and Operations
+
+- metrics and health endpoints;
+- production dashboards backed by real daemon metrics;
+- runbooks for registry invalid, PoA failing, receipt corruption, replay spikes,
+  driver failures, and capability cache staleness;
+- incident snapshot bundles;
+- chaos drills for release readiness.
+
+### SDKs and Interoperability
+
+- protocol source of truth;
+- generated constants and schemas;
+- conformance fixtures;
+- publishable packages for Python, TypeScript, Go, and Rust;
+- planned SDKs for Java/Kotlin, C#/.NET, C/C++, Swift, Dart, and browser-lite
+  workflows;
+- bridges for AI, IoT, industrial, cloud, data streaming, games, simulation,
+  and dashboards.
+
+### Documentation and Community
+
+- unified positioning;
+- install and quickstart pages;
+- domain examples;
+- "Edit this page" links;
+- docs search;
+- release notes and roadmap board;
+- GitHub Discussions;
+- good-first-issue guide;
+- RFC/ZEP governance;
+- architecture decision records.
+
+## Immediate Next 20 Tasks
+
+1. Unify the tagline and product explanation across README, website, and docs.
+2. Add `docs/install.md` with binary, Docker, and source install paths.
+3. Convert getting started into a five-minute quickstart with expected output.
+4. Add missing docs pages to the website navigation.
+5. Add issue templates, PR template, CODEOWNERS, and RFC/ZEP docs.
+6. Add real daemon `/metrics` and `/healthz` endpoints.
+7. Connect Prometheus rules and Grafana panels to emitted metrics.
+8. Add configurable `message_policy.default_decision`.
+9. Add production doctor checks for fail-closed policy coverage.
+10. Add receipt fsync mode, segment rotation, and indexed pull planning.
+11. Add durable replay protection design and implementation.
+12. Add runtime `max_host_calls` and per-action budgets.
+13. Create protocol fixtures for frames, envelopes, signatures, PoA, and control
+    messages.
+14. Add SDK conformance tests against fixtures.
+15. Expand SDK surface to frame signing, verification, receipts, capabilities,
+    and agent messages.
+16. Add CLI workflows for agent intent/session/delegation/negotiation/status.
+17. Define the domain pack manifest format.
+18. Build `zap-pack-agentic-dev` as the first complete domain pack.
+19. Build `zap-pack-smart-building` or `zap-pack-industrial` as the first
+    real-world automation pack.
+20. Publish a release-readiness checklist tied to 1.0 gates.
+
+## Release Cadence
+
+Until 1.0, releases should be small enough to audit and large enough to move a
+visible adoption path forward.
+
+Recommended cadence:
+
+- weekly internal integration snapshots for contributors;
+- monthly alpha releases while protocol and CLI surfaces are still moving;
+- beta releases only after fixtures, docs, SDK conformance, and production
+  checks cover the promoted surface;
+- release candidates only after every official example passes
+  `doctor --strict`, SDK conformance, pack validation, and website link checks.
+
+Each release should publish:
+
+- a short operator impact summary;
+- compatibility notes for protocol, config, SDKs, drivers, and domain packs;
+- migration steps for breaking changes;
+- verification commands for signatures, checksums, fixtures, and examples;
+- known limitations and explicit non-production warnings when applicable.
+
+## Governance Guardrails
+
+ZAP can become broad without becoming vague if changes respect these guardrails:
+
+- protocol changes require fixtures before implementation is considered done;
+- new authority paths require policy, receipt, and observability coverage;
+- new domain integrations start as packs or gateways, not core protocol forks;
+- unsafe defaults must be documented as preview-only or removed before beta;
+- convenience APIs cannot bypass identity, policy, PoA, grants, or receipts;
+- examples must be runnable, validated, and owned by CI before they are treated
+  as official adoption paths.
+
+## Non-Goals
+
+ZAP should not become:
+
+- a natural-language agent planner embedded in the protocol;
+- a replacement for every message broker or RPC framework;
+- a hidden database for model state;
+- a financial ledger or cryptocurrency system;
+- a runtime that grants ambient filesystem, network, clock, or environment
+  access to untrusted drivers;
+- an integration platform that weakens identity, policy, or receipt guarantees
+  for convenience.
+
+The core promise stays narrow and strong: ZAP moves typed messages and actions
+through a verifiable trust boundary. Everything else must reinforce that promise.

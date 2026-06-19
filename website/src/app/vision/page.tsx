@@ -38,7 +38,7 @@ export default function VisionPage() {
           <ul className="space-y-4 mb-8 list-disc pl-6 text-zinc-400">
             <li><strong className="text-zinc-200">Central points of failure:</strong> If the broker goes down, the swarm dies.</li>
             <li><strong className="text-zinc-200">Head-of-line blocking:</strong> TCP retransmissions can delay critical safety signals in noisy RF environments.</li>
-            <li><strong className="text-zinc-200">Implicit Trust:</strong> Once inside the network, services are often implicitly trusted to perform actions they shouldn't.</li>
+            <li><strong className="text-zinc-200">Implicit Trust:</strong> Once inside the network, services are often implicitly trusted to perform actions they shouldn&apos;t.</li>
           </ul>
 
           <h2 className="text-2xl font-bold text-white mt-12 mb-6">The ZAP Philosophy</h2>
@@ -48,15 +48,15 @@ export default function VisionPage() {
           <ol className="space-y-6 mb-8 list-decimal pl-6">
             <li>
               <strong className="text-white text-lg block mb-2">1. Every action must have cryptographic provenance.</strong>
-              <span className="text-zinc-400">In ZAP, every single 64-byte frame is Ed25519-signed. We don't just secure the connection; we secure the message. If an AI agent commands a robot to move, that command is cryptographically tied to the agent's identity forever.</span>
+              <span className="text-zinc-400">In ZAP, every single 64-byte frame is Ed25519-signed. We don&apos;t just secure the connection; we secure the message. If an AI agent commands a robot to move, that command is cryptographically tied to the agent&apos;s identity forever.</span>
             </li>
             <li>
               <strong className="text-white text-lg block mb-2">2. Execution must be sandboxed.</strong>
-              <span className="text-zinc-400">You shouldn't have to trust the code you run. ZAP embeds a WebAssembly (WASM) runtime to execute message drivers. By default, drivers cannot access the network, filesystem, or clock. They are given a strict fuel limit and memory bound.</span>
+              <span className="text-zinc-400">You shouldn&apos;t have to trust the code you run. ZAP embeds a WebAssembly (WASM) runtime to execute message drivers. By default, drivers cannot access the network, filesystem, or clock. They are given a strict fuel limit and memory bound.</span>
             </li>
             <li>
               <strong className="text-white text-lg block mb-2">3. Consensus is a primitive.</strong>
-              <span className="text-zinc-400">Critical actions—like an emergency stop on a factory floor—shouldn't rely on a single node's decision. ZAP integrates Proof-of-Action (PoA), requiring a quorum of validators to cryptographically attest to an action before it is executed.</span>
+              <span className="text-zinc-400">Critical actions-like an emergency stop on a factory floor-shouldn&apos;t rely on a single node&apos;s decision. ZAP integrates Proof-of-Action (PoA), requiring a quorum of validators to cryptographically attest to an action before it is executed.</span>
             </li>
             <li>
               <strong className="text-white text-lg block mb-2">4. Latency is safety.</strong>

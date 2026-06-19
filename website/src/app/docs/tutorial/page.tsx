@@ -159,7 +159,7 @@ zap keygen --out .zap/node-b.key`}</code>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-zinc-400">
-            Sign the driver manifest to authorize the execution of specific actions (e.g. <code>thermostat.set</code>) using Node A's private identity key:
+            Sign the driver manifest to authorize the execution of specific actions (e.g. <code>thermostat.set</code>) using Node A&apos;s private identity key:
           </p>
           <pre className="text-xs bg-[#050505] p-4 rounded-lg border border-zinc-900 font-mono text-zinc-300">
             <code>{`zap driver-manifest create \\

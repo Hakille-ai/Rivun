@@ -2,6 +2,7 @@ import json
 import socket
 import threading
 import unittest
+from pathlib import Path
 from uuid import UUID
 
 from zap_sdk import (
@@ -17,13 +18,21 @@ from zap_sdk import (
     RegistryInstallPlanEntry,
     RegistryInstallPlanRequest,
     ZapStoreClient,
+    ZapMessageKind,
     ZapUdpClient,
     registry_bundle_manifest_request_frame,
     validate_artifact_hash,
     verify_signature_placeholder,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FIXTURES = REPO_ROOT / "fixtures"
 HASH = "blake3:" + "0" * 64
+
+
+def load_fixture(name: str) -> dict:
+    with (FIXTURES / name).open(encoding="utf-8") as handle:
+        return json.load(handle)
 
 
 class ProtocolTests(unittest.TestCase):
@@ -75,6 +84,52 @@ class ProtocolTests(unittest.TestCase):
             json.loads(frame.body.decode("utf-8")),
             {"schema_version": 1, "require_publication": False, "require_drivers": True},
         )
+
+    def test_registry_bundle_manifest_request_matches_root_fixture_contract(self):
+        fixture = load_fixture("zenv-control-registry-bundle-manifest-request.json")
+        envelope = fixture["envelope"]
+
+        frame = registry_bundle_manifest_request_frame(
+            require_publication=envelope["body_json"]["require_publication"],
+            require_drivers=envelope["body_json"]["require_drivers"],
+        )
+        decoded = ControlFrame.decode(frame.encode())
+
+        self.assertEqual(fixture["fixture_schema_version"], 1)
+        self.assertEqual(envelope["magic"], "ZENV")
+        self.assertEqual(envelope["version"], 1)
+        self.assertEqual(envelope["kind_name"], ZapMessageKind.CONTROL.protocol_name)
+        self.assertEqual(envelope["kind_value"], int(ZapMessageKind.CONTROL))
+        self.assertEqual(decoded.subject, envelope["subject"])
+        self.assertEqual(decoded.content_type, envelope["content_type"])
+        self.assertEqual(decoded.json_body(), envelope["body_json"])
+        self.assertEqual(
+            RegistryBundleManifestRequest(
+                require_publication=True,
+                require_drivers=True,
+            ).to_dict(),
+            envelope["body_json"],
+        )
+
+    def test_agent_intent_fixture_is_recognized_as_json_envelope_contract(self):
+        fixture = load_fixture("agent-intent-message-v1.json")
+        body = fixture["body_json"]
+        payload = body["payload"]
+
+        frame = ControlFrame.json(fixture["subject"], fixture["content_type"], body)
+        decoded = ControlFrame.decode(frame.encode())
+        decoded_payload = decoded.json_body()["payload"]
+
+        self.assertEqual(fixture["fixture_schema_version"], 1)
+        self.assertEqual(decoded.subject, "zap.agent.intent")
+        self.assertEqual(decoded.content_type, "application/zap-agent+json")
+        self.assertEqual(decoded.json_body()["type"], "intent")
+        self.assertEqual(decoded_payload["schema_version"], 1)
+        self.assertEqual(UUID(decoded_payload["intent_id"]), UUID(payload["intent_id"]))
+        self.assertEqual(UUID(decoded_payload["session_id"]), UUID(payload["session_id"]))
+        self.assertEqual(decoded_payload["source_agent"], "planner.main")
+        self.assertEqual(decoded_payload["target_agent"], "executor.safety")
+        self.assertEqual(decoded_payload["required_capabilities"], ["driver.execute:valve.open"])
 
     def test_hash_and_signature_helpers_are_explicit(self):
         self.assertTrue(validate_artifact_hash(HASH))

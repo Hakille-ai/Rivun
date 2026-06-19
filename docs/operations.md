@@ -430,6 +430,26 @@ Critical actions, such as `safety.emergency_stop`, should be protected by
 receiver-side `[message_policy]` and sent with `REQUIRES_CONSENSUS` plus a PoA
 certificate:
 
+```toml
+[message_policy]
+default_decision = "deny"
+
+[[message_policy.rules]]
+kind = "action"
+subject = "safety.*"
+decision = "require_poa"
+reason = "safety actions require validator quorum"
+
+[[message_policy.rules]]
+kind = "action"
+subject = "telemetry.*"
+decision = "allow"
+reason = "telemetry is read-only"
+```
+
+If `default_decision` is omitted, receivers keep the historical `allow`
+behavior for unmatched messages. Set it to `deny` to fail closed.
+
 ```bash
 cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
   --kind action --subject safety.emergency_stop \
@@ -567,6 +587,287 @@ cargo run -p zap-cli -- receipts pull --config zap.toml --target <peer-node-id> 
 cargo run -p zap-cli -- receipts prune --path logs/actions.jsonl --before-processed-at-micros 1735689600000000 --out logs/actions.retained.jsonl
 cargo run -p zap-cli -- receipts merge logs/node-a.jsonl logs/node-b.jsonl --out logs/receipts.archive.jsonl
 ```
+
+## Incident Runbooks
+
+Use these runbooks when a production node enters degraded or critical state.
+Before changing traffic, preserve the current config, receipt log, registry
+index, capability cache, validator-set file, driver manifest, and the last
+operator command output. Do not prune or rewrite evidence while an incident is
+open.
+
+### Policy Default Allow In Production
+
+Trigger:
+
+- `zap doctor --strict` reports a policy readiness failure;
+- `[message_policy].default_decision` is missing or set to `allow` on a
+  production receiver;
+- a high-risk action matched no explicit rule and was accepted.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- doctor --config /etc/zap/zap.toml --strict --json
+cargo run -p zap-cli -- check-config --config /etc/zap/zap.toml --json
+cargo run -p zap-cli -- policy evaluate --policy /etc/zap/policy.toml --kind action --subject safety.emergency_stop --requires-consensus --strict --json
+```
+
+Containment:
+
+- freeze new driver installs, route changes, and automated action rollout;
+- set `default_decision = "deny"` in the production receiver config;
+- add explicit `allow`, `deny`, `require_poa`, or approval rules for known
+  subjects before restart;
+- restart only after `doctor --strict` and a targeted `policy evaluate` pass.
+
+Rollback criteria:
+
+- rollback to the last config whose policy section is fail-closed and whose
+  receipt log shows expected denials for unknown subjects;
+- keep the permissive config as incident evidence, not as a fallback.
+
+Preserve:
+
+- old and new `zap.toml`;
+- `doctor --json` and `policy evaluate --json` output;
+- receipt records for accepted unmatched actions;
+- operator approval notes for any temporary exception.
+
+### Registry Signature Invalid
+
+Trigger:
+
+- `zap_registry_signature_valid` is `0`;
+- `registry verify-signature` fails;
+- a pull, mirror, add, deprecate, migration, or revoke command cleared the
+  operator signature.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- registry verify-signature --registry /var/lib/zap/registry.index.toml
+cargo run -p zap-cli -- registry publication verify --registry /var/lib/zap/registry.index.toml --publication /var/lib/zap/registry.publication.json --json
+cargo run -p zap-cli -- registry bundle verify --bundle /var/lib/zap/zapstore-bundle --require-drivers --json
+```
+
+Containment:
+
+- block new driver installs and automatic registry resolution;
+- keep running drivers pinned to already verified manifests;
+- compare the invalid index with the last signed publication hash;
+- re-sign only after operator review of every registry entry and copied driver
+  artifact.
+
+Rollback criteria:
+
+- restore the last registry index whose operator signature, publication, bundle
+  hashes, and driver manifests all verify;
+- revoke a bad release instead of silently replacing it when there is evidence
+  it reached a node.
+
+Preserve:
+
+- invalid `registry.index.toml`;
+- publication JSON, bundle manifest, and copied driver artifacts;
+- `registry verify-signature`, `publication verify`, and `bundle verify`
+  output;
+- release notes or operator approval for the registry mutation.
+
+### Stale Capability Cache
+
+Trigger:
+
+- `zap_capability_cache_age_seconds` exceeds the deployment policy;
+- `check-config --strict` reports stale or missing peer grants;
+- a route with `requires_peer_grant` cannot prove the target advertisement.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- capability cache verify --path /var/lib/zap/capabilities.jsonl
+cargo run -p zap-cli -- capability cache list --path /var/lib/zap/capabilities.jsonl --json
+cargo run -p zap-cli -- capability cache refresh --config /etc/zap/zap.toml --strict --json
+cargo run -p zap-cli -- check-config --config /etc/zap/zap.toml --strict --json
+```
+
+Containment:
+
+- disable or hold routes that depend on `requires_peer_grant`;
+- do not infer grants from old advertisements;
+- refresh from trusted peers only and investigate peers that fail refresh.
+
+Rollback criteria:
+
+- route traffic only after the cache verifies, each required peer advertises the
+  expected capability, and `check-config --strict` passes;
+- rollback route changes if a target peer no longer grants the required
+  capability.
+
+Preserve:
+
+- stale cache JSONL;
+- refreshed cache JSONL;
+- per-peer refresh report;
+- route explain output for affected subjects.
+
+### Receipt Verification Failure
+
+Trigger:
+
+- `zap_receipt_log_verify_failures_total` increases;
+- `receipts verify` fails on the local or pulled receipt log;
+- audit records are missing, duplicated, or hash-chain verification fails.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- receipts verify --path /var/lib/zap/receipts.jsonl
+cargo run -p zap-cli -- receipts pull --config /etc/zap/zap.toml --target <peer-node-id> --out /var/lib/zap/incidents/peer-receipts.jsonl --json
+cargo run -p zap-cli -- receipts merge /var/lib/zap/receipts.jsonl /var/lib/zap/incidents/peer-receipts.jsonl --out /var/lib/zap/incidents/receipts-merged.jsonl
+```
+
+Containment:
+
+- stop receipt pruning and archival compaction;
+- copy the failing log to incident storage before daemon restart;
+- if the node must continue processing, cut over to a new receipt file only
+  after preserving the broken file.
+
+Rollback criteria:
+
+- rollback to the last deployment whose receipt log verifies from the first
+  retained record through the current audit window;
+- pause automated actions if receipts cannot prove policy, PoA, and driver
+  outcomes for high-risk messages.
+
+Preserve:
+
+- failing receipt log byte-for-byte;
+- pulled peer receipts for the same time window;
+- storage and host incident logs;
+- command output from every `receipts verify`, `pull`, and `merge` command.
+
+### PoA Attestation Failure
+
+Trigger:
+
+- `zap_poa_attestation_failures_total` increases;
+- critical actions time out with `--poa-network`;
+- validator-set verification, threshold, or attestation signatures fail.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- poa validator-set verify --path /etc/zap/poa-validators.json --authority-public-key <operator-public-key> --json
+cargo run -p zap-cli -- trust inspect --config /etc/zap/zap.toml --json
+cargo run -p zap-cli -- doctor --config /etc/zap/zap.toml --strict --json
+```
+
+For an offline frame review:
+
+```bash
+cargo run -p zap-cli -- poa request --frame critical-frame.bin --requester-key .zap/node.key --threshold 1 > poa-request.json
+cargo run -p zap-cli -- poa attest --request poa-request.json --validator-key .zap/validator.key > poa-response.json
+```
+
+Containment:
+
+- stop retry loops for critical actions until validator reachability and set
+  epoch are understood;
+- verify validator peer trust allows PoA attestation;
+- check clock skew before rotating validators.
+
+Rollback criteria:
+
+- use the last signed validator set whose epoch, authority signature, threshold,
+  and peer trust all verify;
+- do not lower the effective threshold as a rollback unless an approved incident
+  exception exists.
+
+Preserve:
+
+- failing validator-set JSON;
+- PoA request and response JSON;
+- `doctor --json` and `trust inspect --json` output;
+- receipt records for denied or timed-out critical actions.
+
+### Driver Runtime Errors
+
+Trigger:
+
+- `zap_driver_execution_errors_total` increases;
+- driver execution latency exceeds the runtime budget;
+- a WASM/WAT driver fails ABI validation, fuel, memory, timeout, or output
+  limits.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- driver-manifest verify --driver /var/lib/zap/drivers/<driver>.wasm --manifest /var/lib/zap/manifests/<driver>.manifest.toml
+cargo run -p zap-cli -- registry resolve --registry /var/lib/zap/registry.index.toml --action <action> --version-req '^1.0.0' --abi-req '>=1,<=2' --json
+cargo run -p zap-cli -- route explain --config /etc/zap/zap.toml --kind action --subject <action> --json
+cargo run -p zap-cli -- check-config --config /etc/zap/zap.toml --strict --json
+```
+
+Containment:
+
+- stop routing new traffic to the affected action when errors are persistent;
+- revoke unsafe driver versions or deprecate noisy versions with migration
+  guidance;
+- keep unrelated actions running only if route and receipt evidence show the
+  blast radius is isolated.
+
+Rollback criteria:
+
+- restore the last active registry entry whose manifest verifies and whose
+  receipts show successful execution under the same runtime limits;
+- if the driver requires host imports, rollback to the last manifest with the
+  approved scoped host permissions.
+
+Preserve:
+
+- driver artifact, manifest, registry entry, and install plan;
+- route explain output;
+- runtime limit configuration;
+- receipts and logs for failed executions.
+
+### Replay Spikes
+
+Trigger:
+
+- `zap_frames_rejected_total` rises with replay or nonce-related rejection
+  reasons;
+- peers report duplicate sends after restart or network retry storms;
+- clock skew or transport-key epoch changes line up with rejection spikes.
+
+Immediate checks:
+
+```bash
+cargo run -p zap-cli -- doctor --config /etc/zap/zap.toml --strict --json
+cargo run -p zap-cli -- trust inspect --config /etc/zap/zap.toml --json
+cargo run -p zap-cli -- check-config --config /etc/zap/zap.toml --json
+```
+
+Containment:
+
+- freeze peer key rotation and topology changes until the spike source is
+  identified;
+- quarantine peers that replay frames after their transport key epoch changed;
+- preserve sender logs before increasing replay cache capacity.
+
+Rollback criteria:
+
+- rollback a peer trust or transport-key change if replay rejections began at
+  the same epoch and stop after restoring the previous trusted material;
+- keep the stricter replay policy unless it is proven to reject fresh traffic.
+
+Preserve:
+
+- sender and receiver logs for the spike window;
+- peer trust config before and after the change;
+- `doctor`, `trust inspect`, and `check-config` JSON;
+- representative rejected frames if available through safe packet capture.
 
 ## Logging
 

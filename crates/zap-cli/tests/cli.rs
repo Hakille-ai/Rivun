@@ -376,6 +376,439 @@ reason = "safety actions require quorum"
     assert_eq!(json["required_poa"], true);
 }
 
+#[test]
+fn pack_validate_accepts_domain_pack_manifest() {
+    let dir = tempdir().unwrap();
+    let pack_dir = dir.path().join("agentic-dev");
+    let policies_dir = pack_dir.join("policies");
+    let schemas_dir = pack_dir.join("schemas");
+    std::fs::create_dir_all(&policies_dir).unwrap();
+    std::fs::create_dir_all(&schemas_dir).unwrap();
+    std::fs::write(
+        policies_dir.join("action-policy.toml"),
+        r#"
+[[rules]]
+name = "require-repo-read-grant"
+kind = "action"
+subject = "repo.read"
+decision = "require_grant"
+required_capability = "repo.read"
+reason = "repository reads require a grant"
+"#,
+    )
+    .unwrap();
+    std::fs::write(schemas_dir.join("subjects.md"), "# Subjects\n").unwrap();
+    std::fs::write(
+        pack_dir.join("pack.toml"),
+        r#"
+schema_version = 1
+id = "zap-pack-agentic-dev"
+name = "Agentic Development"
+version = "0.1.0"
+status = "preview"
+
+[[capabilities]]
+id = "repo.read"
+risk = "low"
+
+[[capabilities]]
+id = "repo.patch"
+risk = "medium"
+
+[[policies]]
+path = "policies/action-policy.toml"
+
+[[schemas]]
+path = "schemas/subjects.md"
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pack",
+            "validate",
+            "--pack",
+            pack_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["errors"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn pack_inspect_summarizes_domain_pack_manifest() {
+    let dir = tempdir().unwrap();
+    let pack_dir = dir.path().join("agentic-dev");
+    let policies_dir = pack_dir.join("policies");
+    let schemas_dir = pack_dir.join("schemas");
+    std::fs::create_dir_all(&policies_dir).unwrap();
+    std::fs::create_dir_all(&schemas_dir).unwrap();
+    std::fs::write(
+        policies_dir.join("action-policy.toml"),
+        r#"
+[[rules]]
+name = "allow-repo-read"
+kind = "action"
+subject = "repo.read"
+decision = "allow"
+reason = "repository reads are allowed in this fixture"
+"#,
+    )
+    .unwrap();
+    std::fs::write(schemas_dir.join("subjects.md"), "# Subjects\n").unwrap();
+    std::fs::write(
+        pack_dir.join("pack.toml"),
+        r#"
+schema_version = 1
+id = "zap-pack-agentic-dev"
+name = "Agentic Development"
+version = "0.1.0"
+status = "preview"
+
+[[capabilities]]
+id = "repo.read"
+risk = "low"
+
+[[capabilities]]
+id = "repo.patch"
+risk = "medium"
+
+[[capabilities]]
+id = "repo.merge"
+risk = "medium"
+
+[[policies]]
+path = "policies/action-policy.toml"
+
+[[schemas]]
+path = "schemas/subjects.md"
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pack",
+            "inspect",
+            "--pack",
+            pack_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["id"], "zap-pack-agentic-dev");
+    assert_eq!(json["name"], "Agentic Development");
+    assert_eq!(json["version"], "0.1.0");
+    assert_eq!(json["status"], "preview");
+    assert_eq!(json["capabilities_count"], 3);
+    assert_eq!(json["policies_count"], 1);
+    assert_eq!(json["schemas_count"], 1);
+    assert_eq!(json["risk_levels"]["low"], 1);
+    assert_eq!(json["risk_levels"]["medium"], 2);
+    assert_eq!(json["errors"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn pack_list_catalogs_domain_packs_under_root() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().join("domain-packs");
+    let good_pack = root.join("agentic-dev");
+    let good_policies = good_pack.join("policies");
+    let good_schemas = good_pack.join("schemas");
+    let bad_pack = root.join("bad-pack");
+    std::fs::create_dir_all(&good_policies).unwrap();
+    std::fs::create_dir_all(&good_schemas).unwrap();
+    std::fs::create_dir_all(&bad_pack).unwrap();
+    std::fs::write(
+        good_policies.join("action-policy.toml"),
+        r#"
+[[rules]]
+name = "allow-repo-read"
+kind = "action"
+subject = "repo.read"
+decision = "allow"
+reason = "repository reads are allowed in this fixture"
+"#,
+    )
+    .unwrap();
+    std::fs::write(good_schemas.join("subjects.md"), "# Subjects\n").unwrap();
+    std::fs::write(
+        good_pack.join("pack.toml"),
+        r#"
+schema_version = 1
+id = "zap-pack-agentic-dev"
+name = "Agentic Development"
+version = "0.1.0"
+status = "preview"
+
+[[capabilities]]
+id = "repo.read"
+risk = "low"
+
+[[capabilities]]
+id = "repo.patch"
+risk = "medium"
+
+[[policies]]
+path = "policies/action-policy.toml"
+
+[[schemas]]
+path = "schemas/subjects.md"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        bad_pack.join("pack.toml"),
+        r#"
+schema_version = 1
+id = "zap-pack-bad"
+name = "Bad Pack"
+version = "0.1.0"
+status = "preview"
+
+[[capabilities]]
+id = "unsafe.root"
+risk = "critical"
+
+[[schemas]]
+path = "schemas/missing.md"
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args(["pack", "list", "--root", root.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], false);
+    assert_eq!(json["packs"].as_array().unwrap().len(), 2);
+    assert_eq!(json["errors"].as_array().unwrap().len(), 1);
+
+    let packs = json["packs"].as_array().unwrap();
+    let good = packs
+        .iter()
+        .find(|pack| pack["id"] == "zap-pack-agentic-dev")
+        .unwrap();
+    assert_eq!(good["valid"], true);
+    assert_eq!(good["capabilities_count"], 2);
+    assert_eq!(good["policies_count"], 1);
+    assert_eq!(good["schemas_count"], 1);
+    assert_eq!(good["risk_levels"]["low"], 1);
+    assert_eq!(good["risk_levels"]["medium"], 1);
+
+    let bad = packs
+        .iter()
+        .find(|pack| pack["id"] == "zap-pack-bad")
+        .unwrap();
+    assert_eq!(bad["valid"], false);
+    assert_eq!(bad["risk_levels"]["critical"], 1);
+    assert!(
+        bad["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|error| error.as_str().unwrap().contains("schemas[0].path"))
+    );
+}
+
+#[test]
+fn pack_validate_reports_manifest_and_policy_errors() {
+    let dir = tempdir().unwrap();
+    let pack_dir = dir.path().join("bad-pack");
+    let policies_dir = pack_dir.join("policies");
+    std::fs::create_dir_all(&policies_dir).unwrap();
+    std::fs::write(
+        policies_dir.join("bad-policy.toml"),
+        r#"
+[[rules]]
+name = "missing-capability"
+kind = "action"
+subject = "repo.read"
+decision = "require_grant"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pack_dir.join("pack.toml"),
+        r#"
+schema_version = 2
+id = "bad-pack"
+name = ""
+version = "0.1.0"
+status = "preview"
+
+[[capabilities]]
+id = "repo.read"
+risk = "low"
+
+[[capabilities]]
+id = "repo.read"
+risk = "severe"
+
+[[policies]]
+path = "policies/bad-policy.toml"
+
+[[schemas]]
+path = "schemas/missing.md"
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pack",
+            "validate",
+            "--pack",
+            pack_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], false);
+    let errors = json["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|error| error.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(errors.iter().any(|error| error.contains("schema_version")));
+    assert!(errors.iter().any(|error| error.contains("name")));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("duplicate capability id repo.read"))
+    );
+    assert!(errors.iter().any(|error| error.contains("risk")));
+    assert!(errors.iter().any(|error| error.contains("zap-policy")));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("schemas[0].path does not exist"))
+    );
+}
+
+#[test]
+fn fixtures_verify_accepts_repo_fixtures() {
+    let fixtures_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("fixtures");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "fixtures",
+            "verify",
+            "--fixtures",
+            fixtures_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["fixtures"].as_array().unwrap().len(), 3);
+    assert_eq!(json["errors"].as_array().unwrap().len(), 0);
+    assert!(
+        json["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fixture| fixture["name"] == "agent-intent-message-v1.json")
+    );
+}
+
+#[test]
+fn fixtures_verify_reports_invalid_fixture_contracts() {
+    let dir = tempdir().unwrap();
+    let fixtures_dir = dir.path().join("fixtures");
+    std::fs::create_dir_all(&fixtures_dir).unwrap();
+    std::fs::write(
+        fixtures_dir.join("agent-intent-message-v1.json"),
+        r#"
+{
+  "fixture_schema_version": 2,
+  "description": "",
+  "subject": "zap.agent.status",
+  "content_type": "application/json",
+  "body_json": {
+    "type": "status",
+    "payload": {}
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "fixtures",
+            "verify",
+            "--fixtures",
+            fixtures_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], false);
+    let fixture = &json["fixtures"].as_array().unwrap()[0];
+    assert_eq!(fixture["valid"], false);
+    let errors = fixture["errors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|error| error.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("fixture_schema_version"))
+    );
+    assert!(errors.iter().any(|error| error.contains("description")));
+    assert!(errors.iter().any(|error| error.contains("subject")));
+    assert!(errors.iter().any(|error| error.contains("content_type")));
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("zap-agent message"))
+    );
+}
+
 fn hex_transport_key(key: [u8; 32]) -> String {
     key.iter().map(|byte| format!("{byte:02x}")).collect()
 }
@@ -1150,6 +1583,147 @@ fn agent_schema_and_validate_accept_agent_messages() {
     let report: serde_json::Value = serde_json::from_slice(&validate.stdout).unwrap();
     assert_eq!(report["valid"], true);
     assert_eq!(report["subject"], "zap.agent.intent");
+}
+
+#[test]
+fn agent_intent_builds_valid_message() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "intent",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--intent-id",
+            "22222222-2222-4222-8222-222222222222",
+            "--source-agent",
+            "planner.main",
+            "--target-agent",
+            "executor.safety",
+            "--kind",
+            "act",
+            "--objective",
+            "open valve",
+            "--input",
+            r#"{"valve":"v-7"}"#,
+            "--capability",
+            "driver.execute:valve.open",
+            "--priority",
+            "high",
+            "--metadata",
+            r#"{"ticket":"ops-17"}"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(message["type"], "intent");
+    assert_eq!(message["payload"]["source_agent"], "planner.main");
+    assert_eq!(message["payload"]["target_agent"], "executor.safety");
+    assert_eq!(message["payload"]["input"]["valve"], "v-7");
+    assert_eq!(
+        message["payload"]["required_capabilities"][0],
+        "driver.execute:valve.open"
+    );
+}
+
+#[test]
+fn agent_status_builds_valid_message_file() {
+    let dir = tempdir().unwrap();
+    let message_path = dir.path().join("status.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "status",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--intent-id",
+            "22222222-2222-4222-8222-222222222222",
+            "--agent-id",
+            "executor.safety",
+            "--status",
+            "running",
+            "--progress-per-mille",
+            "250",
+            "--message",
+            "opening valve",
+            "--updated-at-micros",
+            "42",
+            "--out",
+            message_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let validate = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "validate",
+            "--input",
+            message_path.to_str().unwrap(),
+            "--subject",
+            "zap.agent.status",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        validate.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&validate.stdout),
+        String::from_utf8_lossy(&validate.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&validate.stdout).unwrap();
+    assert_eq!(report["subject"], "zap.agent.status");
+}
+
+#[test]
+fn agent_result_builds_failed_message_with_error() {
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "agent",
+            "result",
+            "--session-id",
+            "11111111-1111-4111-8111-111111111111",
+            "--intent-id",
+            "22222222-2222-4222-8222-222222222222",
+            "--result-id",
+            "33333333-3333-4333-8333-333333333333",
+            "--agent-id",
+            "executor.safety",
+            "--status",
+            "failed",
+            "--outputs",
+            r#"{"attempted":true}"#,
+            "--error-code",
+            "valve.timeout",
+            "--error-message",
+            "valve did not acknowledge",
+            "--completed-at-micros",
+            "99",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let message: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(message["type"], "result");
+    assert_eq!(message["payload"]["status"], "failed");
+    assert_eq!(message["payload"]["outputs"]["attempted"], true);
+    assert_eq!(message["payload"]["error"]["code"], "valve.timeout");
 }
 
 #[test]

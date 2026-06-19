@@ -1,25 +1,82 @@
 bind = "127.0.0.1:7000"
 key_file = "../../.zap/node-a.key"
 require_signed = true
+routes = []
 
 [[peers]]
-# Replace with node B's generated node_id before running.
-node_id = "22222222-2222-4222-8222-222222222222"
+node_id = "b299a511-2804-88b8-a046-5a68ef82f1b7"
 addr = "127.0.0.1:7001"
-# Replace with node B's generated public_key before running.
-public_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+public_key = "yXppuwaQUlSfJboDlJqSjFmRaHSrIDN6l0BxAFtFDwA"
 transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
+
+[peers.trust]
+status = "trusted"
+allow_send = true
+allow_receive = true
+allow_forward = true
+allow_poa_attestation = true
+labels = []
 
 [[drivers]]
 action = "echo"
 path = "../wasm-drivers/echo/echo.wat"
 
+[[drivers]]
+action = "greet"
+path = "../wasm-drivers/greet/greet.wat"
+
 [runtime]
+max_memory_bytes = 16777216
 fuel = 10000000
 timeout_ms = 1000
-max_memory_bytes = 16777216
 max_output_bytes = 1048576
+
+[runtime.permissions]
+network = false
+filesystem = false
+clock = false
+environment = false
+emit_event = false
+memory_read = false
+memory_write = false
+device_call = false
+max_host_call_bytes = 4096
 
 [security]
 max_clock_skew_micros = 300000000
 replay_cache_capacity = 4096
+
+[trust]
+require_peer_expiry = false
+
+[poa]
+required_threshold = 1
+validators = []
+validator_set = "../../.zap/poa-validators.json"
+validator_set_authority = "ub04BmALK4loxSDH2CYepq8cy/qWaJuJQdKeGSkKRzY"
+
+[receipts]
+path = "../../.zap/receipts.jsonl"
+
+[registry]
+require_signature = false
+
+[memory]
+allow_driver_read = false
+allow_driver_write = false
+
+[capability_policy]
+grants = []
+requirements = []
+require_grants_for_advertised = false
+
+[capability_cache]
+
+[discovery]
+
+[message_policy]
+rules = []
+
+[message_schema]
+require_match = false
+contracts = []

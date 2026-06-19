@@ -3,7 +3,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use rand_core::{OsRng, RngCore};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
@@ -14,7 +14,10 @@ use std::{
 };
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
-use zap_agent::{AGENT_CONTENT_TYPE, AgentMessage, agent_message_json_schema};
+use zap_agent::{
+    AGENT_CONTENT_TYPE, AGENT_PROTOCOL_SCHEMA_VERSION, AgentErrorInfo, AgentId, AgentIntent,
+    AgentMessage, AgentResult, AgentStatusUpdate, agent_message_json_schema,
+};
 use zap_capability::{
     CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
     CapabilityCacheEntry, CapabilityId, CapabilityQuery, CapabilityResponse, DriverPermissions,
@@ -49,7 +52,7 @@ use zap_node::{
     ZapNode, ZapNodeConfig, build_discovery_advertisement, describe_capabilities,
     sign_discovery_advertisement,
 };
-use zap_policy::{PolicyInput, PolicySet};
+use zap_policy::{PolicyDecision, PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
 use zap_schema::{MessageContract, MessageParts};
 use zap_store::{
@@ -212,6 +215,16 @@ enum Commands {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+    /// Inspect and validate domain packs.
+    Pack {
+        #[command(subcommand)]
+        command: PackCommand,
+    },
+    /// Verify stable protocol fixture JSON files.
+    Fixtures {
+        #[command(subcommand)]
+        command: FixturesCommand,
+    },
     /// Create or verify signed ZapStore driver manifests.
     #[command(name = "driver-manifest")]
     DriverManifest {
@@ -321,6 +334,91 @@ enum CapabilityCacheCommand {
 
 #[derive(Debug, Subcommand)]
 enum AgentCommand {
+    /// Build an agent intent JSON message without sending it.
+    Intent {
+        #[arg(long)]
+        session_id: Option<Uuid>,
+        #[arg(long)]
+        intent_id: Option<Uuid>,
+        #[arg(long)]
+        source_agent: String,
+        #[arg(long)]
+        target_agent: Option<String>,
+        #[arg(long, default_value = "act")]
+        kind: String,
+        #[arg(long)]
+        objective: String,
+        /// JSON value to place in payload.input.
+        #[arg(long)]
+        input: Option<String>,
+        #[arg(long = "capability")]
+        required_capabilities: Vec<String>,
+        #[arg(long, default_value = "normal")]
+        priority: String,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent status JSON message without sending it.
+    Status {
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        intent_id: Option<Uuid>,
+        #[arg(long)]
+        agent_id: String,
+        #[arg(long, default_value = "running")]
+        status: String,
+        #[arg(long)]
+        progress_per_mille: Option<u16>,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        updated_at_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent result JSON message without sending it.
+    Result {
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        intent_id: Uuid,
+        #[arg(long)]
+        result_id: Option<Uuid>,
+        #[arg(long)]
+        agent_id: String,
+        #[arg(long, default_value = "completed")]
+        status: String,
+        /// JSON object to place in payload.outputs.
+        #[arg(long)]
+        outputs: Option<String>,
+        #[arg(long)]
+        error_code: Option<String>,
+        #[arg(long)]
+        error_message: Option<String>,
+        #[arg(long)]
+        completed_at_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
     /// Validate one agent protocol JSON message.
     Validate {
         /// Read the JSON message from this file. Omit to read stdin.
@@ -644,6 +742,42 @@ enum PolicyCommand {
         simulation_passed: bool,
         #[arg(long)]
         strict: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PackCommand {
+    /// Validate a domain pack manifest and referenced policy/schema files.
+    Validate {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize a domain pack manifest.
+    Inspect {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List and validate domain packs under a root directory.
+    List {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum FixturesCommand {
+    /// Verify JSON fixtures and known v1 protocol fixture contracts.
+    Verify {
+        #[arg(long)]
+        fixtures: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -1300,6 +1434,8 @@ async fn async_main() -> Result<()> {
         Commands::Schema { command } => schema(command),
         Commands::Agent { command } => agent(command),
         Commands::Policy { command } => policy(command),
+        Commands::Pack { command } => pack(command),
+        Commands::Fixtures { command } => fixtures(command),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command).await,
         Commands::Receipts { command } => receipts(command).await,
@@ -1420,6 +1556,10 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             report.capability_cache_enabled
         );
         println!("discovery_cache_enabled={}", report.discovery_cache_enabled);
+        println!(
+            "message_policy_default_decision={}",
+            policy_decision_name(report.message_policy_default_decision)
+        );
         println!("message_policy_rules={}", report.message_policy_rule_count);
         println!(
             "message_schema_contracts={}",
@@ -1717,13 +1857,37 @@ fn capability_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorC
 }
 
 fn message_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.message_policy_default_decision == PolicyDecision::Allow {
+        return DoctorCheck::warn(
+            "message policy",
+            format!(
+                "default_decision=allow rules={}; unmatched messages are accepted",
+                report.message_policy_rule_count
+            ),
+        );
+    }
     if report.message_policy_rule_count == 0 {
-        return DoctorCheck::warn("message policy", "no message policy rules configured");
+        return DoctorCheck::pass("message policy", "default_decision=deny rules=0");
     }
     DoctorCheck::pass(
         "message policy",
-        format!("rules={}", report.message_policy_rule_count),
+        format!(
+            "default_decision={} rules={}",
+            policy_decision_name(report.message_policy_default_decision),
+            report.message_policy_rule_count
+        ),
     )
+}
+
+fn policy_decision_name(decision: PolicyDecision) -> &'static str {
+    match decision {
+        PolicyDecision::Allow => "allow",
+        PolicyDecision::Deny => "deny",
+        PolicyDecision::RequirePoa => "require_poa",
+        PolicyDecision::RequireGrant => "require_grant",
+        PolicyDecision::HumanApproval => "human_approval",
+        PolicyDecision::SimulateFirst => "simulate_first",
+    }
 }
 
 fn message_schema_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
@@ -4951,12 +5115,240 @@ fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
 
 fn agent(command: AgentCommand) -> Result<()> {
     match command {
+        AgentCommand::Intent {
+            session_id,
+            intent_id,
+            source_agent,
+            target_agent,
+            kind,
+            objective,
+            input,
+            required_capabilities,
+            priority,
+            metadata,
+            out,
+            force,
+        } => agent_intent(
+            session_id,
+            intent_id,
+            &source_agent,
+            target_agent.as_deref(),
+            &kind,
+            objective,
+            input.as_deref(),
+            &required_capabilities,
+            &priority,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
+        AgentCommand::Status {
+            session_id,
+            intent_id,
+            agent_id,
+            status,
+            progress_per_mille,
+            message,
+            updated_at_micros,
+            metadata,
+            out,
+            force,
+        } => agent_status(
+            session_id,
+            intent_id,
+            &agent_id,
+            &status,
+            progress_per_mille,
+            message,
+            updated_at_micros,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
+        AgentCommand::Result {
+            session_id,
+            intent_id,
+            result_id,
+            agent_id,
+            status,
+            outputs,
+            error_code,
+            error_message,
+            completed_at_micros,
+            metadata,
+            out,
+            force,
+        } => agent_result(
+            session_id,
+            intent_id,
+            result_id,
+            &agent_id,
+            &status,
+            outputs.as_deref(),
+            error_code,
+            error_message,
+            completed_at_micros,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
         AgentCommand::Validate {
             input,
             subject,
             json,
         } => agent_validate(input.as_deref(), subject.as_deref(), json),
         AgentCommand::Schema { out, force } => agent_schema(out.as_deref(), force),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_intent(
+    session_id: Option<Uuid>,
+    intent_id: Option<Uuid>,
+    source_agent: &str,
+    target_agent: Option<&str>,
+    kind: &str,
+    objective: String,
+    input: Option<&str>,
+    required_capabilities: &[String],
+    priority: &str,
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let mut intent = AgentIntent::new(
+        session_id.unwrap_or_else(Uuid::new_v4),
+        AgentId::new(source_agent)?,
+        parse_agent_enum("kind", kind)?,
+        objective,
+    );
+    if let Some(intent_id) = intent_id {
+        intent.intent_id = intent_id;
+    }
+    intent.target_agent = target_agent.map(AgentId::new).transpose()?;
+    intent.input = parse_optional_json_value("input", input)?;
+    intent.required_capabilities = required_capabilities
+        .iter()
+        .map(|capability| CapabilityId::new(capability.clone()).map_err(Into::into))
+        .collect::<Result<BTreeSet<_>>>()?;
+    intent.priority = parse_agent_enum("priority", priority)?;
+    intent.metadata = parse_optional_json_object("metadata", metadata)?;
+    write_agent_message(&AgentMessage::Intent(intent), out, force)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_status(
+    session_id: Uuid,
+    intent_id: Option<Uuid>,
+    agent_id: &str,
+    status: &str,
+    progress_per_mille: Option<u16>,
+    message: Option<String>,
+    updated_at_micros: Option<u64>,
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let update = AgentStatusUpdate {
+        schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+        session_id,
+        intent_id,
+        agent_id: AgentId::new(agent_id)?,
+        status: parse_agent_enum("status", status)?,
+        progress_per_mille,
+        message,
+        updated_at_micros: match updated_at_micros {
+            Some(value) => value,
+            None => now_micros()?,
+        },
+        metadata: parse_optional_json_object("metadata", metadata)?,
+    };
+    write_agent_message(&AgentMessage::Status(update), out, force)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_result(
+    session_id: Uuid,
+    intent_id: Uuid,
+    result_id: Option<Uuid>,
+    agent_id: &str,
+    status: &str,
+    outputs: Option<&str>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    completed_at_micros: Option<u64>,
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let error = match (error_code, error_message) {
+        (Some(code), Some(message)) => Some(AgentErrorInfo::new(code, message)),
+        (None, None) => None,
+        (Some(_), None) => bail!("--error-code requires --error-message"),
+        (None, Some(_)) => bail!("--error-message requires --error-code"),
+    };
+    let result = AgentResult {
+        schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+        result_id: result_id.unwrap_or_else(Uuid::new_v4),
+        session_id,
+        intent_id,
+        agent_id: AgentId::new(agent_id)?,
+        status: parse_agent_enum("status", status)?,
+        outputs: parse_optional_json_object("outputs", outputs)?,
+        artifacts: Vec::new(),
+        error,
+        completed_at_micros: match completed_at_micros {
+            Some(value) => value,
+            None => now_micros()?,
+        },
+        metadata: parse_optional_json_object("metadata", metadata)?,
+    };
+    write_agent_message(&AgentMessage::Result(result), out, force)
+}
+
+fn write_agent_message(message: &AgentMessage, out: Option<&Path>, force: bool) -> Result<()> {
+    let json = serde_json::to_string_pretty(message)?;
+    AgentMessage::from_json_str(&json)?;
+    match out {
+        Some(path) => write_text_file(path, &format!("{json}\n"), force),
+        None => {
+            println!("{json}");
+            Ok(())
+        }
+    }
+}
+
+fn parse_agent_enum<T>(field: &str, input: &str) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::Value::String(input.to_string()))
+        .with_context(|| format!("invalid agent {field} `{input}`"))
+}
+
+fn parse_optional_json_value(field: &str, input: Option<&str>) -> Result<serde_json::Value> {
+    match input {
+        Some(input) => {
+            serde_json::from_str(input).with_context(|| format!("failed to parse --{field} JSON"))
+        }
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+fn parse_optional_json_object(
+    field: &str,
+    input: Option<&str>,
+) -> Result<BTreeMap<String, serde_json::Value>> {
+    match input {
+        Some(input) => {
+            let value: serde_json::Value = serde_json::from_str(input)
+                .with_context(|| format!("failed to parse --{field} JSON"))?;
+            match value {
+                serde_json::Value::Object(map) => Ok(map.into_iter().collect()),
+                _ => bail!("--{field} must be a JSON object"),
+            }
+        }
+        None => Ok(BTreeMap::new()),
     }
 }
 
@@ -5175,6 +5567,730 @@ fn policy_evaluate(options: PolicyEvaluateOptions<'_>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn pack(command: PackCommand) -> Result<()> {
+    match command {
+        PackCommand::Validate { pack, json } => pack_validate(&pack, json),
+        PackCommand::Inspect { pack, json } => pack_inspect(&pack, json),
+        PackCommand::List { root, json } => pack_list(&root, json),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PackValidationReport {
+    pack: String,
+    manifest: String,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PackInspectionReport {
+    pack: String,
+    manifest: String,
+    valid: bool,
+    errors: Vec<String>,
+    id: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    status: Option<String>,
+    capabilities_count: usize,
+    policies_count: usize,
+    schemas_count: usize,
+    risk_levels: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct PackCatalogReport {
+    root: String,
+    packs: Vec<PackInspectionReport>,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DomainPackManifest {
+    schema_version: Option<u32>,
+    id: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    status: Option<String>,
+    #[serde(default)]
+    capabilities: Vec<DomainPackCapability>,
+    #[serde(default)]
+    policies: Vec<DomainPackPathRef>,
+    #[serde(default)]
+    schemas: Vec<DomainPackPathRef>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DomainPackCapability {
+    id: Option<String>,
+    risk: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DomainPackPathRef {
+    path: Option<PathBuf>,
+}
+
+fn pack_validate(pack_dir: &Path, json: bool) -> Result<()> {
+    let report = validate_domain_pack(pack_dir);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if report.valid {
+        println!("pack={} ok", pack_dir.display());
+    } else {
+        println!("pack={} invalid", pack_dir.display());
+        for error in &report.errors {
+            println!("error={error}");
+        }
+    }
+
+    if report.valid {
+        Ok(())
+    } else {
+        bail!("domain pack validation failed")
+    }
+}
+
+fn pack_inspect(pack_dir: &Path, json: bool) -> Result<()> {
+    let report = inspect_domain_pack(pack_dir)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "pack={} id={} version={} status={} capabilities={} policies={} schemas={} valid={}",
+            pack_dir.display(),
+            report.id.as_deref().unwrap_or(""),
+            report.version.as_deref().unwrap_or(""),
+            report.status.as_deref().unwrap_or(""),
+            report.capabilities_count,
+            report.policies_count,
+            report.schemas_count,
+            report.valid
+        );
+    }
+    Ok(())
+}
+
+fn pack_list(root_dir: &Path, json: bool) -> Result<()> {
+    let report = list_domain_packs(root_dir);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "root={} packs={} valid={}",
+            root_dir.display(),
+            report.packs.len(),
+            report.valid
+        );
+        for pack in &report.packs {
+            println!(
+                "pack={} id={} version={} status={} capabilities={} policies={} schemas={} valid={}",
+                pack.pack,
+                pack.id.as_deref().unwrap_or(""),
+                pack.version.as_deref().unwrap_or(""),
+                pack.status.as_deref().unwrap_or(""),
+                pack.capabilities_count,
+                pack.policies_count,
+                pack.schemas_count,
+                pack.valid
+            );
+        }
+        for error in &report.errors {
+            println!("error={error}");
+        }
+    }
+
+    if report.valid {
+        Ok(())
+    } else {
+        bail!("domain pack catalog validation failed")
+    }
+}
+
+fn validate_domain_pack(pack_dir: &Path) -> PackValidationReport {
+    let manifest_path = pack_dir.join("pack.toml");
+    let mut report = PackValidationReport {
+        pack: pack_dir.display().to_string(),
+        manifest: manifest_path.display().to_string(),
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    if !manifest_path.exists() {
+        report
+            .errors
+            .push(format!("missing manifest {}", manifest_path.display()));
+        return report;
+    }
+
+    let manifest = match read_domain_pack_manifest(&manifest_path) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            report.errors.push(error.to_string());
+            return report;
+        }
+    };
+
+    if manifest.schema_version != Some(1) {
+        report.errors.push("schema_version must be 1".to_string());
+    }
+    validate_required_pack_text("id", manifest.id.as_deref(), &mut report.errors);
+    validate_required_pack_text("name", manifest.name.as_deref(), &mut report.errors);
+    validate_required_pack_text("version", manifest.version.as_deref(), &mut report.errors);
+    validate_required_pack_text("status", manifest.status.as_deref(), &mut report.errors);
+    validate_pack_capabilities(&manifest.capabilities, &mut report.errors);
+    validate_pack_refs(
+        pack_dir,
+        "policies",
+        &manifest.policies,
+        true,
+        &mut report.errors,
+    );
+    validate_pack_refs(
+        pack_dir,
+        "schemas",
+        &manifest.schemas,
+        false,
+        &mut report.errors,
+    );
+
+    report.valid = report.errors.is_empty();
+    report
+}
+
+fn inspect_domain_pack(pack_dir: &Path) -> Result<PackInspectionReport> {
+    let manifest_path = pack_dir.join("pack.toml");
+    let manifest = read_domain_pack_manifest(&manifest_path)?;
+    let validation = validate_domain_pack(pack_dir);
+    let mut risk_levels = BTreeMap::new();
+    for capability in &manifest.capabilities {
+        let risk = capability.risk.as_deref().unwrap_or_default().trim();
+        if !risk.is_empty() {
+            *risk_levels.entry(risk.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    Ok(PackInspectionReport {
+        pack: pack_dir.display().to_string(),
+        manifest: manifest_path.display().to_string(),
+        valid: validation.valid,
+        errors: validation.errors,
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        status: manifest.status,
+        capabilities_count: manifest.capabilities.len(),
+        policies_count: manifest.policies.len(),
+        schemas_count: manifest.schemas.len(),
+        risk_levels,
+    })
+}
+
+fn list_domain_packs(root_dir: &Path) -> PackCatalogReport {
+    let mut report = PackCatalogReport {
+        root: root_dir.display().to_string(),
+        packs: Vec::new(),
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    if !root_dir.is_dir() {
+        report
+            .errors
+            .push(format!("pack root not found: {}", root_dir.display()));
+        return report;
+    }
+
+    let entries = match fs::read_dir(root_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            report.errors.push(format!(
+                "failed to read pack root {}: {error}",
+                root_dir.display()
+            ));
+            return report;
+        }
+    };
+
+    let mut pack_dirs = entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let path = entry.path();
+                if path.is_dir() && path.join("pack.toml").exists() {
+                    Some(path)
+                } else {
+                    None
+                }
+            }
+            Err(error) => {
+                report
+                    .errors
+                    .push(format!("failed to read pack root entry: {error}"));
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    pack_dirs.sort();
+
+    if pack_dirs.is_empty() {
+        report.errors.push(format!(
+            "no domain packs with pack.toml found in {}",
+            root_dir.display()
+        ));
+    }
+
+    for pack_dir in pack_dirs {
+        match inspect_domain_pack(&pack_dir) {
+            Ok(pack_report) => {
+                if !pack_report.valid {
+                    report.errors.push(format!(
+                        "pack {} invalid: {}",
+                        pack_dir.display(),
+                        pack_report.errors.join("; ")
+                    ));
+                }
+                report.packs.push(pack_report);
+            }
+            Err(error) => {
+                let manifest_path = pack_dir.join("pack.toml");
+                report.errors.push(format!(
+                    "pack {} failed inspection: {error}",
+                    pack_dir.display()
+                ));
+                report.packs.push(PackInspectionReport {
+                    pack: pack_dir.display().to_string(),
+                    manifest: manifest_path.display().to_string(),
+                    valid: false,
+                    errors: vec![error.to_string()],
+                    id: None,
+                    name: None,
+                    version: None,
+                    status: None,
+                    capabilities_count: 0,
+                    policies_count: 0,
+                    schemas_count: 0,
+                    risk_levels: BTreeMap::new(),
+                });
+            }
+        }
+    }
+
+    report.valid = report.errors.is_empty() && report.packs.iter().all(|pack| pack.valid);
+    report
+}
+
+fn read_domain_pack_manifest(manifest_path: &Path) -> Result<DomainPackManifest> {
+    let input = fs::read_to_string(manifest_path)
+        .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?;
+    toml::from_str(&input)
+        .with_context(|| format!("failed to parse manifest {}", manifest_path.display()))
+}
+
+fn validate_required_pack_text(field: &str, value: Option<&str>, errors: &mut Vec<String>) {
+    if value.is_none_or(|value| value.trim().is_empty()) {
+        errors.push(format!("{field} must not be empty"));
+    }
+}
+
+fn validate_pack_capabilities(capabilities: &[DomainPackCapability], errors: &mut Vec<String>) {
+    let mut seen = BTreeSet::new();
+    for (index, capability) in capabilities.iter().enumerate() {
+        let label = format!("capabilities[{index}]");
+        let id = capability.id.as_deref().unwrap_or_default().trim();
+        if id.is_empty() {
+            errors.push(format!("{label}.id must not be empty"));
+        } else if !seen.insert(id.to_string()) {
+            errors.push(format!("duplicate capability id {id}"));
+        }
+
+        let risk = capability.risk.as_deref().unwrap_or_default().trim();
+        if !matches!(risk, "low" | "medium" | "high" | "critical") {
+            errors.push(format!(
+                "{label}.risk must be one of low, medium, high, critical"
+            ));
+        }
+    }
+}
+
+fn validate_pack_refs(
+    pack_dir: &Path,
+    section: &str,
+    refs: &[DomainPackPathRef],
+    parse_policy: bool,
+    errors: &mut Vec<String>,
+) {
+    for (index, reference) in refs.iter().enumerate() {
+        let label = format!("{section}[{index}].path");
+        let Some(path) = reference.path.as_ref() else {
+            errors.push(format!("{label} must not be empty"));
+            continue;
+        };
+        if path.as_os_str().is_empty() {
+            errors.push(format!("{label} must not be empty"));
+            continue;
+        }
+
+        let resolved = pack_dir.join(path);
+        if !resolved.exists() {
+            errors.push(format!("{label} does not exist: {}", resolved.display()));
+            continue;
+        }
+        if parse_policy {
+            match fs::read_to_string(&resolved) {
+                Ok(input) => {
+                    if let Err(error) = PolicySet::from_toml_str(&input) {
+                        errors.push(format!(
+                            "{label} failed policy validation through zap-policy: {error}"
+                        ));
+                    }
+                }
+                Err(error) => {
+                    errors.push(format!(
+                        "failed to read policy {}: {error}",
+                        resolved.display()
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn fixtures(command: FixturesCommand) -> Result<()> {
+    match command {
+        FixturesCommand::Verify { fixtures, json } => fixtures_verify(&fixtures, json),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct FixturesVerificationReport {
+    fixtures: Vec<FixtureVerification>,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FixtureVerification {
+    path: String,
+    name: String,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+fn fixtures_verify(fixtures_dir: &Path, json: bool) -> Result<()> {
+    let report = verify_fixtures(fixtures_dir);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "fixtures={} files={} valid={}",
+            fixtures_dir.display(),
+            report.fixtures.len(),
+            report.valid
+        );
+        for fixture in &report.fixtures {
+            println!("fixture={} valid={}", fixture.name, fixture.valid);
+            for error in &fixture.errors {
+                println!("error={error}");
+            }
+        }
+        for error in &report.errors {
+            println!("error={error}");
+        }
+    }
+
+    if report.valid {
+        Ok(())
+    } else {
+        bail!("fixture verification failed")
+    }
+}
+
+fn verify_fixtures(fixtures_dir: &Path) -> FixturesVerificationReport {
+    let mut report = FixturesVerificationReport {
+        fixtures: Vec::new(),
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    if !fixtures_dir.is_dir() {
+        report.errors.push(format!(
+            "fixtures directory not found: {}",
+            fixtures_dir.display()
+        ));
+        return report;
+    }
+
+    let mut paths = match fs::read_dir(fixtures_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| match entry {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                }
+                Err(error) => {
+                    report.errors.push(format!(
+                        "failed to read fixture directory entry in {}: {error}",
+                        fixtures_dir.display()
+                    ));
+                    None
+                }
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            report.errors.push(format!(
+                "failed to read fixtures directory {}: {error}",
+                fixtures_dir.display()
+            ));
+            return report;
+        }
+    };
+    paths.sort();
+
+    if paths.is_empty() {
+        report.errors.push(format!(
+            "no JSON fixtures found in {}",
+            fixtures_dir.display()
+        ));
+    }
+
+    for path in paths {
+        report.fixtures.push(verify_fixture_file(&path));
+    }
+
+    report.valid = report.errors.is_empty() && report.fixtures.iter().all(|fixture| fixture.valid);
+    report
+}
+
+fn verify_fixture_file(path: &Path) -> FixtureVerification {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut fixture = FixtureVerification {
+        path: path.display().to_string(),
+        name,
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            fixture
+                .errors
+                .push(format!("failed to read {}: {error}", path.display()));
+            return fixture;
+        }
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            fixture
+                .errors
+                .push(format!("invalid JSON in {}: {error}", path.display()));
+            return fixture;
+        }
+    };
+
+    if value
+        .get("fixture_schema_version")
+        .and_then(|value| value.as_u64())
+        != Some(1)
+    {
+        fixture
+            .errors
+            .push("fixture_schema_version must be 1".to_string());
+    }
+    validate_non_empty_json_string(&value, "description", &mut fixture.errors);
+
+    match fixture.name.as_str() {
+        "agent-intent-message-v1.json" => verify_agent_intent_fixture(&value, &mut fixture.errors),
+        "control-subjects-v1.json" => verify_control_subjects_fixture(&value, &mut fixture.errors),
+        "zenv-control-registry-bundle-manifest-request.json" => {
+            verify_registry_bundle_manifest_request_fixture(&value, &mut fixture.errors)
+        }
+        _ => fixture
+            .errors
+            .push(format!("unknown fixture {}", fixture.name)),
+    }
+
+    fixture.valid = fixture.errors.is_empty();
+    fixture
+}
+
+fn verify_agent_intent_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(value, "subject", "zap.agent.intent", errors);
+    validate_json_string_equals(value, "content_type", AGENT_CONTENT_TYPE, errors);
+    let Some(body) = value.get("body_json") else {
+        errors.push("body_json must be present".to_string());
+        return;
+    };
+    match serde_json::to_vec(body)
+        .ok()
+        .and_then(|bytes| AgentMessage::from_json_slice(&bytes).ok())
+    {
+        Some(AgentMessage::Intent(_)) => {}
+        Some(_) => errors.push("body_json must be an agent intent message".to_string()),
+        None => errors.push("body_json must parse as a zap-agent message".to_string()),
+    }
+}
+
+fn verify_control_subjects_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    verify_control_envelope(value.get("envelope"), errors);
+    let Some(subjects) = value.get("subjects").and_then(|value| value.as_array()) else {
+        errors.push("subjects must be an array".to_string());
+        return;
+    };
+    if subjects.is_empty() {
+        errors.push("subjects must not be empty".to_string());
+    }
+
+    let mut seen = BTreeSet::new();
+    for (index, subject) in subjects.iter().enumerate() {
+        let label = format!("subjects[{index}]");
+        let Some(name) = subject.get("subject").and_then(|value| value.as_str()) else {
+            errors.push(format!("{label}.subject must be a string"));
+            continue;
+        };
+        if name.trim().is_empty() {
+            errors.push(format!("{label}.subject must not be empty"));
+        } else if !seen.insert(name.to_string()) {
+            errors.push(format!("duplicate control subject {name}"));
+        }
+        if subject
+            .get("content_type")
+            .and_then(|value| value.as_str())
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            errors.push(format!("{label}.content_type must be a non-empty string"));
+        }
+        if subject
+            .get("purpose")
+            .and_then(|value| value.as_str())
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            errors.push(format!("{label}.purpose must be a non-empty string"));
+        }
+    }
+
+    for required in [
+        CAPABILITY_QUERY_SUBJECT,
+        REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+        RECEIPT_REPLICATION_REQUEST_SUBJECT,
+    ] {
+        if !seen.contains(required) {
+            errors.push(format!("missing required control subject {required}"));
+        }
+    }
+}
+
+fn verify_registry_bundle_manifest_request_fixture(
+    value: &serde_json::Value,
+    errors: &mut Vec<String>,
+) {
+    verify_control_envelope(value.get("envelope"), errors);
+    let Some(envelope) = value.get("envelope") else {
+        return;
+    };
+    validate_json_string_equals(
+        envelope,
+        "subject",
+        REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+        errors,
+    );
+    validate_json_string_equals(
+        envelope,
+        "content_type",
+        REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+        errors,
+    );
+    let Some(body) = envelope.get("body_json") else {
+        errors.push("envelope.body_json must be present".to_string());
+        return;
+    };
+    if body.get("schema_version").and_then(|value| value.as_u64()) != Some(1) {
+        errors.push("envelope.body_json.schema_version must be 1".to_string());
+    }
+    if body
+        .get("require_publication")
+        .and_then(|value| value.as_bool())
+        .is_none()
+    {
+        errors.push("envelope.body_json.require_publication must be a boolean".to_string());
+    }
+    if body
+        .get("require_drivers")
+        .and_then(|value| value.as_bool())
+        .is_none()
+    {
+        errors.push("envelope.body_json.require_drivers must be a boolean".to_string());
+    }
+}
+
+fn verify_control_envelope(envelope: Option<&serde_json::Value>, errors: &mut Vec<String>) {
+    let Some(envelope) = envelope else {
+        errors.push("envelope must be present".to_string());
+        return;
+    };
+    validate_json_string_equals(envelope, "magic", "ZENV", errors);
+    validate_json_u64_equals(envelope, "version", 1, errors);
+    validate_json_string_equals(envelope, "kind_name", "control", errors);
+    validate_json_u64_equals(envelope, "kind_value", 8, errors);
+}
+
+fn validate_non_empty_json_string(
+    value: &serde_json::Value,
+    field: &str,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_str()) {
+        Some(text) if !text.trim().is_empty() => {}
+        _ => errors.push(format!("{field} must be a non-empty string")),
+    }
+}
+
+fn validate_json_string_equals(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &str,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_str()) {
+        Some(actual) if actual == expected => {}
+        Some(actual) => errors.push(format!("{field} must be {expected}, got {actual}")),
+        None => errors.push(format!("{field} must be {expected}")),
+    }
+}
+
+fn validate_json_u64_equals(
+    value: &serde_json::Value,
+    field: &str,
+    expected: u64,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_u64()) {
+        Some(actual) if actual == expected => {}
+        Some(actual) => errors.push(format!("{field} must be {expected}, got {actual}")),
+        None => errors.push(format!("{field} must be {expected}")),
+    }
+}
+
+fn get_dotted_json_field<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Option<&'a serde_json::Value> {
+    field
+        .split('.')
+        .try_fold(value, |current, part| current.get(part))
 }
 
 fn driver_manifest(command: DriverManifestCommand) -> Result<()> {

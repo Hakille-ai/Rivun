@@ -8,13 +8,14 @@ use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     fs,
     fs::OpenOptions,
     io::Write,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::SystemTime,
 };
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -780,6 +781,8 @@ fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MessagePolicyConfig {
     #[serde(default)]
+    pub default_decision: MessagePolicyDecision,
+    #[serde(default)]
     pub rules: Vec<MessagePolicyRule>,
 }
 
@@ -891,6 +894,7 @@ pub struct ConfigValidationReport {
     pub ungranted_capability_count: usize,
     pub capability_cache_enabled: bool,
     pub discovery_cache_enabled: bool,
+    pub message_policy_default_decision: MessagePolicyDecision,
     pub message_policy_rule_count: usize,
     pub message_schema_contract_count: usize,
     pub message_schema_require_match: bool,
@@ -1144,6 +1148,7 @@ pub struct ZapNode {
     registry_path: Option<PathBuf>,
     registry_bundle_path: Option<PathBuf>,
     registry_require_signature: bool,
+    capability_cache_path: Option<PathBuf>,
     memory: MemoryConfig,
     route_table: RouteTable,
     message_policy: MessagePolicyConfig,
@@ -1153,11 +1158,196 @@ pub struct ZapNode {
     discovery_peers: Vec<DiscoveryPeer>,
     discovery_announcement_cache: Option<PathBuf>,
     discovery_announcements: Mutex<HashMap<Uuid, SignedDiscoveryAdvertisement>>,
+    metrics: Mutex<NodeMetricsCounters>,
 }
 
 struct DriverRegistration {
     driver: WasmDriver,
     permissions: DriverPermissions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZapNodeMetricsSnapshot {
+    pub node_id: Uuid,
+    pub frames_sent_total: Vec<PeerCounter>,
+    pub frames_received_total: Vec<PeerCounter>,
+    pub frames_rejected_total: Vec<ReasonCounter>,
+    pub driver_execution_errors_total: Vec<ActionCounter>,
+    pub peer_trust_status: Vec<PeerTrustGauge>,
+    pub registry_signature_valid: Option<u8>,
+    pub capability_cache_age_seconds: Option<u64>,
+    pub receipt_log_verify_failures_total: u64,
+    pub poa_attestation_failures_total: u64,
+}
+
+impl ZapNodeMetricsSnapshot {
+    pub fn to_prometheus_text(&self) -> String {
+        let mut output = String::new();
+        output.push_str("# HELP zap_frames_sent_total ZAP frames sent by peer.\n");
+        output.push_str("# TYPE zap_frames_sent_total counter\n");
+        for counter in &self.frames_sent_total {
+            output.push_str(&format!(
+                "zap_frames_sent_total{{node_id=\"{}\",peer=\"{}\"}} {}\n",
+                self.node_id, counter.peer, counter.value
+            ));
+        }
+        output.push_str("# HELP zap_frames_received_total ZAP frames received by peer.\n");
+        output.push_str("# TYPE zap_frames_received_total counter\n");
+        for counter in &self.frames_received_total {
+            output.push_str(&format!(
+                "zap_frames_received_total{{node_id=\"{}\",peer=\"{}\"}} {}\n",
+                self.node_id, counter.peer, counter.value
+            ));
+        }
+        output
+            .push_str("# HELP zap_frames_rejected_total ZAP inbound frames rejected by reason.\n");
+        output.push_str("# TYPE zap_frames_rejected_total counter\n");
+        for counter in &self.frames_rejected_total {
+            output.push_str(&format!(
+                "zap_frames_rejected_total{{node_id=\"{}\",reason=\"{}\"}} {}\n",
+                self.node_id,
+                prometheus_escape(&counter.reason),
+                counter.value
+            ));
+        }
+        output.push_str(
+            "# HELP zap_driver_execution_errors_total ZAP WASM driver execution failures.\n",
+        );
+        output.push_str("# TYPE zap_driver_execution_errors_total counter\n");
+        for counter in &self.driver_execution_errors_total {
+            output.push_str(&format!(
+                "zap_driver_execution_errors_total{{node_id=\"{}\",action=\"{}\"}} {}\n",
+                self.node_id,
+                prometheus_escape(&counter.action),
+                counter.value
+            ));
+        }
+        output
+            .push_str("# HELP zap_peer_trust_status Peer trust status gauge by peer and status.\n");
+        output.push_str("# TYPE zap_peer_trust_status gauge\n");
+        for gauge in &self.peer_trust_status {
+            output.push_str(&format!(
+                "zap_peer_trust_status{{node_id=\"{}\",peer=\"{}\",status=\"{}\"}} {}\n",
+                self.node_id,
+                gauge.peer,
+                gauge.status.as_metric_label(),
+                gauge.value
+            ));
+        }
+        if let Some(valid) = self.registry_signature_valid {
+            output.push_str(
+                "# HELP zap_registry_signature_valid Whether the local registry signature verifies.\n",
+            );
+            output.push_str("# TYPE zap_registry_signature_valid gauge\n");
+            output.push_str(&format!(
+                "zap_registry_signature_valid{{node_id=\"{}\"}} {}\n",
+                self.node_id, valid
+            ));
+        }
+        if let Some(age) = self.capability_cache_age_seconds {
+            output.push_str(
+                "# HELP zap_capability_cache_age_seconds Age of the local capability cache file.\n",
+            );
+            output.push_str("# TYPE zap_capability_cache_age_seconds gauge\n");
+            output.push_str(&format!(
+                "zap_capability_cache_age_seconds{{node_id=\"{}\"}} {}\n",
+                self.node_id, age
+            ));
+        }
+        output.push_str(
+            "# HELP zap_receipt_log_verify_failures_total Receipt log verification failures.\n",
+        );
+        output.push_str("# TYPE zap_receipt_log_verify_failures_total counter\n");
+        output.push_str(&format!(
+            "zap_receipt_log_verify_failures_total{{node_id=\"{}\"}} {}\n",
+            self.node_id, self.receipt_log_verify_failures_total
+        ));
+        output.push_str("# HELP zap_poa_attestation_failures_total Proof-of-Action validation or attestation failures.\n");
+        output.push_str("# TYPE zap_poa_attestation_failures_total counter\n");
+        output.push_str(&format!(
+            "zap_poa_attestation_failures_total{{node_id=\"{}\"}} {}\n",
+            self.node_id, self.poa_attestation_failures_total
+        ));
+        output
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerCounter {
+    pub peer: Uuid,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReasonCounter {
+    pub reason: String,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionCounter {
+    pub action: String,
+    pub value: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerTrustGauge {
+    pub peer: Uuid,
+    pub status: PeerTrustStatus,
+    pub value: u8,
+}
+
+impl PeerTrustStatus {
+    fn as_metric_label(self) -> &'static str {
+        match self {
+            PeerTrustStatus::Trusted => "trusted",
+            PeerTrustStatus::Quarantined => "quarantined",
+            PeerTrustStatus::Revoked => "revoked",
+        }
+    }
+}
+
+fn prometheus_escape(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|ch| match ch {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            '\n' => "\\n".chars().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect()
+}
+
+fn classify_processing_error(error: &anyhow::Error) -> &'static str {
+    let details = format!("{error:#}");
+    if details.contains("anti-replay") || details.contains("stale frame timestamp") {
+        "anti_replay"
+    } else if details.contains("signature") || details.contains("public key") {
+        "signature"
+    } else if details.contains("Proof-of-Action") || details.contains("PoA") {
+        "poa"
+    } else if details.contains("message policy") {
+        "message_policy"
+    } else if details.contains("message contract") || details.contains("schema") {
+        "message_contract"
+    } else if details.contains("not permitted") || details.contains("missing trust contract") {
+        "peer_trust"
+    } else if details.contains("invalid ZENV envelope") || details.contains("message subject") {
+        "message_parse"
+    } else {
+        "processing_error"
+    }
+}
+
+#[derive(Debug, Default)]
+struct NodeMetricsCounters {
+    frames_sent_by_peer: BTreeMap<Uuid, u64>,
+    frames_received_by_peer: BTreeMap<Uuid, u64>,
+    frames_rejected_by_reason: BTreeMap<String, u64>,
+    driver_execution_errors_by_action: BTreeMap<String, u64>,
+    receipt_log_verify_failures_total: u64,
+    poa_attestation_failures_total: u64,
 }
 
 impl ZapNode {
@@ -1225,6 +1415,7 @@ impl ZapNode {
         let registry_path = config.registry.path.clone();
         let registry_bundle_path = config.registry.bundle_path.clone();
         let registry_require_signature = config.registry.require_signature;
+        let capability_cache_path = config.capability_cache.path.clone();
         let registry = load_driver_registry_optional(&config.registry)?;
         let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
         let route_table = RouteTable::new(config.routes.clone())?;
@@ -1254,6 +1445,7 @@ impl ZapNode {
             registry_path,
             registry_bundle_path,
             registry_require_signature,
+            capability_cache_path,
             memory: config.memory,
             route_table,
             message_policy: config.message_policy,
@@ -1263,6 +1455,7 @@ impl ZapNode {
             discovery_peers,
             discovery_announcement_cache,
             discovery_announcements: Mutex::new(discovery_announcements),
+            metrics: Mutex::new(NodeMetricsCounters::default()),
         })
     }
 
@@ -1289,7 +1482,18 @@ impl ZapNode {
     }
 
     pub async fn handle_once(&self) -> Result<NodeEvent> {
+        match self.handle_once_inner().await {
+            Ok(event) => Ok(event),
+            Err(error) => {
+                self.record_rejected_frame(classify_processing_error(&error));
+                Err(error)
+            }
+        }
+    }
+
+    async fn handle_once_inner(&self) -> Result<NodeEvent> {
         let inbound = self.endpoint.recv().await?;
+        self.record_received_frame(inbound.peer.node_id);
         self.ensure_peer_can_receive(inbound.peer.node_id)?;
         if self.require_signed {
             let public_key = self
@@ -1317,8 +1521,13 @@ impl ZapNode {
         let output = if message.kind == ZapMessageKind::Control
             && message.subject == POA_ATTESTATION_REQUEST_SUBJECT
         {
-            self.respond_to_poa_attestation_request(inbound.peer.node_id, &message.body)
-                .await?;
+            if let Err(error) = self
+                .respond_to_poa_attestation_request(inbound.peer.node_id, &message.body)
+                .await
+            {
+                self.record_poa_attestation_failure();
+                return Err(error);
+            }
             None
         } else if message.kind == ZapMessageKind::Control
             && message.subject == DISCOVERY_ANNOUNCE_SUBJECT
@@ -1380,6 +1589,134 @@ impl ZapNode {
         })
     }
 
+    pub fn metrics_snapshot(&self) -> ZapNodeMetricsSnapshot {
+        let counters = self.metrics.lock().expect("node metrics mutex poisoned");
+        ZapNodeMetricsSnapshot {
+            node_id: self.keypair.node_id(),
+            frames_sent_total: counters
+                .frames_sent_by_peer
+                .iter()
+                .map(|(peer, value)| PeerCounter {
+                    peer: *peer,
+                    value: *value,
+                })
+                .collect(),
+            frames_received_total: counters
+                .frames_received_by_peer
+                .iter()
+                .map(|(peer, value)| PeerCounter {
+                    peer: *peer,
+                    value: *value,
+                })
+                .collect(),
+            frames_rejected_total: counters
+                .frames_rejected_by_reason
+                .iter()
+                .map(|(reason, value)| ReasonCounter {
+                    reason: reason.clone(),
+                    value: *value,
+                })
+                .collect(),
+            driver_execution_errors_total: counters
+                .driver_execution_errors_by_action
+                .iter()
+                .map(|(action, value)| ActionCounter {
+                    action: action.clone(),
+                    value: *value,
+                })
+                .collect(),
+            peer_trust_status: self.peer_trust_gauges(),
+            registry_signature_valid: self.registry_signature_valid(),
+            capability_cache_age_seconds: self.capability_cache_age_seconds(),
+            receipt_log_verify_failures_total: counters.receipt_log_verify_failures_total,
+            poa_attestation_failures_total: counters.poa_attestation_failures_total,
+        }
+    }
+
+    pub fn metrics_prometheus_text(&self) -> String {
+        self.metrics_snapshot().to_prometheus_text()
+    }
+
+    fn record_sent_frame(&self, peer: Uuid) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            *counters.frames_sent_by_peer.entry(peer).or_default() += 1;
+        }
+    }
+
+    fn record_received_frame(&self, peer: Uuid) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            *counters.frames_received_by_peer.entry(peer).or_default() += 1;
+        }
+    }
+
+    fn record_rejected_frame(&self, reason: &'static str) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            *counters
+                .frames_rejected_by_reason
+                .entry(reason.to_string())
+                .or_default() += 1;
+        }
+    }
+
+    fn record_driver_execution_error(&self, action: &str) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            *counters
+                .driver_execution_errors_by_action
+                .entry(action.to_string())
+                .or_default() += 1;
+        }
+    }
+
+    fn record_receipt_log_verify_failure(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.receipt_log_verify_failures_total += 1;
+        }
+    }
+
+    fn record_poa_attestation_failure(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.poa_attestation_failures_total += 1;
+        }
+    }
+
+    fn peer_trust_gauges(&self) -> Vec<PeerTrustGauge> {
+        let mut gauges = Vec::new();
+        for (peer, trust) in &self.peer_trust {
+            for status in [
+                PeerTrustStatus::Trusted,
+                PeerTrustStatus::Quarantined,
+                PeerTrustStatus::Revoked,
+            ] {
+                gauges.push(PeerTrustGauge {
+                    peer: *peer,
+                    status,
+                    value: u8::from(trust.status == status),
+                });
+            }
+        }
+        gauges.sort_by_key(|gauge| (gauge.peer, gauge.status.as_metric_label()));
+        gauges
+    }
+
+    fn registry_signature_valid(&self) -> Option<u8> {
+        let path = self.registry_path.clone()?;
+        let config = RegistryConfig {
+            path: Some(path),
+            require_signature: true,
+            bundle_path: None,
+        };
+        Some(u8::from(load_driver_registry_optional(&config).is_ok()))
+    }
+
+    fn capability_cache_age_seconds(&self) -> Option<u64> {
+        let path = self.capability_cache_path.as_ref()?;
+        let modified = fs::metadata(path).ok()?.modified().ok()?;
+        SystemTime::now()
+            .duration_since(modified)
+            .ok()
+            .map(|duration| duration.as_secs())
+    }
+
     async fn respond_to_poa_attestation_request(
         &self,
         requester_node: Uuid,
@@ -1403,6 +1740,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1430,6 +1768,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1478,6 +1817,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1556,7 +1896,13 @@ impl ZapNode {
         request.validate()?;
         let limit = request.effective_limit()?;
         let mut receipts = match &self.receipt_log_path {
-            Some(path) => load_verified_receipt_log(path)?,
+            Some(path) => match load_verified_receipt_log(path) {
+                Ok(receipts) => receipts,
+                Err(error) => {
+                    self.record_receipt_log_verify_failure();
+                    return Err(error);
+                }
+            },
             None => Vec::new(),
         };
         receipts.retain(|receipt| request.matches(receipt));
@@ -1577,6 +1923,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1633,6 +1980,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1688,6 +2036,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1737,6 +2086,7 @@ impl ZapNode {
         )?;
         let frame = sign_frame(&self.keypair, &frame)?;
         self.endpoint.send_frame(requester_node, &frame).await?;
+        self.record_sent_frame(requester_node);
         Ok(())
     }
 
@@ -1827,9 +2177,17 @@ impl ZapNode {
             Some(driver) => {
                 let mut limits = self.limits;
                 limits.permissions = merge_permissions(limits.permissions, driver.permissions);
-                let result = self
-                    .runtime
-                    .execute(&driver.driver, action, &message.body, limits)?;
+                let result =
+                    match self
+                        .runtime
+                        .execute(&driver.driver, action, &message.body, limits)
+                    {
+                        Ok(result) => result,
+                        Err(error) => {
+                            self.record_driver_execution_error(action);
+                            return Err(error.into());
+                        }
+                    };
                 self.record_host_calls(action, message, frame, &result.host_calls)?;
                 Ok(Some(result.output))
             }
@@ -1929,7 +2287,8 @@ impl ZapNode {
     }
 
     fn apply_message_policy(&self, frame: &ZapFrame, message: &InboundMessage) -> Result<()> {
-        let policy = PolicySet::new(
+        let policy = PolicySet::new_with_default(
+            self.message_policy.default_decision,
             self.message_policy
                 .rules
                 .iter()
@@ -2018,6 +2377,7 @@ impl ZapNode {
         })?;
         let forwarded = sign_frame(&self.keypair, &forwarded)?;
         self.endpoint.send_frame(peer, &forwarded).await?;
+        self.record_sent_frame(peer);
         Ok(())
     }
 
@@ -2095,10 +2455,18 @@ impl ZapNode {
 
     fn verify_consensus(&self, frame: &zap_core::ZapFrame) -> Result<()> {
         if self.poa_validators.is_empty() {
+            self.record_poa_attestation_failure();
             bail!("frame requires Proof-of-Action, but no PoA validators are configured");
         }
-        verify_poa_certificate(frame, &self.poa_validators, self.poa_required_threshold)
+        match verify_poa_certificate(frame, &self.poa_validators, self.poa_required_threshold)
             .context("inbound frame failed Proof-of-Action validation")
+        {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.record_poa_attestation_failure();
+                Err(error)
+            }
+        }
     }
 
     fn write_receipt(
@@ -2240,6 +2608,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         ungranted_capability_count,
         capability_cache_enabled: config.capability_cache.path.is_some(),
         discovery_cache_enabled: config.discovery.announcement_cache.is_some(),
+        message_policy_default_decision: config.message_policy.default_decision,
         message_policy_rule_count: config.message_policy.rules.len(),
         message_schema_contract_count: message_contracts.contracts.len(),
         message_schema_require_match: message_contracts.require_match,
@@ -2416,6 +2785,12 @@ fn validate_capability_cache_config(config: &ZapNodeConfig) -> Result<()> {
 }
 
 fn validate_message_policy(config: &ZapNodeConfig, warnings: &mut Vec<String>) -> Result<()> {
+    if !matches!(
+        config.message_policy.default_decision,
+        MessagePolicyDecision::Allow | MessagePolicyDecision::Deny
+    ) {
+        bail!("message_policy.default_decision must be allow or deny");
+    }
     for (index, rule) in config.message_policy.rules.iter().enumerate() {
         let rule_name = format!("message_policy.rules[{index}]");
         if let Some(kind) = rule.kind.as_deref()
@@ -3883,7 +4258,51 @@ mod tests {
         });
 
         let report = config.validate().unwrap();
+        assert_eq!(
+            report.message_policy_default_decision,
+            MessagePolicyDecision::Allow
+        );
         assert_eq!(report.message_policy_rule_count, 1);
+    }
+
+    #[test]
+    fn config_validation_reports_message_policy_default_deny() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.message_policy.default_decision = MessagePolicyDecision::Deny;
+
+        let report = config.validate().unwrap();
+        assert_eq!(
+            report.message_policy_default_decision,
+            MessagePolicyDecision::Deny
+        );
+        assert_eq!(report.message_policy_rule_count, 0);
+    }
+
+    #[test]
+    fn config_validation_rejects_non_terminal_message_policy_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.message_policy.default_decision = MessagePolicyDecision::RequirePoa;
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("message_policy.default_decision"));
     }
 
     #[test]
@@ -4803,6 +5222,70 @@ path = "logs/receipts.jsonl"
     }
 
     #[tokio::test]
+    async fn node_metrics_snapshot_tracks_received_frames_and_prometheus_text() {
+        let harness = node_harness(SecurityConfig::default()).await;
+        let signed = signed_echo_frame(&harness, now_micros().unwrap());
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let snapshot = harness.node.metrics_snapshot();
+        assert_eq!(
+            snapshot.frames_received_total,
+            vec![PeerCounter {
+                peer: harness.sender_key.node_id(),
+                value: 1
+            }]
+        );
+        assert!(
+            snapshot
+                .peer_trust_status
+                .iter()
+                .any(|gauge| gauge.peer == harness.sender_key.node_id()
+                    && gauge.status == PeerTrustStatus::Trusted
+                    && gauge.value == 1)
+        );
+
+        let prometheus = harness.node.metrics_prometheus_text();
+        assert!(prometheus.contains("zap_frames_received_total"));
+        assert!(prometheus.contains("zap_peer_trust_status"));
+    }
+
+    #[tokio::test]
+    async fn node_metrics_snapshot_tracks_rejected_frames() {
+        let harness = node_harness(SecurityConfig {
+            max_clock_skew_micros: 1_000,
+            replay_cache_capacity: 4096,
+        })
+        .await;
+        let signed = signed_echo_frame(&harness, 1);
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let error = harness.node.handle_once().await.unwrap_err();
+        assert!(format!("{error:#}").contains("stale frame timestamp"));
+
+        let snapshot = harness.node.metrics_snapshot();
+        assert_eq!(
+            snapshot.frames_rejected_total,
+            vec![ReasonCounter {
+                reason: "anti_replay".to_string(),
+                value: 1
+            }]
+        );
+    }
+
+    #[tokio::test]
     async fn node_handles_zenv_action_and_executes_wasm_driver() {
         let harness = node_harness(SecurityConfig::default()).await;
         let signed = signed_zenv_frame(
@@ -5408,6 +5891,7 @@ required_json_fields = ["message"]
                     required_capability: None,
                     reason: Some("echo requires operator approval".to_string()),
                 }],
+                ..MessagePolicyConfig::default()
             },
         )
         .await;
@@ -5446,6 +5930,7 @@ required_json_fields = ["message"]
                     required_capability: None,
                     reason: Some("echo disabled".to_string()),
                 }],
+                ..MessagePolicyConfig::default()
             },
         )
         .await;
@@ -5465,6 +5950,35 @@ required_json_fields = ["message"]
         let error = harness.node.handle_once().await.unwrap_err();
         assert!(format!("{error:#}").contains("message policy denied action echo"));
         assert!(format!("{error:#}").contains("echo disabled"));
+    }
+
+    #[tokio::test]
+    async fn node_policy_default_deny_rejects_unmatched_message() {
+        let harness = node_harness_with_poa_and_message_policy(
+            SecurityConfig::default(),
+            PoaConfig::default(),
+            MessagePolicyConfig {
+                default_decision: MessagePolicyDecision::Deny,
+                rules: Vec::new(),
+            },
+        )
+        .await;
+        let signed = signed_zenv_frame(
+            &harness,
+            ZapMessageKind::Action,
+            "echo",
+            b"default-denied-body",
+            now_micros().unwrap(),
+        );
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let error = harness.node.handle_once().await.unwrap_err();
+        assert!(format!("{error:#}").contains("message policy denied action echo"));
+        assert!(format!("{error:#}").contains("default deny"));
     }
 
     #[tokio::test]
@@ -5492,6 +6006,7 @@ required_json_fields = ["message"]
                     required_capability: None,
                     reason: Some("echo requires operator approval".to_string()),
                 }],
+                ..MessagePolicyConfig::default()
             },
         )
         .await;

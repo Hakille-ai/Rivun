@@ -1,0 +1,51 @@
+[[rules]]
+name = "allow-sensor-read-with-grant"
+kind = "action"
+subject = "sensor.read"
+decision = "require_grant"
+required_capability = "sensor.read"
+reason = "sensor reads must be attached to an explicit telemetry grant"
+
+[[rules]]
+name = "gate-thermostat-setpoint"
+kind = "action"
+subject = "thermostat.setpoint"
+decision = "require_grant"
+required_capability = "thermostat.setpoint"
+reason = "HVAC setpoint changes require an explicit bounded zone grant"
+
+[[rules]]
+name = "gate-light-set"
+kind = "action"
+subject = "light.set"
+decision = "require_grant"
+required_capability = "light.set"
+reason = "lighting changes require an explicit scoped lighting grant"
+
+[[rules]]
+name = "require-poa-for-lock-open"
+kind = "action"
+subject = "lock.open"
+decision = "require_poa"
+reason = "opening access-controlled locks is a critical physical security action"
+
+[[rules]]
+name = "require-human-approval-for-alarm-arm"
+kind = "action"
+subject = "alarm.arm"
+decision = "human_approval"
+reason = "alarm mode changes require human approval to avoid unsafe security states"
+
+[[rules]]
+name = "require-human-approval-for-camera-snapshot"
+kind = "action"
+subject = "camera.snapshot"
+decision = "human_approval"
+reason = "camera snapshots may capture sensitive occupancy data and require approval"
+
+[[rules]]
+name = "deny-unlisted-smart-building-actions"
+kind = "action"
+subject = "*"
+decision = "deny"
+reason = "smart-building pack denies unlisted actions by default"

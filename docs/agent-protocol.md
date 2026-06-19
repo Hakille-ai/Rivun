@@ -118,6 +118,11 @@ envelopes, set the subject from `AgentMessage::subject()`, and set
 `AgentMessage::from_json_slice` so validation runs before policy evaluation or
 dispatch.
 
+The CLI can construct common agent messages locally without sending them:
+`zap agent intent`, `zap agent status`, and `zap agent result` print validated
+JSON to stdout or write it with `--out`. These builders are useful for fixtures,
+operator handoffs, and preparing payloads that a later step can wrap in `ZENV`.
+
 Agent capabilities reuse `zap-capability::CapabilityId`. A negotiated
 capability is descriptive until existing node policy, manifest, registry, and
 grant checks authorize execution.
