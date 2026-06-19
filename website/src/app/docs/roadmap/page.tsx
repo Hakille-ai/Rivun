@@ -37,7 +37,7 @@ export default function RoadmapPage() {
             <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 block">Milestones</span>
             <h3 className="text-xl font-bold text-white tracking-tight">Evolution of the ZAP Stack</h3>
             <p className="text-sm text-zinc-400 leading-relaxed">
-              The ZAP protocol's core execution sandbox, message validation layers, driver registry manifests, and Proof-of-Action consensus are fully implemented. Next milestones focus on dynamic network routing tables and peer orchestration VPNs.
+              The ZAP protocol&apos;s core execution sandbox, message validation layers, driver registry manifests, and Proof-of-Action consensus are fully implemented. Next milestones focus on dynamic network routing tables and peer orchestration VPNs.
             </p>
           </div>
         </div>

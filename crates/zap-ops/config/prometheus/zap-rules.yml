@@ -11,15 +11,6 @@ groups:
           summary: "ZAP node target is not scrapeable"
           runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapnodedown"
 
-      - alert: ZapHealthCritical
-        expr: zap_node_health_status >= 2
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "ZAP node reports a critical health check"
-          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zaphealthcritical"
-
       - alert: ZapReceiptAuditFailing
         expr: increase(zap_receipt_log_verify_failures_total[10m]) > 0
         for: 0m
@@ -30,7 +21,7 @@ groups:
           runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapreceiptauditfailing"
 
       - alert: ZapRegistrySignatureInvalid
-        expr: zap_registry_signature_valid == 0
+        expr: (zap_registry_signature_valid == 0) or absent(zap_registry_signature_valid)
         for: 5m
         labels:
           severity: critical
@@ -48,7 +39,7 @@ groups:
           runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapcapabilitycachestale"
 
       - alert: ZapDriverErrorRateHigh
-        expr: sum by (cluster, action) (rate(zap_driver_execution_errors_total[5m])) > 0.05
+        expr: sum by (action) (rate(zap_driver_execution_errors_total[5m])) > 0.05
         for: 5m
         labels:
           severity: warning
@@ -64,3 +55,21 @@ groups:
         annotations:
           summary: "Proof-of-Action attestation failures detected"
           runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zappoaattestationfailures"
+
+      - alert: ZapFrameRejectRateHigh
+        expr: sum by (reason) (rate(zap_frames_rejected_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frame rejections are elevated for {{ $labels.reason }}"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapframerejectratehigh"
+
+      - alert: ZapReplaySpike
+        expr: sum by (reason) (rate(zap_frames_rejected_total{reason=~".*(replay|nonce|fresh|stale).*"}[5m])) > 0.02
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replay or freshness-related frame rejections are rising"
+          runbook_url: "https://github.com/hakille-ai/ZAP/blob/main/docs/observability.md#zapreplayspike"

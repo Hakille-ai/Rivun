@@ -1,0 +1,53 @@
+default_decision = "deny"
+
+[[rules]]
+name = "read bounded patient context"
+kind = "data"
+subject = "patient.record.read"
+decision = "require_grant"
+required_capability = "patient.record.read"
+reason = "patient context requires an explicit scoped grant"
+
+[[rules]]
+name = "route clinical alert"
+kind = "action"
+subject = "clinical.alert.route"
+decision = "require_grant"
+required_capability = "clinical.alert.route"
+reason = "alert routing must be scoped to an approved care team"
+
+[[rules]]
+name = "propose care task"
+kind = "action"
+subject = "care.task.propose"
+decision = "require_grant"
+required_capability = "care.task.propose"
+reason = "task proposals are reversible but still require scoped access"
+
+[[rules]]
+name = "write record note"
+kind = "action"
+subject = "record.note.write"
+decision = "human_approval"
+reason = "record amendments require a clinician approval gate"
+
+[[rules]]
+name = "propose device command"
+kind = "action"
+subject = "device.command.propose"
+decision = "simulate_first"
+reason = "device command proposals require simulation before escalation"
+
+[[rules]]
+name = "clinical order execution"
+kind = "action"
+subject = "clinical.order.place"
+decision = "require_poa"
+reason = "clinical orders are critical and require Proof-of-Action"
+
+[[rules]]
+name = "privacy export"
+kind = "action"
+subject = "privacy.export"
+decision = "require_poa"
+reason = "PHI export requires Proof-of-Action and operator evidence"

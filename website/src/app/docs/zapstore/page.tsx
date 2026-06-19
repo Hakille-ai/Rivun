@@ -61,7 +61,7 @@ export default function ZapStorePage() {
           <CardContent className="space-y-3 text-sm text-zinc-400">
             <p>A signed driver manifest securely binds the following values:</p>
             <ul className="space-y-1 text-xs text-zinc-300 list-disc pl-5">
-              <li><strong>Action Identifier:</strong> Action binding name (e.g. <code>"echo"</code>).</li>
+              <li><strong>Action Identifier:</strong> Action binding name (e.g. <code>&quot;echo&quot;</code>).</li>
               <li><strong>Artifact Hash:</strong> BLAKE3 binary fingerprint of compiled WASM bytecode.</li>
               <li><strong>Permissions:</strong> Declarations of sandbox syscall exceptions.</li>
               <li><strong>Signature:</strong> Ed25519 payload attestation.</li>

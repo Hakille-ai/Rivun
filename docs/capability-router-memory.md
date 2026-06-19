@@ -126,6 +126,7 @@ cargo run -p zap-cli -- memory put --path .zap/memory.jsonl --subject note --pay
 cargo run -p zap-cli -- memory query --path .zap/memory.jsonl --subject note --json
 cargo run -p zap-cli -- memory verify --path .zap/memory.jsonl
 cargo run -p zap-cli -- memory prune --path .zap/memory.jsonl --before-created-at-micros 1735689600000000 --out .zap/memory.retained.jsonl
+cargo run -p zap-cli -- memory export-evidence --path .zap/memory.jsonl --receipts logs/actions.jsonl
 ```
 
 Node config can expose memory in local capability advertisements:
@@ -149,3 +150,9 @@ Newly appended memory entries include `previous_entry_hash` and `entry_hash`.
 append-only chain, rejects duplicate entry ids, and rejects tombstones whose
 source record is missing. `zap memory prune` rewrites retained entries into a
 fresh verifiable chain and drops tombstones whose source record was pruned.
+`zap memory export-evidence` emits a bounded JSON evidence bundle with memory
+verification counts, entry ids, subjects, content types, body hashes, chain
+hashes, optional verified receipt summaries, and limitations. It intentionally
+omits memory payload bytes, metadata values, key material, and raw receipt
+signatures; preserve the referenced JSONL files and re-run `zap memory verify`
+or `zap receipts verify` to prove the bundle.

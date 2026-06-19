@@ -1,1 +1,5 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Hakille-ai/ZAP/security/advisories/new
+    about: Privately report exploitable vulnerabilities, key leaks, or bypasses.

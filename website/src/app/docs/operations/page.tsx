@@ -15,7 +15,7 @@ export default function OperationsPage() {
         <Terminal className="w-4 h-4 text-blue-400" />
         <AlertTitle className="font-semibold text-blue-400">CLI Binary Path</AlertTitle>
         <AlertDescription className="text-xs">
-          The operations commands below assume the compiled binary <code>zap</code> (or <code>zap-cli</code>) is located in your system's PATH.
+          The operations commands below assume the compiled binary <code>zap</code> (or <code>zap-cli</code>) is located in your system&apos;s PATH.
         </AlertDescription>
       </Alert>
 

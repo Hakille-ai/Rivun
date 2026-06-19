@@ -1,0 +1,95 @@
+# Roadmap Implementation Status
+
+This file tracks implementation evidence for the roadmap. It is intentionally
+stricter than `roadmap.md`: an item is marked done only when the repository has
+code, tests, docs, and operator evidence for the promised behavior.
+
+Status values:
+
+- `done`: implemented, tested, and documented.
+- `partial`: useful work exists, but the roadmap promise is not fully met.
+- `planned`: documented but not implemented.
+
+## Phase 0: Promise, Packaging, and Adoption
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Install docs | done | `docs/install.md`, website install page | Keep release artifact instructions current |
+| Five-minute source quickstart | partial | `docs/getting-started.md`, `README.md` | Add exact expected terminal output for every step |
+| Website docs coverage | partial | Website pages for install, agent protocol, domain packs, message policy, observability, RFC/ZEP | Add release/governance/community pages and link checking |
+| GitHub contribution flow | done | Issue templates, PR template, `CODEOWNERS`, `docs/rfc-process.md` | Add examples of accepted ZEPs once proposals exist |
+
+## Phase 1: Production Hardening
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Node metrics text | partial | `ZapNode::metrics_snapshot()`, `ZapNode::metrics_prometheus_text()` | Add daemon HTTP `/metrics` endpoint or documented embedding adapter |
+| Health endpoint | planned | `doctor --strict` readiness checks | Add daemon or embedding `/healthz` response contract |
+| Prometheus/Grafana assets | done | `crates/zap-ops/config`, `docs/observability.md`, `crates/zap-ops/tests/configs.rs` | Add new rules only with emitted-metric validation |
+| Fail-closed message policy | done | `message_policy.default_decision`, policy tests, docs | Add more production profile examples |
+| Receipt fsync/segments/index | partial | `ReceiptFsyncPolicy`, `[receipts] fsync`, node config validation, fsync cadence tests | Add segment manifests and indexed bounded pulls |
+| Durable replay window | partial | In-memory replay guard and datagram nonce cache | Add optional restart-persistent replay windows |
+| Runtime host-call limits | partial | Host call byte limit and runtime bounds exist | Add per-action budget profiles and richer error taxonomy |
+
+## Phase 2: Protocol Spec and SDK Conformance
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Shared fixtures | partial | `fixtures/`, `fixtures/protocol/`, Rust/Python/TypeScript/Go tests | Add signature, PoA, capability, and datagram golden vectors |
+| `zap fixtures verify` | done | CLI command and tests | Add SDK-path conformance mode |
+| SDK matrix | partial | `docs/sdks.md`, SDK README updates | Expand SDKs to signing, receipt verification, and capability helpers |
+| `zap schema export` | partial | CLI export of compiled protocol constants, agent schema, control subjects, fixture catalog | Add external domain-pack schema registry and SDK-generated schema parity |
+
+## Phase 3: Agent Gateway
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Agent intent/status/result | done | `zap-agent`, `zap agent intent/status/result`, tests, docs | Keep SDK fixture coverage in sync |
+| Agent session/delegate/negotiate | partial | `zap agent session/delegate/negotiate`, CLI tests | Add fixtures, receipt links, storage, and persistent orchestration |
+| Agent receipt linkage | partial | Receipts record message kind/subject and PoA | Link intent/session/capabilities/output artifacts explicitly |
+| Evidence export | partial | `zap memory export-evidence` emits payload-free memory and receipt summaries | Add signed bundle manifest and optional encrypted raw evidence archive |
+| Agent framework adapters | planned | Architecture docs only | Add adapters outside the wire protocol core |
+
+## Phase 4: Domain Packs and Marketplace
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Domain pack manifest | done | `docs/domain-packs.md`, `zap pack validate/inspect/list` | Add signing/build/install workflows |
+| Preview packs | done | agentic-dev, smart-building, cloud-ops, industrial, personal-ai, healthcare, finance | Add robotics and data-platform packs |
+| Pack catalog | done | `zap pack list --root ... --json` | Expose catalog in website or ZapStore |
+| Pack marketplace | planned | ZapStore driver registry exists | Extend ZapStore to signed domain-pack registry |
+
+## Phase 5: Fleet and Multi-Transport
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Static peers | done | Config, trust, peer invite/accept/rotate/revoke | Add live enrollment and revocation propagation |
+| Fleet doctor | planned | `doctor --strict` local checks | Add fleet topology inspection across peers |
+| Stream/gateway transports | planned | UDP transport and control messages | Add HTTP, WebSocket, gRPC, MQTT/NATS/Kafka/ROS2/OPC UA/Modbus bridges |
+| Incident snapshot | partial | `zap incident snapshot` captures doctor/config/memory/receipt/cache summaries | Add live process metrics, network state, and fleet-wide peer snapshots |
+
+## Phase 6: Architecture Modularization
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Node service boundaries | planned | `zap-node` still owns many responsibilities | Extract config, control, discovery, receipts, registry, PoA, route, runtime, observability services |
+| Cross-boundary invariant tests | partial | Many unit and integration tests exist | Add direct invariant suites per service boundary |
+
+## Phase 7: 1.0 Readiness
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Compatibility matrix | partial | `docs/sdks.md`, `docs/versioning.md` | Add generated protocol constant/source matrix |
+| Release checklist | done | `docs/release.md`, `tools/xtask release readiness`, release workflow | Keep gates current as new SDKs and packs are added |
+| External audit plan | planned | Security docs exist | Add third-party review plan and audit scope |
+| Official examples strict doctor | planned | Example configs exist | Add CI that runs `doctor --strict` on official examples |
+
+## Next Highest-Value Implementation Blocks
+
+1. Add agent session, delegate, and negotiate contracts with CLI commands and fixtures.
+2. Add receipt fsync modes and segment/index primitives.
+3. Add `zap schema export` and a machine-readable protocol source of truth.
+4. Add daemon or embedding-ready `/metrics` and `/healthz` adapters.
+5. Expand fixtures to frame/signature/PoA/receipt/capability/datagram golden vectors.
+6. Add `zap memory export-evidence` and `zap incident snapshot`.
+7. Extend ZapStore with signed domain-pack build/sign/verify/install workflows.

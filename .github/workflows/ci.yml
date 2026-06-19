@@ -25,6 +25,46 @@ jobs:
       - run: cargo ci-bench-smoke
       - run: cargo ci-clippy
 
+  cli-conformance:
+    name: cli conformance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify protocol fixtures
+        run: cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --json
+      - name: Validate example domain packs
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packs=(examples/domain-packs/*)
+          if [ ${#packs[@]} -eq 0 ]; then
+            echo "No example domain packs found."
+            exit 1
+          fi
+          for pack in "${packs[@]}"; do
+            [ -d "$pack" ] || continue
+            cargo run --locked -p zap-cli -- pack validate --pack "$pack" --json
+          done
+
+  website:
+    name: website lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
   docker:
     name: docker build
     runs-on: ubuntu-latest

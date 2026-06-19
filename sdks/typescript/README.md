@@ -38,12 +38,29 @@ console.log(parsed.jsonBody());
 `verifyEd25519Signature()` verifies registry/publication signatures through
 `@noble/ed25519`.
 
+## Shared fixtures and conformance
+
+The TypeScript test suite reads the shared protocol fixtures from the
+repository-level `fixtures/` directory. It currently asserts:
+
+- `zenv-control-registry-bundle-manifest-request.json` matches the TypeScript
+  ZapStore request helper and round-trips through `ControlFrame`.
+- `control-subjects-v1.json` includes the SDK registry subjects and uses frame
+  compatible media types.
+- `agent-intent-message-v1.json` can be carried as an
+  `application/zap-agent+json` control envelope.
+
+To add a fixture, create a small deterministic JSON file in `fixtures/`, then
+add or extend a test in `sdks/typescript/test/fixtures.test.ts` that checks the
+schema version, subject, media type, encoded header fields, and stable body
+fields.
+
 ## Test
 
 Node 24 can run the TypeScript tests with built-in type stripping:
 
 ```bash
-node --test --experimental-strip-types sdks/typescript/test/*.test.ts
-npm run typecheck
-npm run build:types
+npm --prefix sdks/typescript test
+npm --prefix sdks/typescript run typecheck
+npm --prefix sdks/typescript run build:types
 ```

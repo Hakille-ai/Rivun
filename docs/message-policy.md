@@ -35,6 +35,7 @@ Receiver configs can define deterministic message policy rules:
 
 ```toml
 [message_policy]
+default_decision = "deny"
 
 [[message_policy.rules]]
 kind = "action"
@@ -52,6 +53,12 @@ reason = "debug drivers are disabled in production"
 Rules are evaluated in order. `kind` and `subject` are optional wildcards when
 omitted. `subject` supports `*` for all subjects and suffix wildcards such as
 `safety.*`.
+
+When no rule matches, `message_policy.default_decision` decides whether the
+message continues. The value can be `allow` or `deny`. Omitted configs default
+to `allow` for backward compatibility; production receivers should set
+`default_decision = "deny"` and add explicit `allow` or gated rules for expected
+traffic.
 
 Decisions:
 
@@ -121,6 +128,8 @@ an allowlist for typed messages.
 Policy files use the same rule shape as node config:
 
 ```toml
+default_decision = "deny"
+
 [[rules]]
 name = "safety quorum"
 kind = "action"

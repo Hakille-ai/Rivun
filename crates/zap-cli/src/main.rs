@@ -3,7 +3,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use rand_core::{OsRng, RngCore};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
@@ -14,7 +14,12 @@ use std::{
 };
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
-use zap_agent::{AGENT_CONTENT_TYPE, AgentMessage, agent_message_json_schema};
+use zap_agent::{
+    AGENT_CONTENT_TYPE, AGENT_PROTOCOL_SCHEMA_VERSION, AgentErrorInfo, AgentId, AgentIntent,
+    AgentMessage, AgentResult, AgentSession, AgentStatusUpdate, CapabilityNegotiationRequest,
+    CapabilityNegotiationResponse, DelegationRequest, DelegationResponse, IntentKind,
+    agent_message_json_schema,
+};
 use zap_capability::{
     CAPABILITY_CONTENT_TYPE, CAPABILITY_QUERY_SUBJECT, CAPABILITY_RESPONSE_SUBJECT,
     CapabilityCacheEntry, CapabilityId, CapabilityQuery, CapabilityResponse, DriverPermissions,
@@ -38,9 +43,10 @@ use zap_envelope::{
 use zap_ledger::{
     DEFAULT_RECEIPT_REPLICATION_LIMIT, RECEIPT_REPLICATION_CONTENT_TYPE,
     RECEIPT_REPLICATION_REQUEST_SUBJECT, RECEIPT_REPLICATION_RESPONSE_SUBJECT,
-    ReceiptReplicationRequest, ReceiptReplicationResponse, SignedActionReceipt,
+    RECEIPT_SCHEMA_VERSION, ReceiptReplicationRequest, ReceiptReplicationResponse,
+    SignedActionReceipt,
 };
-use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
+use zap_memory::{JsonlMemoryStore, MEMORY_SCHEMA_VERSION, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
     DISCOVERY_ANNOUNCE_SUBJECT, DISCOVERY_CONTENT_TYPE, DISCOVERY_QUERY_SUBJECT,
@@ -49,7 +55,7 @@ use zap_node::{
     ZapNode, ZapNodeConfig, build_discovery_advertisement, describe_capabilities,
     sign_discovery_advertisement,
 };
-use zap_policy::{PolicyInput, PolicySet};
+use zap_policy::{PolicyDecision, PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
 use zap_schema::{MessageContract, MessageParts};
 use zap_store::{
@@ -212,6 +218,16 @@ enum Commands {
         #[command(subcommand)]
         command: PolicyCommand,
     },
+    /// Inspect and validate domain packs.
+    Pack {
+        #[command(subcommand)]
+        command: PackCommand,
+    },
+    /// Verify stable protocol fixture JSON files.
+    Fixtures {
+        #[command(subcommand)]
+        command: FixturesCommand,
+    },
     /// Create or verify signed ZapStore driver manifests.
     #[command(name = "driver-manifest")]
     DriverManifest {
@@ -227,6 +243,11 @@ enum Commands {
     Receipts {
         #[command(subcommand)]
         command: ReceiptsCommand,
+    },
+    /// Capture bounded incident evidence without raw secrets or payloads.
+    Incident {
+        #[command(subcommand)]
+        command: IncidentCommand,
     },
     /// Create or sign Proof-of-Action attestation messages.
     Poa {
@@ -321,6 +342,194 @@ enum CapabilityCacheCommand {
 
 #[derive(Debug, Subcommand)]
 enum AgentCommand {
+    /// Build an agent session JSON message without sending it.
+    Session {
+        #[arg(long)]
+        session_id: Option<Uuid>,
+        #[arg(long)]
+        root_intent_id: Option<Uuid>,
+        #[arg(long)]
+        parent_session_id: Option<Uuid>,
+        #[arg(long)]
+        owner_agent: String,
+        #[arg(long, default_value = "queued")]
+        status: String,
+        #[arg(long)]
+        created_at_micros: Option<u64>,
+        #[arg(long)]
+        updated_at_micros: Option<u64>,
+        #[arg(long = "accepted-capability")]
+        accepted_capabilities: Vec<String>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent intent JSON message without sending it.
+    Intent {
+        #[arg(long)]
+        session_id: Option<Uuid>,
+        #[arg(long)]
+        intent_id: Option<Uuid>,
+        #[arg(long)]
+        source_agent: String,
+        #[arg(long)]
+        target_agent: Option<String>,
+        #[arg(long, default_value = "act")]
+        kind: String,
+        #[arg(long)]
+        objective: String,
+        /// JSON value to place in payload.input.
+        #[arg(long)]
+        input: Option<String>,
+        #[arg(long = "capability")]
+        required_capabilities: Vec<String>,
+        #[arg(long, default_value = "normal")]
+        priority: String,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent status JSON message without sending it.
+    Status {
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        intent_id: Option<Uuid>,
+        #[arg(long)]
+        agent_id: String,
+        #[arg(long, default_value = "running")]
+        status: String,
+        #[arg(long)]
+        progress_per_mille: Option<u16>,
+        #[arg(long)]
+        message: Option<String>,
+        #[arg(long)]
+        updated_at_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent result JSON message without sending it.
+    Result {
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        intent_id: Uuid,
+        #[arg(long)]
+        result_id: Option<Uuid>,
+        #[arg(long)]
+        agent_id: String,
+        #[arg(long, default_value = "completed")]
+        status: String,
+        /// JSON object to place in payload.outputs.
+        #[arg(long)]
+        outputs: Option<String>,
+        #[arg(long)]
+        error_code: Option<String>,
+        #[arg(long)]
+        error_message: Option<String>,
+        #[arg(long)]
+        completed_at_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent delegation request or response JSON message without sending it.
+    Delegate {
+        #[arg(long)]
+        response: bool,
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        delegation_id: Option<Uuid>,
+        #[arg(long)]
+        parent_intent_id: Option<Uuid>,
+        #[arg(long)]
+        from_agent: Option<String>,
+        #[arg(long)]
+        to_agent: Option<String>,
+        #[arg(long)]
+        respondent_agent: Option<String>,
+        #[arg(long, default_value = "accepted")]
+        decision: String,
+        #[arg(long)]
+        assigned_agent: Option<String>,
+        #[arg(long)]
+        objective: Option<String>,
+        #[arg(long = "capability")]
+        required_capabilities: Vec<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        estimated_completion_unix_micros: Option<u64>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build an agent capability negotiation request or response JSON message without sending it.
+    Negotiate {
+        #[arg(long)]
+        response: bool,
+        #[arg(long)]
+        session_id: Uuid,
+        #[arg(long)]
+        negotiation_id: Option<Uuid>,
+        #[arg(long)]
+        requester_agent: Option<String>,
+        #[arg(long)]
+        responder_agent: Option<String>,
+        #[arg(long, default_value = "partial")]
+        decision: String,
+        #[arg(long = "required-capability")]
+        required_capabilities: Vec<String>,
+        #[arg(long = "optional-capability")]
+        optional_capabilities: Vec<String>,
+        #[arg(long = "accepted-capability")]
+        accepted_capabilities: Vec<String>,
+        #[arg(long = "unsupported-capability")]
+        unsupported_capabilities: Vec<String>,
+        #[arg(long = "intent-kind")]
+        desired_intents: Vec<String>,
+        #[arg(long = "supported-intent")]
+        supported_intents: Vec<String>,
+        #[arg(long)]
+        expires_at_unix_micros: Option<u64>,
+        #[arg(long)]
+        reason: Option<String>,
+        /// JSON object to place in payload.metadata.
+        #[arg(long)]
+        metadata: Option<String>,
+        /// Write the message to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
     /// Validate one agent protocol JSON message.
     Validate {
         /// Read the JSON message from this file. Omit to read stdin.
@@ -463,6 +672,18 @@ enum MemoryCommand {
         force: bool,
         #[arg(long)]
         json: bool,
+    },
+    /// Export a payload-free evidence bundle from memory and optional receipts.
+    ExportEvidence {
+        #[arg(long, default_value = ".zap/memory.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        receipts: Option<PathBuf>,
+        /// Write the bundle to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -616,6 +837,37 @@ enum SchemaCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Export machine-readable protocol constants and known schema contracts.
+    Export {
+        /// Write the schema source to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IncidentCommand {
+    /// Write a bounded JSON snapshot for incident triage and postmortems.
+    Snapshot {
+        #[arg(long, default_value = "zap.toml")]
+        config: PathBuf,
+        /// Override or provide a memory JSONL path. Defaults to [memory].path when configured.
+        #[arg(long)]
+        memory: Option<PathBuf>,
+        /// Override or provide a receipt JSONL path. Defaults to [receipts].path when configured.
+        #[arg(long)]
+        receipts: Option<PathBuf>,
+        /// Include a capability cache verification summary.
+        #[arg(long)]
+        capability_cache: Option<PathBuf>,
+        /// Write the snapshot to a file instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -644,6 +896,42 @@ enum PolicyCommand {
         simulation_passed: bool,
         #[arg(long)]
         strict: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PackCommand {
+    /// Validate a domain pack manifest and referenced policy/schema files.
+    Validate {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Summarize a domain pack manifest.
+    Inspect {
+        #[arg(long)]
+        pack: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List and validate domain packs under a root directory.
+    List {
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum FixturesCommand {
+    /// Verify JSON fixtures and known v1 protocol fixture contracts.
+    Verify {
+        #[arg(long)]
+        fixtures: PathBuf,
         #[arg(long)]
         json: bool,
     },
@@ -1300,9 +1588,12 @@ async fn async_main() -> Result<()> {
         Commands::Schema { command } => schema(command),
         Commands::Agent { command } => agent(command),
         Commands::Policy { command } => policy(command),
+        Commands::Pack { command } => pack(command),
+        Commands::Fixtures { command } => fixtures(command),
         Commands::DriverManifest { command } => driver_manifest(command),
         Commands::Registry { command } => registry(command).await,
         Commands::Receipts { command } => receipts(command).await,
+        Commands::Incident { command } => incident(command),
         Commands::Poa { command } => poa(command).await,
         Commands::Bench { command } => bench(command),
     }
@@ -1420,6 +1711,10 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             report.capability_cache_enabled
         );
         println!("discovery_cache_enabled={}", report.discovery_cache_enabled);
+        println!(
+            "message_policy_default_decision={}",
+            policy_decision_name(report.message_policy_default_decision)
+        );
         println!("message_policy_rules={}", report.message_policy_rule_count);
         println!(
             "message_schema_contracts={}",
@@ -1717,13 +2012,37 @@ fn capability_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorC
 }
 
 fn message_policy_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
+    if report.message_policy_default_decision == PolicyDecision::Allow {
+        return DoctorCheck::warn(
+            "message policy",
+            format!(
+                "default_decision=allow rules={}; unmatched messages are accepted",
+                report.message_policy_rule_count
+            ),
+        );
+    }
     if report.message_policy_rule_count == 0 {
-        return DoctorCheck::warn("message policy", "no message policy rules configured");
+        return DoctorCheck::pass("message policy", "default_decision=deny rules=0");
     }
     DoctorCheck::pass(
         "message policy",
-        format!("rules={}", report.message_policy_rule_count),
+        format!(
+            "default_decision={} rules={}",
+            policy_decision_name(report.message_policy_default_decision),
+            report.message_policy_rule_count
+        ),
     )
+}
+
+fn policy_decision_name(decision: PolicyDecision) -> &'static str {
+    match decision {
+        PolicyDecision::Allow => "allow",
+        PolicyDecision::Deny => "deny",
+        PolicyDecision::RequirePoa => "require_poa",
+        PolicyDecision::RequireGrant => "require_grant",
+        PolicyDecision::HumanApproval => "human_approval",
+        PolicyDecision::SimulateFirst => "simulate_first",
+    }
 }
 
 fn message_schema_check(report: &zap_node::ConfigValidationReport) -> DoctorCheck {
@@ -2853,6 +3172,201 @@ fn normalize_path_for_comparison(path: &Path) -> Result<PathBuf> {
         std::env::current_dir()?.join(path)
     };
     Ok(path.components().collect())
+}
+
+fn incident(command: IncidentCommand) -> Result<()> {
+    match command {
+        IncidentCommand::Snapshot {
+            config,
+            memory,
+            receipts,
+            capability_cache,
+            out,
+            force,
+        } => incident_snapshot(IncidentSnapshotOptions {
+            config_path: &config,
+            memory_path: memory.as_deref(),
+            receipts_path: receipts.as_deref(),
+            capability_cache_path: capability_cache.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
+    }
+}
+
+struct IncidentSnapshotOptions<'a> {
+    config_path: &'a Path,
+    memory_path: Option<&'a Path>,
+    receipts_path: Option<&'a Path>,
+    capability_cache_path: Option<&'a Path>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct IncidentSnapshot {
+    schema_version: u8,
+    generated_at_micros: u64,
+    config: String,
+    valid: bool,
+    doctor: DoctorReport,
+    config_summary: Option<IncidentConfigSummary>,
+    memory: Option<EvidenceMemorySummary>,
+    receipts: Option<EvidenceReceiptSummary>,
+    capability_cache: Option<IncidentCapabilityCacheSummary>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct IncidentConfigSummary {
+    node_id: String,
+    bind: String,
+    peers: usize,
+    drivers: usize,
+    routes: usize,
+    require_signed: bool,
+    registry_enabled: bool,
+    registry_signature_required: bool,
+    receipt_log_enabled: bool,
+    memory_enabled: bool,
+    capability_cache_enabled: bool,
+    message_policy_default_decision: &'static str,
+    message_policy_rules: usize,
+    message_schema_contracts: usize,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct IncidentCapabilityCacheSummary {
+    path: String,
+    verified: bool,
+    entries: Option<usize>,
+    errors: Vec<String>,
+}
+
+fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
+    let loaded = ZapNodeConfig::from_path(options.config_path);
+    let (config, validation, doctor) = match loaded {
+        Ok(config) => match config.validate() {
+            Ok(validation) => {
+                let doctor = build_doctor_report(options.config_path, &validation);
+                (Some(config), Some(validation), doctor)
+            }
+            Err(error) => (
+                Some(config),
+                None,
+                DoctorReport {
+                    config: options.config_path.display().to_string(),
+                    status: "failed".to_string(),
+                    score: 0,
+                    summary: "configuration validation failed".to_string(),
+                    checks: vec![DoctorCheck::fail("config validation", format!("{error:#}"))],
+                    warnings: Vec::new(),
+                    error: Some(format!("{error:#}")),
+                },
+            ),
+        },
+        Err(error) => (
+            None,
+            None,
+            DoctorReport {
+                config: options.config_path.display().to_string(),
+                status: "failed".to_string(),
+                score: 0,
+                summary: "configuration could not be loaded".to_string(),
+                checks: vec![DoctorCheck::fail("config load", format!("{error:#}"))],
+                warnings: Vec::new(),
+                error: Some(format!("{error:#}")),
+            },
+        ),
+    };
+
+    let memory_path = options.memory_path.map(Path::to_path_buf).or_else(|| {
+        config
+            .as_ref()
+            .and_then(|config| config.memory.path.clone())
+    });
+    let receipts_path = options.receipts_path.map(Path::to_path_buf).or_else(|| {
+        config
+            .as_ref()
+            .and_then(|config| config.receipts.path.clone())
+    });
+    let capability_cache_path = options
+        .capability_cache_path
+        .map(Path::to_path_buf)
+        .or_else(|| {
+            config
+                .as_ref()
+                .and_then(|config| config.capability_cache.path.clone())
+        });
+
+    let config_summary = validation.as_ref().map(|report| IncidentConfigSummary {
+        node_id: report.node_id.to_string(),
+        bind: report.bind.to_string(),
+        peers: report.peer_count,
+        drivers: report.driver_count,
+        routes: report.route_count,
+        require_signed: report.require_signed,
+        registry_enabled: report.registry_enabled,
+        registry_signature_required: report.registry_signature_required,
+        receipt_log_enabled: report.receipt_log_enabled,
+        memory_enabled: report.memory_enabled,
+        capability_cache_enabled: report.capability_cache_enabled,
+        message_policy_default_decision: policy_decision_name(
+            report.message_policy_default_decision,
+        ),
+        message_policy_rules: report.message_policy_rule_count,
+        message_schema_contracts: report.message_schema_contract_count,
+        warnings: report.warnings.clone(),
+    });
+    let memory = memory_path.as_deref().map(summarize_memory_evidence);
+    let receipts = receipts_path.as_deref().map(summarize_receipt_evidence);
+    let capability_cache = capability_cache_path
+        .as_deref()
+        .map(summarize_capability_cache_for_incident);
+    let valid = doctor.status != "failed"
+        && memory
+            .as_ref()
+            .is_none_or(|memory| memory.verified && memory.errors.is_empty())
+        && receipts
+            .as_ref()
+            .is_none_or(|receipts| receipts.verified && receipts.errors.is_empty())
+        && capability_cache
+            .as_ref()
+            .is_none_or(|cache| cache.verified && cache.errors.is_empty());
+    let snapshot = IncidentSnapshot {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        config: options.config_path.display().to_string(),
+        valid,
+        doctor,
+        config_summary,
+        memory,
+        receipts,
+        capability_cache,
+        limitations: vec![
+            "snapshot omits key material, transport keys, raw payloads, memory metadata, and raw receipt signatures".to_string(),
+            "runtime process state, network captures, and live /metrics HTTP output are not collected by this bounded CLI snapshot".to_string(),
+        ],
+    };
+    write_json_output(&snapshot, options.out, options.force)
+}
+
+fn summarize_capability_cache_for_incident(path: &Path) -> IncidentCapabilityCacheSummary {
+    match JsonlCapabilityCache::open(path).verify() {
+        Ok(report) => IncidentCapabilityCacheSummary {
+            path: path.display().to_string(),
+            verified: true,
+            entries: Some(report.entries),
+            errors: Vec::new(),
+        },
+        Err(error) => IncidentCapabilityCacheSummary {
+            path: path.display().to_string(),
+            verified: false,
+            entries: None,
+            errors: vec![format!("{error:#}")],
+        },
+    }
 }
 
 async fn certify_frame_with_network_poa(
@@ -4085,6 +4599,12 @@ fn memory(command: MemoryCommand) -> Result<()> {
             force,
             json,
         } => memory_prune(&path, before_created_at_micros, &out, force, json),
+        MemoryCommand::ExportEvidence {
+            path,
+            receipts,
+            out,
+            force,
+        } => memory_export_evidence(&path, receipts.as_deref(), out.as_deref(), force),
     }
 }
 
@@ -4223,6 +4743,274 @@ fn memory_prune(
         println!("pruned_entries={pruned}");
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceBundle {
+    schema_version: u8,
+    generated_at_micros: u64,
+    valid: bool,
+    memory: EvidenceMemorySummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipts: Option<EvidenceReceiptSummary>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceMemorySummary {
+    path: String,
+    verified: bool,
+    entries: usize,
+    records: usize,
+    tombstones: usize,
+    records_summary: Vec<EvidenceMemoryRecordSummary>,
+    tombstones_summary: Vec<EvidenceMemoryTombstoneSummary>,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceMemoryRecordSummary {
+    id: String,
+    namespace: String,
+    subject: String,
+    content_type: String,
+    body_hash: String,
+    previous_entry_hash: Option<String>,
+    entry_hash: Option<String>,
+    source_node: Option<String>,
+    frame_hash: Option<String>,
+    created_at_micros: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceMemoryTombstoneSummary {
+    id: String,
+    record_id: String,
+    namespace: String,
+    previous_entry_hash: Option<String>,
+    entry_hash: Option<String>,
+    reason_hash: Option<String>,
+    created_at_micros: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceReceiptSummary {
+    path: String,
+    verified: bool,
+    receipts: usize,
+    first_processed_at_micros: Option<u64>,
+    last_processed_at_micros: Option<u64>,
+    subjects: BTreeMap<String, usize>,
+    signers: BTreeMap<String, usize>,
+    receipt_hashes: Vec<String>,
+    errors: Vec<String>,
+}
+
+fn memory_export_evidence(
+    path: &Path,
+    receipts: Option<&Path>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let memory = summarize_memory_evidence(path);
+    let receipts = receipts.map(summarize_receipt_evidence);
+    let valid = memory.verified
+        && memory.errors.is_empty()
+        && receipts
+            .as_ref()
+            .is_none_or(|receipts| receipts.verified && receipts.errors.is_empty());
+    let bundle = EvidenceBundle {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        valid,
+        memory,
+        receipts,
+        limitations: vec![
+            "memory payload bytes, metadata values, key material, and raw receipt signatures are not embedded".to_string(),
+            "re-verify the referenced memory JSONL with `zap memory verify` and receipts with `zap receipts verify`".to_string(),
+        ],
+    };
+    write_json_output(&bundle, out, force)
+}
+
+fn summarize_memory_evidence(path: &Path) -> EvidenceMemorySummary {
+    let store = JsonlMemoryStore::open(path);
+    let verification = store.verify();
+    let mut summary = EvidenceMemorySummary {
+        path: path.display().to_string(),
+        verified: verification.is_ok(),
+        entries: 0,
+        records: 0,
+        tombstones: 0,
+        records_summary: Vec::new(),
+        tombstones_summary: Vec::new(),
+        errors: Vec::new(),
+    };
+
+    match verification {
+        Ok(report) => {
+            summary.entries = report.entries;
+            summary.records = report.records;
+            summary.tombstones = report.tombstones;
+        }
+        Err(error) => {
+            summary.errors.push(format!("{error:#}"));
+            return summary;
+        }
+    }
+
+    let input = match fs::read_to_string(path) {
+        Ok(input) => input,
+        Err(error) => {
+            summary.errors.push(format!(
+                "failed to read memory JSONL {}: {error}",
+                path.display()
+            ));
+            return summary;
+        }
+    };
+
+    for (index, line) in input.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(error) => {
+                summary
+                    .errors
+                    .push(format!("line {} is invalid JSON: {error}", index + 1));
+                continue;
+            }
+        };
+        if value.get("record_id").is_some() {
+            summary
+                .tombstones_summary
+                .push(memory_tombstone_summary(&value));
+        } else {
+            summary.records_summary.push(memory_record_summary(&value));
+        }
+    }
+    summary
+}
+
+fn memory_record_summary(value: &serde_json::Value) -> EvidenceMemoryRecordSummary {
+    EvidenceMemoryRecordSummary {
+        id: json_string_field(value, "id"),
+        namespace: json_string_field(value, "namespace"),
+        subject: json_string_field(value, "subject"),
+        content_type: json_string_field(value, "content_type"),
+        body_hash: json_string_field(value, "body_hash"),
+        previous_entry_hash: json_optional_string_field(value, "previous_entry_hash"),
+        entry_hash: json_optional_string_field(value, "entry_hash"),
+        source_node: json_optional_string_field(value, "source_node"),
+        frame_hash: json_optional_string_field(value, "frame_hash"),
+        created_at_micros: value
+            .get("created_at_micros")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default(),
+    }
+}
+
+fn memory_tombstone_summary(value: &serde_json::Value) -> EvidenceMemoryTombstoneSummary {
+    EvidenceMemoryTombstoneSummary {
+        id: json_string_field(value, "id"),
+        record_id: json_string_field(value, "record_id"),
+        namespace: json_string_field(value, "namespace"),
+        previous_entry_hash: json_optional_string_field(value, "previous_entry_hash"),
+        entry_hash: json_optional_string_field(value, "entry_hash"),
+        reason_hash: json_optional_string_field(value, "reason").map(|reason| hash_text(&reason)),
+        created_at_micros: value
+            .get("created_at_micros")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default(),
+    }
+}
+
+fn summarize_receipt_evidence(path: &Path) -> EvidenceReceiptSummary {
+    let mut summary = EvidenceReceiptSummary {
+        path: path.display().to_string(),
+        verified: false,
+        receipts: 0,
+        first_processed_at_micros: None,
+        last_processed_at_micros: None,
+        subjects: BTreeMap::new(),
+        signers: BTreeMap::new(),
+        receipt_hashes: Vec::new(),
+        errors: Vec::new(),
+    };
+    let receipts = match load_verified_receipts(path) {
+        Ok(receipts) => receipts,
+        Err(error) => {
+            summary.errors.push(format!("{error:#}"));
+            return summary;
+        }
+    };
+    summary.verified = true;
+    summary.receipts = receipts.len();
+    for receipt in receipts {
+        let processed_at = receipt.receipt.processed_at_micros;
+        summary.first_processed_at_micros = Some(
+            summary
+                .first_processed_at_micros
+                .map_or(processed_at, |current| current.min(processed_at)),
+        );
+        summary.last_processed_at_micros = Some(
+            summary
+                .last_processed_at_micros
+                .map_or(processed_at, |current| current.max(processed_at)),
+        );
+        *summary
+            .subjects
+            .entry(receipt.receipt.subject.clone())
+            .or_insert(0) += 1;
+        *summary
+            .signers
+            .entry(receipt.signer_node_id.to_string())
+            .or_insert(0) += 1;
+        match serde_json::to_vec(&receipt.receipt) {
+            Ok(bytes) => summary.receipt_hashes.push(hash_bytes_for_report(&bytes)),
+            Err(error) => summary
+                .errors
+                .push(format!("failed to hash receipt summary: {error}")),
+        }
+    }
+    summary
+}
+
+fn json_string_field(value: &serde_json::Value, field: &str) -> String {
+    value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn json_optional_string_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
+fn hash_text(input: &str) -> String {
+    hash_bytes_for_report(input.as_bytes())
+}
+
+fn hash_bytes_for_report(input: &[u8]) -> String {
+    artifact_hash(input)
+}
+
+fn write_json_output<T: Serialize>(value: &T, out: Option<&Path>, force: bool) -> Result<()> {
+    let output = format!("{}\n", serde_json::to_string_pretty(value)?);
+    match out {
+        Some(path) => write_text_file(path, &output, force),
+        None => {
+            print!("{output}");
+            Ok(())
+        }
+    }
 }
 
 fn parse_metadata(metadata: Option<String>) -> Result<serde_json::Value> {
@@ -4951,12 +5739,506 @@ fn decode_signature(encoded: &str) -> Result<[u8; ED25519_SIGNATURE_LEN]> {
 
 fn agent(command: AgentCommand) -> Result<()> {
     match command {
+        AgentCommand::Session {
+            session_id,
+            root_intent_id,
+            parent_session_id,
+            owner_agent,
+            status,
+            created_at_micros,
+            updated_at_micros,
+            accepted_capabilities,
+            metadata,
+            out,
+            force,
+        } => agent_session(
+            session_id,
+            root_intent_id,
+            parent_session_id,
+            &owner_agent,
+            &status,
+            created_at_micros,
+            updated_at_micros,
+            &accepted_capabilities,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
+        AgentCommand::Intent {
+            session_id,
+            intent_id,
+            source_agent,
+            target_agent,
+            kind,
+            objective,
+            input,
+            required_capabilities,
+            priority,
+            metadata,
+            out,
+            force,
+        } => agent_intent(
+            session_id,
+            intent_id,
+            &source_agent,
+            target_agent.as_deref(),
+            &kind,
+            objective,
+            input.as_deref(),
+            &required_capabilities,
+            &priority,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
+        AgentCommand::Status {
+            session_id,
+            intent_id,
+            agent_id,
+            status,
+            progress_per_mille,
+            message,
+            updated_at_micros,
+            metadata,
+            out,
+            force,
+        } => agent_status(
+            session_id,
+            intent_id,
+            &agent_id,
+            &status,
+            progress_per_mille,
+            message,
+            updated_at_micros,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
+        AgentCommand::Result {
+            session_id,
+            intent_id,
+            result_id,
+            agent_id,
+            status,
+            outputs,
+            error_code,
+            error_message,
+            completed_at_micros,
+            metadata,
+            out,
+            force,
+        } => agent_result(
+            session_id,
+            intent_id,
+            result_id,
+            &agent_id,
+            &status,
+            outputs.as_deref(),
+            error_code,
+            error_message,
+            completed_at_micros,
+            metadata.as_deref(),
+            out.as_deref(),
+            force,
+        ),
+        AgentCommand::Delegate {
+            response,
+            session_id,
+            delegation_id,
+            parent_intent_id,
+            from_agent,
+            to_agent,
+            respondent_agent,
+            decision,
+            assigned_agent,
+            objective,
+            required_capabilities,
+            reason,
+            estimated_completion_unix_micros,
+            metadata,
+            out,
+            force,
+        } => agent_delegate(AgentDelegateOptions {
+            response,
+            session_id,
+            delegation_id,
+            parent_intent_id,
+            from_agent: from_agent.as_deref(),
+            to_agent: to_agent.as_deref(),
+            respondent_agent: respondent_agent.as_deref(),
+            decision: &decision,
+            assigned_agent: assigned_agent.as_deref(),
+            objective,
+            required_capabilities: &required_capabilities,
+            reason,
+            estimated_completion_unix_micros,
+            metadata: metadata.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
+        AgentCommand::Negotiate {
+            response,
+            session_id,
+            negotiation_id,
+            requester_agent,
+            responder_agent,
+            decision,
+            required_capabilities,
+            optional_capabilities,
+            accepted_capabilities,
+            unsupported_capabilities,
+            desired_intents,
+            supported_intents,
+            expires_at_unix_micros,
+            reason,
+            metadata,
+            out,
+            force,
+        } => agent_negotiate(AgentNegotiateOptions {
+            response,
+            session_id,
+            negotiation_id,
+            requester_agent: requester_agent.as_deref(),
+            responder_agent: responder_agent.as_deref(),
+            decision: &decision,
+            required_capabilities: &required_capabilities,
+            optional_capabilities: &optional_capabilities,
+            accepted_capabilities: &accepted_capabilities,
+            unsupported_capabilities: &unsupported_capabilities,
+            desired_intents: &desired_intents,
+            supported_intents: &supported_intents,
+            expires_at_unix_micros,
+            reason,
+            metadata: metadata.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
         AgentCommand::Validate {
             input,
             subject,
             json,
         } => agent_validate(input.as_deref(), subject.as_deref(), json),
         AgentCommand::Schema { out, force } => agent_schema(out.as_deref(), force),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_session(
+    session_id: Option<Uuid>,
+    root_intent_id: Option<Uuid>,
+    parent_session_id: Option<Uuid>,
+    owner_agent: &str,
+    status: &str,
+    created_at_micros: Option<u64>,
+    updated_at_micros: Option<u64>,
+    accepted_capabilities: &[String],
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let created_at_micros = match created_at_micros {
+        Some(value) => value,
+        None => now_micros()?,
+    };
+    let mut session = AgentSession::new(
+        session_id.unwrap_or_else(Uuid::new_v4),
+        AgentId::new(owner_agent)?,
+        created_at_micros,
+    );
+    session.root_intent_id = root_intent_id;
+    session.parent_session_id = parent_session_id;
+    session.status = parse_agent_enum("status", status)?;
+    session.updated_at_micros = updated_at_micros.unwrap_or(created_at_micros);
+    session.accepted_capabilities = parse_capability_set(accepted_capabilities)?;
+    session.metadata = parse_optional_json_object("metadata", metadata)?;
+    write_agent_message(&AgentMessage::Session(session), out, force)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_intent(
+    session_id: Option<Uuid>,
+    intent_id: Option<Uuid>,
+    source_agent: &str,
+    target_agent: Option<&str>,
+    kind: &str,
+    objective: String,
+    input: Option<&str>,
+    required_capabilities: &[String],
+    priority: &str,
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let mut intent = AgentIntent::new(
+        session_id.unwrap_or_else(Uuid::new_v4),
+        AgentId::new(source_agent)?,
+        parse_agent_enum("kind", kind)?,
+        objective,
+    );
+    if let Some(intent_id) = intent_id {
+        intent.intent_id = intent_id;
+    }
+    intent.target_agent = target_agent.map(AgentId::new).transpose()?;
+    intent.input = parse_optional_json_value("input", input)?;
+    intent.required_capabilities = required_capabilities
+        .iter()
+        .map(|capability| CapabilityId::new(capability.clone()).map_err(Into::into))
+        .collect::<Result<BTreeSet<_>>>()?;
+    intent.priority = parse_agent_enum("priority", priority)?;
+    intent.metadata = parse_optional_json_object("metadata", metadata)?;
+    write_agent_message(&AgentMessage::Intent(intent), out, force)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_status(
+    session_id: Uuid,
+    intent_id: Option<Uuid>,
+    agent_id: &str,
+    status: &str,
+    progress_per_mille: Option<u16>,
+    message: Option<String>,
+    updated_at_micros: Option<u64>,
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let update = AgentStatusUpdate {
+        schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+        session_id,
+        intent_id,
+        agent_id: AgentId::new(agent_id)?,
+        status: parse_agent_enum("status", status)?,
+        progress_per_mille,
+        message,
+        updated_at_micros: match updated_at_micros {
+            Some(value) => value,
+            None => now_micros()?,
+        },
+        metadata: parse_optional_json_object("metadata", metadata)?,
+    };
+    write_agent_message(&AgentMessage::Status(update), out, force)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn agent_result(
+    session_id: Uuid,
+    intent_id: Uuid,
+    result_id: Option<Uuid>,
+    agent_id: &str,
+    status: &str,
+    outputs: Option<&str>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+    completed_at_micros: Option<u64>,
+    metadata: Option<&str>,
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let error = match (error_code, error_message) {
+        (Some(code), Some(message)) => Some(AgentErrorInfo::new(code, message)),
+        (None, None) => None,
+        (Some(_), None) => bail!("--error-code requires --error-message"),
+        (None, Some(_)) => bail!("--error-message requires --error-code"),
+    };
+    let result = AgentResult {
+        schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+        result_id: result_id.unwrap_or_else(Uuid::new_v4),
+        session_id,
+        intent_id,
+        agent_id: AgentId::new(agent_id)?,
+        status: parse_agent_enum("status", status)?,
+        outputs: parse_optional_json_object("outputs", outputs)?,
+        artifacts: Vec::new(),
+        error,
+        completed_at_micros: match completed_at_micros {
+            Some(value) => value,
+            None => now_micros()?,
+        },
+        metadata: parse_optional_json_object("metadata", metadata)?,
+    };
+    write_agent_message(&AgentMessage::Result(result), out, force)
+}
+
+struct AgentDelegateOptions<'a> {
+    response: bool,
+    session_id: Uuid,
+    delegation_id: Option<Uuid>,
+    parent_intent_id: Option<Uuid>,
+    from_agent: Option<&'a str>,
+    to_agent: Option<&'a str>,
+    respondent_agent: Option<&'a str>,
+    decision: &'a str,
+    assigned_agent: Option<&'a str>,
+    objective: Option<String>,
+    required_capabilities: &'a [String],
+    reason: Option<String>,
+    estimated_completion_unix_micros: Option<u64>,
+    metadata: Option<&'a str>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+fn agent_delegate(options: AgentDelegateOptions<'_>) -> Result<()> {
+    let delegation_id = options.delegation_id.unwrap_or_else(Uuid::new_v4);
+    let metadata = parse_optional_json_object("metadata", options.metadata)?;
+    let message = if options.response {
+        AgentMessage::DelegationResponse(DelegationResponse {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            delegation_id,
+            session_id: options.session_id,
+            respondent_agent: AgentId::new(required_agent_arg(
+                "--respondent-agent",
+                options.respondent_agent,
+            )?)?,
+            decision: parse_agent_enum("decision", options.decision)?,
+            assigned_agent: options.assigned_agent.map(AgentId::new).transpose()?,
+            accepted_capabilities: parse_capability_set(options.required_capabilities)?,
+            reason: options.reason,
+            estimated_completion_unix_micros: options.estimated_completion_unix_micros,
+            metadata,
+        })
+    } else {
+        AgentMessage::DelegationRequest(DelegationRequest {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            delegation_id,
+            session_id: options.session_id,
+            parent_intent_id: options
+                .parent_intent_id
+                .ok_or_else(|| anyhow!("--parent-intent-id is required for delegation requests"))?,
+            from_agent: AgentId::new(required_agent_arg("--from-agent", options.from_agent)?)?,
+            to_agent: options.to_agent.map(AgentId::new).transpose()?,
+            objective: options
+                .objective
+                .ok_or_else(|| anyhow!("--objective is required for delegation requests"))?,
+            required_capabilities: parse_capability_set(options.required_capabilities)?,
+            constraints: Vec::new(),
+            context: Vec::new(),
+            deadline_unix_micros: None,
+            metadata,
+        })
+    };
+    write_agent_message(&message, options.out, options.force)
+}
+
+struct AgentNegotiateOptions<'a> {
+    response: bool,
+    session_id: Uuid,
+    negotiation_id: Option<Uuid>,
+    requester_agent: Option<&'a str>,
+    responder_agent: Option<&'a str>,
+    decision: &'a str,
+    required_capabilities: &'a [String],
+    optional_capabilities: &'a [String],
+    accepted_capabilities: &'a [String],
+    unsupported_capabilities: &'a [String],
+    desired_intents: &'a [String],
+    supported_intents: &'a [String],
+    expires_at_unix_micros: Option<u64>,
+    reason: Option<String>,
+    metadata: Option<&'a str>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+fn agent_negotiate(options: AgentNegotiateOptions<'_>) -> Result<()> {
+    let negotiation_id = options.negotiation_id.unwrap_or_else(Uuid::new_v4);
+    let metadata = parse_optional_json_object("metadata", options.metadata)?;
+    let message = if options.response {
+        AgentMessage::CapabilityNegotiationResponse(CapabilityNegotiationResponse {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            negotiation_id,
+            session_id: options.session_id,
+            responder_agent: AgentId::new(required_agent_arg(
+                "--responder-agent",
+                options.responder_agent,
+            )?)?,
+            decision: parse_agent_enum("decision", options.decision)?,
+            accepted_capabilities: parse_capability_set(options.accepted_capabilities)?,
+            unsupported_capabilities: parse_capability_set(options.unsupported_capabilities)?,
+            supported_intents: parse_intent_kind_set(options.supported_intents)?,
+            expires_at_unix_micros: options.expires_at_unix_micros,
+            reason: options.reason,
+            metadata,
+        })
+    } else {
+        AgentMessage::CapabilityNegotiationRequest(CapabilityNegotiationRequest {
+            schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            negotiation_id,
+            session_id: options.session_id,
+            requester_agent: AgentId::new(required_agent_arg(
+                "--requester-agent",
+                options.requester_agent,
+            )?)?,
+            required_capabilities: parse_capability_set(options.required_capabilities)?,
+            optional_capabilities: parse_capability_set(options.optional_capabilities)?,
+            desired_intents: parse_intent_kind_set(options.desired_intents)?,
+            metadata,
+        })
+    };
+    write_agent_message(&message, options.out, options.force)
+}
+
+fn write_agent_message(message: &AgentMessage, out: Option<&Path>, force: bool) -> Result<()> {
+    let json = serde_json::to_string_pretty(message)?;
+    AgentMessage::from_json_str(&json)?;
+    match out {
+        Some(path) => write_text_file(path, &format!("{json}\n"), force),
+        None => {
+            println!("{json}");
+            Ok(())
+        }
+    }
+}
+
+fn required_agent_arg<'a>(name: &str, value: Option<&'a str>) -> Result<&'a str> {
+    value.ok_or_else(|| anyhow!("{name} is required"))
+}
+
+fn parse_capability_set(input: &[String]) -> Result<BTreeSet<CapabilityId>> {
+    input
+        .iter()
+        .map(|capability| CapabilityId::new(capability.clone()).map_err(Into::into))
+        .collect()
+}
+
+fn parse_intent_kind_set(input: &[String]) -> Result<BTreeSet<IntentKind>> {
+    input
+        .iter()
+        .map(|kind| parse_agent_enum("intent-kind", kind))
+        .collect()
+}
+
+fn parse_agent_enum<T>(field: &str, input: &str) -> Result<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::Value::String(input.to_string()))
+        .with_context(|| format!("invalid agent {field} `{input}`"))
+}
+
+fn parse_optional_json_value(field: &str, input: Option<&str>) -> Result<serde_json::Value> {
+    match input {
+        Some(input) => {
+            serde_json::from_str(input).with_context(|| format!("failed to parse --{field} JSON"))
+        }
+        None => Ok(serde_json::Value::Null),
+    }
+}
+
+fn parse_optional_json_object(
+    field: &str,
+    input: Option<&str>,
+) -> Result<BTreeMap<String, serde_json::Value>> {
+    match input {
+        Some(input) => {
+            let value: serde_json::Value = serde_json::from_str(input)
+                .with_context(|| format!("failed to parse --{field} JSON"))?;
+            match value {
+                serde_json::Value::Object(map) => Ok(map.into_iter().collect()),
+                _ => bail!("--{field} must be a JSON object"),
+            }
+        }
+        None => Ok(BTreeMap::new()),
     }
 }
 
@@ -5018,7 +6300,223 @@ fn schema(command: SchemaCommand) -> Result<()> {
             json,
         } => schema_validate(&contract, &envelope, json),
         SchemaCommand::Inspect { contract, json } => schema_inspect(&contract, json),
+        SchemaCommand::Export { out, force } => schema_export(out.as_deref(), force),
     }
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaExport {
+    schema_version: u8,
+    generated_at_micros: u64,
+    protocol: SchemaProtocolExport,
+    envelope: SchemaEnvelopeExport,
+    agent: SchemaAgentExport,
+    controls: SchemaControlsExport,
+    fixtures: Vec<SchemaFixtureExport>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaProtocolExport {
+    ed25519_signature_len: usize,
+    poa_validator_set_schema_version: u8,
+    receipt_schema_version: u8,
+    memory_schema_version: u8,
+    discovery_schema_version: u8,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaEnvelopeExport {
+    default_content_type: &'static str,
+    kinds: Vec<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaAgentExport {
+    content_type: &'static str,
+    protocol_schema_version: u8,
+    subjects: Vec<&'static str>,
+    json_schema: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaControlsExport {
+    capability: Vec<SchemaControlSubjectExport>,
+    discovery: Vec<SchemaControlSubjectExport>,
+    registry: Vec<SchemaControlSubjectExport>,
+    receipts: Vec<SchemaControlSubjectExport>,
+    poa: Vec<SchemaControlSubjectExport>,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaControlSubjectExport {
+    subject: &'static str,
+    content_type: &'static str,
+    direction: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaFixtureExport {
+    path: &'static str,
+    purpose: &'static str,
+}
+
+fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
+    let export = SchemaExport {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        protocol: SchemaProtocolExport {
+            ed25519_signature_len: ED25519_SIGNATURE_LEN,
+            poa_validator_set_schema_version: POA_VALIDATOR_SET_SCHEMA_VERSION,
+            receipt_schema_version: RECEIPT_SCHEMA_VERSION,
+            memory_schema_version: MEMORY_SCHEMA_VERSION,
+            discovery_schema_version: DISCOVERY_SCHEMA_VERSION,
+        },
+        envelope: SchemaEnvelopeExport {
+            default_content_type: DEFAULT_ENVELOPE_CONTENT_TYPE,
+            kinds: vec![
+                "data",
+                "event",
+                "command",
+                "query",
+                "response",
+                "stream_chunk",
+                "action",
+                "control",
+            ],
+        },
+        agent: SchemaAgentExport {
+            content_type: AGENT_CONTENT_TYPE,
+            protocol_schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
+            subjects: vec![
+                "zap.agent.session",
+                "zap.agent.intent",
+                "zap.agent.status",
+                "zap.agent.result",
+                "zap.agent.delegation.request",
+                "zap.agent.delegation.response",
+                "zap.agent.capability.negotiation.request",
+                "zap.agent.capability.negotiation.response",
+            ],
+            json_schema: agent_message_json_schema(),
+        },
+        controls: SchemaControlsExport {
+            capability: vec![
+                SchemaControlSubjectExport {
+                    subject: CAPABILITY_QUERY_SUBJECT,
+                    content_type: CAPABILITY_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: CAPABILITY_RESPONSE_SUBJECT,
+                    content_type: CAPABILITY_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            discovery: vec![
+                SchemaControlSubjectExport {
+                    subject: DISCOVERY_ANNOUNCE_SUBJECT,
+                    content_type: DISCOVERY_CONTENT_TYPE,
+                    direction: "announce",
+                },
+                SchemaControlSubjectExport {
+                    subject: DISCOVERY_QUERY_SUBJECT,
+                    content_type: DISCOVERY_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: DISCOVERY_RESPONSE_SUBJECT,
+                    content_type: DISCOVERY_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            registry: vec![
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_INDEX_REQUEST_SUBJECT,
+                    content_type: REGISTRY_INDEX_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_INDEX_RESPONSE_SUBJECT,
+                    content_type: REGISTRY_INDEX_CONTENT_TYPE,
+                    direction: "response",
+                },
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+                    content_type: REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT,
+                    content_type: REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            receipts: vec![
+                SchemaControlSubjectExport {
+                    subject: RECEIPT_REPLICATION_REQUEST_SUBJECT,
+                    content_type: RECEIPT_REPLICATION_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+                    content_type: RECEIPT_REPLICATION_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+            poa: vec![
+                SchemaControlSubjectExport {
+                    subject: POA_ATTESTATION_REQUEST_SUBJECT,
+                    content_type: POA_ATTESTATION_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: POA_ATTESTATION_RESPONSE_SUBJECT,
+                    content_type: POA_ATTESTATION_CONTENT_TYPE,
+                    direction: "response",
+                },
+                SchemaControlSubjectExport {
+                    subject: POA_VALIDATOR_SET_REQUEST_SUBJECT,
+                    content_type: POA_VALIDATOR_SET_CONTENT_TYPE,
+                    direction: "request",
+                },
+                SchemaControlSubjectExport {
+                    subject: POA_VALIDATOR_SET_RESPONSE_SUBJECT,
+                    content_type: POA_VALIDATOR_SET_CONTENT_TYPE,
+                    direction: "response",
+                },
+            ],
+        },
+        fixtures: vec![
+            SchemaFixtureExport {
+                path: "fixtures/agent-intent-message-v1.json",
+                purpose: "agent intent message contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/control-subjects-v1.json",
+                purpose: "control subject registry",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/zenv-control-registry-bundle-manifest-request.json",
+                purpose: "registry bundle manifest request envelope",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/protocol/zenv-unsigned-control-frame-v1.json",
+                purpose: "unsigned control frame shape",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/protocol/receipt-sample-v1.json",
+                purpose: "signed action receipt sample",
+            },
+        ],
+        limitations: vec![
+            "this export is a bounded protocol source derived from compiled CLI constants"
+                .to_string(),
+            "domain-pack schemas and user-provided MessageContract files remain external artifacts"
+                .to_string(),
+        ],
+    };
+    write_json_output(&export, out, force)
 }
 
 fn schema_validate(contract_path: &Path, envelope_path: &Path, json: bool) -> Result<()> {
@@ -5175,6 +6673,730 @@ fn policy_evaluate(options: PolicyEvaluateOptions<'_>) -> Result<()> {
         );
     }
     Ok(())
+}
+
+fn pack(command: PackCommand) -> Result<()> {
+    match command {
+        PackCommand::Validate { pack, json } => pack_validate(&pack, json),
+        PackCommand::Inspect { pack, json } => pack_inspect(&pack, json),
+        PackCommand::List { root, json } => pack_list(&root, json),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct PackValidationReport {
+    pack: String,
+    manifest: String,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PackInspectionReport {
+    pack: String,
+    manifest: String,
+    valid: bool,
+    errors: Vec<String>,
+    id: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    status: Option<String>,
+    capabilities_count: usize,
+    policies_count: usize,
+    schemas_count: usize,
+    risk_levels: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Serialize)]
+struct PackCatalogReport {
+    root: String,
+    packs: Vec<PackInspectionReport>,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DomainPackManifest {
+    schema_version: Option<u32>,
+    id: Option<String>,
+    name: Option<String>,
+    version: Option<String>,
+    status: Option<String>,
+    #[serde(default)]
+    capabilities: Vec<DomainPackCapability>,
+    #[serde(default)]
+    policies: Vec<DomainPackPathRef>,
+    #[serde(default)]
+    schemas: Vec<DomainPackPathRef>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DomainPackCapability {
+    id: Option<String>,
+    risk: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DomainPackPathRef {
+    path: Option<PathBuf>,
+}
+
+fn pack_validate(pack_dir: &Path, json: bool) -> Result<()> {
+    let report = validate_domain_pack(pack_dir);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else if report.valid {
+        println!("pack={} ok", pack_dir.display());
+    } else {
+        println!("pack={} invalid", pack_dir.display());
+        for error in &report.errors {
+            println!("error={error}");
+        }
+    }
+
+    if report.valid {
+        Ok(())
+    } else {
+        bail!("domain pack validation failed")
+    }
+}
+
+fn pack_inspect(pack_dir: &Path, json: bool) -> Result<()> {
+    let report = inspect_domain_pack(pack_dir)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "pack={} id={} version={} status={} capabilities={} policies={} schemas={} valid={}",
+            pack_dir.display(),
+            report.id.as_deref().unwrap_or(""),
+            report.version.as_deref().unwrap_or(""),
+            report.status.as_deref().unwrap_or(""),
+            report.capabilities_count,
+            report.policies_count,
+            report.schemas_count,
+            report.valid
+        );
+    }
+    Ok(())
+}
+
+fn pack_list(root_dir: &Path, json: bool) -> Result<()> {
+    let report = list_domain_packs(root_dir);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "root={} packs={} valid={}",
+            root_dir.display(),
+            report.packs.len(),
+            report.valid
+        );
+        for pack in &report.packs {
+            println!(
+                "pack={} id={} version={} status={} capabilities={} policies={} schemas={} valid={}",
+                pack.pack,
+                pack.id.as_deref().unwrap_or(""),
+                pack.version.as_deref().unwrap_or(""),
+                pack.status.as_deref().unwrap_or(""),
+                pack.capabilities_count,
+                pack.policies_count,
+                pack.schemas_count,
+                pack.valid
+            );
+        }
+        for error in &report.errors {
+            println!("error={error}");
+        }
+    }
+
+    if report.valid {
+        Ok(())
+    } else {
+        bail!("domain pack catalog validation failed")
+    }
+}
+
+fn validate_domain_pack(pack_dir: &Path) -> PackValidationReport {
+    let manifest_path = pack_dir.join("pack.toml");
+    let mut report = PackValidationReport {
+        pack: pack_dir.display().to_string(),
+        manifest: manifest_path.display().to_string(),
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    if !manifest_path.exists() {
+        report
+            .errors
+            .push(format!("missing manifest {}", manifest_path.display()));
+        return report;
+    }
+
+    let manifest = match read_domain_pack_manifest(&manifest_path) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            report.errors.push(error.to_string());
+            return report;
+        }
+    };
+
+    if manifest.schema_version != Some(1) {
+        report.errors.push("schema_version must be 1".to_string());
+    }
+    validate_required_pack_text("id", manifest.id.as_deref(), &mut report.errors);
+    validate_required_pack_text("name", manifest.name.as_deref(), &mut report.errors);
+    validate_required_pack_text("version", manifest.version.as_deref(), &mut report.errors);
+    validate_required_pack_text("status", manifest.status.as_deref(), &mut report.errors);
+    validate_pack_capabilities(&manifest.capabilities, &mut report.errors);
+    validate_pack_refs(
+        pack_dir,
+        "policies",
+        &manifest.policies,
+        true,
+        &mut report.errors,
+    );
+    validate_pack_refs(
+        pack_dir,
+        "schemas",
+        &manifest.schemas,
+        false,
+        &mut report.errors,
+    );
+
+    report.valid = report.errors.is_empty();
+    report
+}
+
+fn inspect_domain_pack(pack_dir: &Path) -> Result<PackInspectionReport> {
+    let manifest_path = pack_dir.join("pack.toml");
+    let manifest = read_domain_pack_manifest(&manifest_path)?;
+    let validation = validate_domain_pack(pack_dir);
+    let mut risk_levels = BTreeMap::new();
+    for capability in &manifest.capabilities {
+        let risk = capability.risk.as_deref().unwrap_or_default().trim();
+        if !risk.is_empty() {
+            *risk_levels.entry(risk.to_string()).or_insert(0) += 1;
+        }
+    }
+
+    Ok(PackInspectionReport {
+        pack: pack_dir.display().to_string(),
+        manifest: manifest_path.display().to_string(),
+        valid: validation.valid,
+        errors: validation.errors,
+        id: manifest.id,
+        name: manifest.name,
+        version: manifest.version,
+        status: manifest.status,
+        capabilities_count: manifest.capabilities.len(),
+        policies_count: manifest.policies.len(),
+        schemas_count: manifest.schemas.len(),
+        risk_levels,
+    })
+}
+
+fn list_domain_packs(root_dir: &Path) -> PackCatalogReport {
+    let mut report = PackCatalogReport {
+        root: root_dir.display().to_string(),
+        packs: Vec::new(),
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    if !root_dir.is_dir() {
+        report
+            .errors
+            .push(format!("pack root not found: {}", root_dir.display()));
+        return report;
+    }
+
+    let entries = match fs::read_dir(root_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            report.errors.push(format!(
+                "failed to read pack root {}: {error}",
+                root_dir.display()
+            ));
+            return report;
+        }
+    };
+
+    let mut pack_dirs = entries
+        .filter_map(|entry| match entry {
+            Ok(entry) => {
+                let path = entry.path();
+                if path.is_dir() && path.join("pack.toml").exists() {
+                    Some(path)
+                } else {
+                    None
+                }
+            }
+            Err(error) => {
+                report
+                    .errors
+                    .push(format!("failed to read pack root entry: {error}"));
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    pack_dirs.sort();
+
+    if pack_dirs.is_empty() {
+        report.errors.push(format!(
+            "no domain packs with pack.toml found in {}",
+            root_dir.display()
+        ));
+    }
+
+    for pack_dir in pack_dirs {
+        match inspect_domain_pack(&pack_dir) {
+            Ok(pack_report) => {
+                if !pack_report.valid {
+                    report.errors.push(format!(
+                        "pack {} invalid: {}",
+                        pack_dir.display(),
+                        pack_report.errors.join("; ")
+                    ));
+                }
+                report.packs.push(pack_report);
+            }
+            Err(error) => {
+                let manifest_path = pack_dir.join("pack.toml");
+                report.errors.push(format!(
+                    "pack {} failed inspection: {error}",
+                    pack_dir.display()
+                ));
+                report.packs.push(PackInspectionReport {
+                    pack: pack_dir.display().to_string(),
+                    manifest: manifest_path.display().to_string(),
+                    valid: false,
+                    errors: vec![error.to_string()],
+                    id: None,
+                    name: None,
+                    version: None,
+                    status: None,
+                    capabilities_count: 0,
+                    policies_count: 0,
+                    schemas_count: 0,
+                    risk_levels: BTreeMap::new(),
+                });
+            }
+        }
+    }
+
+    report.valid = report.errors.is_empty() && report.packs.iter().all(|pack| pack.valid);
+    report
+}
+
+fn read_domain_pack_manifest(manifest_path: &Path) -> Result<DomainPackManifest> {
+    let input = fs::read_to_string(manifest_path)
+        .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?;
+    toml::from_str(&input)
+        .with_context(|| format!("failed to parse manifest {}", manifest_path.display()))
+}
+
+fn validate_required_pack_text(field: &str, value: Option<&str>, errors: &mut Vec<String>) {
+    if value.is_none_or(|value| value.trim().is_empty()) {
+        errors.push(format!("{field} must not be empty"));
+    }
+}
+
+fn validate_pack_capabilities(capabilities: &[DomainPackCapability], errors: &mut Vec<String>) {
+    let mut seen = BTreeSet::new();
+    for (index, capability) in capabilities.iter().enumerate() {
+        let label = format!("capabilities[{index}]");
+        let id = capability.id.as_deref().unwrap_or_default().trim();
+        if id.is_empty() {
+            errors.push(format!("{label}.id must not be empty"));
+        } else if !seen.insert(id.to_string()) {
+            errors.push(format!("duplicate capability id {id}"));
+        }
+
+        let risk = capability.risk.as_deref().unwrap_or_default().trim();
+        if !matches!(risk, "low" | "medium" | "high" | "critical") {
+            errors.push(format!(
+                "{label}.risk must be one of low, medium, high, critical"
+            ));
+        }
+    }
+}
+
+fn validate_pack_refs(
+    pack_dir: &Path,
+    section: &str,
+    refs: &[DomainPackPathRef],
+    parse_policy: bool,
+    errors: &mut Vec<String>,
+) {
+    for (index, reference) in refs.iter().enumerate() {
+        let label = format!("{section}[{index}].path");
+        let Some(path) = reference.path.as_ref() else {
+            errors.push(format!("{label} must not be empty"));
+            continue;
+        };
+        if path.as_os_str().is_empty() {
+            errors.push(format!("{label} must not be empty"));
+            continue;
+        }
+
+        let resolved = pack_dir.join(path);
+        if !resolved.exists() {
+            errors.push(format!("{label} does not exist: {}", resolved.display()));
+            continue;
+        }
+        if parse_policy {
+            match fs::read_to_string(&resolved) {
+                Ok(input) => {
+                    if let Err(error) = PolicySet::from_toml_str(&input) {
+                        errors.push(format!(
+                            "{label} failed policy validation through zap-policy: {error}"
+                        ));
+                    }
+                }
+                Err(error) => {
+                    errors.push(format!(
+                        "failed to read policy {}: {error}",
+                        resolved.display()
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn fixtures(command: FixturesCommand) -> Result<()> {
+    match command {
+        FixturesCommand::Verify { fixtures, json } => fixtures_verify(&fixtures, json),
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct FixturesVerificationReport {
+    fixtures: Vec<FixtureVerification>,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct FixtureVerification {
+    path: String,
+    name: String,
+    valid: bool,
+    errors: Vec<String>,
+}
+
+fn fixtures_verify(fixtures_dir: &Path, json: bool) -> Result<()> {
+    let report = verify_fixtures(fixtures_dir);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "fixtures={} files={} valid={}",
+            fixtures_dir.display(),
+            report.fixtures.len(),
+            report.valid
+        );
+        for fixture in &report.fixtures {
+            println!("fixture={} valid={}", fixture.name, fixture.valid);
+            for error in &fixture.errors {
+                println!("error={error}");
+            }
+        }
+        for error in &report.errors {
+            println!("error={error}");
+        }
+    }
+
+    if report.valid {
+        Ok(())
+    } else {
+        bail!("fixture verification failed")
+    }
+}
+
+fn verify_fixtures(fixtures_dir: &Path) -> FixturesVerificationReport {
+    let mut report = FixturesVerificationReport {
+        fixtures: Vec::new(),
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    if !fixtures_dir.is_dir() {
+        report.errors.push(format!(
+            "fixtures directory not found: {}",
+            fixtures_dir.display()
+        ));
+        return report;
+    }
+
+    let mut paths = match fs::read_dir(fixtures_dir) {
+        Ok(entries) => entries
+            .filter_map(|entry| match entry {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                }
+                Err(error) => {
+                    report.errors.push(format!(
+                        "failed to read fixture directory entry in {}: {error}",
+                        fixtures_dir.display()
+                    ));
+                    None
+                }
+            })
+            .collect::<Vec<_>>(),
+        Err(error) => {
+            report.errors.push(format!(
+                "failed to read fixtures directory {}: {error}",
+                fixtures_dir.display()
+            ));
+            return report;
+        }
+    };
+    paths.sort();
+
+    if paths.is_empty() {
+        report.errors.push(format!(
+            "no JSON fixtures found in {}",
+            fixtures_dir.display()
+        ));
+    }
+
+    for path in paths {
+        report.fixtures.push(verify_fixture_file(&path));
+    }
+
+    report.valid = report.errors.is_empty() && report.fixtures.iter().all(|fixture| fixture.valid);
+    report
+}
+
+fn verify_fixture_file(path: &Path) -> FixtureVerification {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let mut fixture = FixtureVerification {
+        path: path.display().to_string(),
+        name,
+        valid: false,
+        errors: Vec::new(),
+    };
+
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            fixture
+                .errors
+                .push(format!("failed to read {}: {error}", path.display()));
+            return fixture;
+        }
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(error) => {
+            fixture
+                .errors
+                .push(format!("invalid JSON in {}: {error}", path.display()));
+            return fixture;
+        }
+    };
+
+    if value
+        .get("fixture_schema_version")
+        .and_then(|value| value.as_u64())
+        != Some(1)
+    {
+        fixture
+            .errors
+            .push("fixture_schema_version must be 1".to_string());
+    }
+    validate_non_empty_json_string(&value, "description", &mut fixture.errors);
+
+    match fixture.name.as_str() {
+        "agent-intent-message-v1.json" => verify_agent_intent_fixture(&value, &mut fixture.errors),
+        "control-subjects-v1.json" => verify_control_subjects_fixture(&value, &mut fixture.errors),
+        "zenv-control-registry-bundle-manifest-request.json" => {
+            verify_registry_bundle_manifest_request_fixture(&value, &mut fixture.errors)
+        }
+        _ => fixture
+            .errors
+            .push(format!("unknown fixture {}", fixture.name)),
+    }
+
+    fixture.valid = fixture.errors.is_empty();
+    fixture
+}
+
+fn verify_agent_intent_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(value, "subject", "zap.agent.intent", errors);
+    validate_json_string_equals(value, "content_type", AGENT_CONTENT_TYPE, errors);
+    let Some(body) = value.get("body_json") else {
+        errors.push("body_json must be present".to_string());
+        return;
+    };
+    match serde_json::to_vec(body)
+        .ok()
+        .and_then(|bytes| AgentMessage::from_json_slice(&bytes).ok())
+    {
+        Some(AgentMessage::Intent(_)) => {}
+        Some(_) => errors.push("body_json must be an agent intent message".to_string()),
+        None => errors.push("body_json must parse as a zap-agent message".to_string()),
+    }
+}
+
+fn verify_control_subjects_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    verify_control_envelope(value.get("envelope"), errors);
+    let Some(subjects) = value.get("subjects").and_then(|value| value.as_array()) else {
+        errors.push("subjects must be an array".to_string());
+        return;
+    };
+    if subjects.is_empty() {
+        errors.push("subjects must not be empty".to_string());
+    }
+
+    let mut seen = BTreeSet::new();
+    for (index, subject) in subjects.iter().enumerate() {
+        let label = format!("subjects[{index}]");
+        let Some(name) = subject.get("subject").and_then(|value| value.as_str()) else {
+            errors.push(format!("{label}.subject must be a string"));
+            continue;
+        };
+        if name.trim().is_empty() {
+            errors.push(format!("{label}.subject must not be empty"));
+        } else if !seen.insert(name.to_string()) {
+            errors.push(format!("duplicate control subject {name}"));
+        }
+        if subject
+            .get("content_type")
+            .and_then(|value| value.as_str())
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            errors.push(format!("{label}.content_type must be a non-empty string"));
+        }
+        if subject
+            .get("purpose")
+            .and_then(|value| value.as_str())
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            errors.push(format!("{label}.purpose must be a non-empty string"));
+        }
+    }
+
+    for required in [
+        CAPABILITY_QUERY_SUBJECT,
+        REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+        RECEIPT_REPLICATION_REQUEST_SUBJECT,
+    ] {
+        if !seen.contains(required) {
+            errors.push(format!("missing required control subject {required}"));
+        }
+    }
+}
+
+fn verify_registry_bundle_manifest_request_fixture(
+    value: &serde_json::Value,
+    errors: &mut Vec<String>,
+) {
+    verify_control_envelope(value.get("envelope"), errors);
+    let Some(envelope) = value.get("envelope") else {
+        return;
+    };
+    validate_json_string_equals(
+        envelope,
+        "subject",
+        REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
+        errors,
+    );
+    validate_json_string_equals(
+        envelope,
+        "content_type",
+        REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
+        errors,
+    );
+    let Some(body) = envelope.get("body_json") else {
+        errors.push("envelope.body_json must be present".to_string());
+        return;
+    };
+    if body.get("schema_version").and_then(|value| value.as_u64()) != Some(1) {
+        errors.push("envelope.body_json.schema_version must be 1".to_string());
+    }
+    if body
+        .get("require_publication")
+        .and_then(|value| value.as_bool())
+        .is_none()
+    {
+        errors.push("envelope.body_json.require_publication must be a boolean".to_string());
+    }
+    if body
+        .get("require_drivers")
+        .and_then(|value| value.as_bool())
+        .is_none()
+    {
+        errors.push("envelope.body_json.require_drivers must be a boolean".to_string());
+    }
+}
+
+fn verify_control_envelope(envelope: Option<&serde_json::Value>, errors: &mut Vec<String>) {
+    let Some(envelope) = envelope else {
+        errors.push("envelope must be present".to_string());
+        return;
+    };
+    validate_json_string_equals(envelope, "magic", "ZENV", errors);
+    validate_json_u64_equals(envelope, "version", 1, errors);
+    validate_json_string_equals(envelope, "kind_name", "control", errors);
+    validate_json_u64_equals(envelope, "kind_value", 8, errors);
+}
+
+fn validate_non_empty_json_string(
+    value: &serde_json::Value,
+    field: &str,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_str()) {
+        Some(text) if !text.trim().is_empty() => {}
+        _ => errors.push(format!("{field} must be a non-empty string")),
+    }
+}
+
+fn validate_json_string_equals(
+    value: &serde_json::Value,
+    field: &str,
+    expected: &str,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_str()) {
+        Some(actual) if actual == expected => {}
+        Some(actual) => errors.push(format!("{field} must be {expected}, got {actual}")),
+        None => errors.push(format!("{field} must be {expected}")),
+    }
+}
+
+fn validate_json_u64_equals(
+    value: &serde_json::Value,
+    field: &str,
+    expected: u64,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_u64()) {
+        Some(actual) if actual == expected => {}
+        Some(actual) => errors.push(format!("{field} must be {expected}, got {actual}")),
+        None => errors.push(format!("{field} must be {expected}")),
+    }
+}
+
+fn get_dotted_json_field<'a>(
+    value: &'a serde_json::Value,
+    field: &str,
+) -> Option<&'a serde_json::Value> {
+    field
+        .split('.')
+        .try_fold(value, |current, part| current.get(part))
 }
 
 fn driver_manifest(command: DriverManifestCommand) -> Result<()> {

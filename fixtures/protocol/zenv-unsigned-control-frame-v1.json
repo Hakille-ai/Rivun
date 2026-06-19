@@ -1,0 +1,28 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Readable fixture for a v1 unsigned ZENV control envelope carrying a registry index request.",
+  "envelope": {
+    "magic": "ZENV",
+    "version": 1,
+    "kind_name": "control",
+    "kind_value": 8,
+    "reserved": 0,
+    "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "correlation_id": "00000000-0000-0000-0000-000000000000",
+    "causation_id": "00000000-0000-0000-0000-000000000000",
+    "subject": "zap.registry.index.request",
+    "content_type": "application/zap-registry-index+json",
+    "metadata_base64": "",
+    "body_json": {
+      "schema_version": 1,
+      "require_signature": false
+    }
+  },
+  "security": {
+    "signed": false,
+    "encrypted": false,
+    "signature_hint_hex": "0000000000000000",
+    "auth_trailer": null,
+    "poa_trailer": null
+  }
+}

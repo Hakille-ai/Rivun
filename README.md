@@ -470,10 +470,24 @@ wire formats.
 
 See the full [Roadmap](docs/roadmap.md) for detailed status and next steps.
 
+## Universal Trust Surface
+
+ZAP is being shaped as a reusable trust boundary for many domains, not a single
+application stack. The current preview surface includes:
+
+- agent protocol messages for typed AI intent, status, and result handoff;
+- domain packs for agentic development, smart buildings, cloud operations,
+  industrial automation, and personal AI workflows;
+- SDK conformance fixtures shared by Rust, TypeScript, Python, and Go;
+- operator checks for message policy, fixtures, domain packs, receipts,
+  observability, and release readiness;
+- RFC/ZEP governance for protocol, crypto, ABI, config, SDK, and pack changes.
+
 ## 📚 Documentation
 
 | Document | Description |
 |---|---|
+| [Install](docs/install.md) | Source install, CLI build, local setup, and Docker quickstart |
 | [Protocol](docs/protocol.md) | ZAP-Wire v1 frame format and ZENV envelope specification |
 | [Security Model](docs/security.md) | Threat model, crypto choices, and defense-in-depth design |
 | [Use Cases](docs/use-cases.md) | Real-world application scenarios for the ZAP protocol |
@@ -482,11 +496,16 @@ See the full [Roadmap](docs/roadmap.md) for detailed status and next steps.
 | [FAQ](docs/faq.md) | Frequently asked questions about design, security, and protocol comparisons |
 | [Deployment](docs/deployment.md) | Production configuration, Docker, and hardening guide |
 | [Operations](docs/operations.md) | Operator workflows: doctor, receipts, monitoring |
+| [Observability](docs/observability.md) | Metrics, health signals, alerting, and production telemetry |
 | [Runtime](docs/runtime.md) | WASM sandboxing: fuel, memory, time, and output limits |
 | [ZapStore](docs/zapstore.md) | Signed manifests, registry, versioning, and revocation |
 | [Capability, Router & Memory](docs/capability-router-memory.md) | Discovery, routing, and auditable memory |
 | [Message Policy](docs/message-policy.md) | Deterministic allow/deny/require-PoA gates for typed messages |
+| [Agent Protocol](docs/agent-protocol.md) | Typed agent intent, status, delegation, and result contracts |
+| [Domain Packs](docs/domain-packs.md) | Reusable capability, schema, and policy bundles by industry |
+| [SDKs](docs/sdks.md) | SDK surface, conformance matrix, fixtures, and test commands |
 | [Signed Receipts](docs/receipts.md) | Receipt ledger, peer pull, verification, pruning, and merging |
+| [RFC/ZEP Process](docs/rfc-process.md) | Proposal process for long-lived protocol and ecosystem contracts |
 | [Versioning](docs/versioning.md) | Semantic versioning and wire compatibility rules |
 | [Release Process](docs/release.md) | Release checklist and publishing workflow |
 | [Roadmap](docs/roadmap.md) | Phased development plan and current status |

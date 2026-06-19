@@ -1,0 +1,58 @@
+[[rules]]
+name = "allow-telemetry-read-with-grant"
+kind = "action"
+subject = "telemetry.read"
+decision = "require_grant"
+required_capability = "telemetry.read"
+reason = "telemetry reads must be attached to an explicit environment and time-window grant"
+
+[[rules]]
+name = "gate-incident-declaration"
+kind = "action"
+subject = "incident.declare"
+decision = "require_grant"
+required_capability = "incident.declare"
+reason = "incident lifecycle changes require an explicit incident-management grant"
+
+[[rules]]
+name = "gate-service-scaling"
+kind = "action"
+subject = "service.scale"
+decision = "require_grant"
+required_capability = "service.scale"
+reason = "service scaling must be bounded by service, environment, and maximum delta"
+
+[[rules]]
+name = "require-human-approval-for-traffic-shift"
+kind = "action"
+subject = "traffic.shift"
+decision = "human_approval"
+reason = "traffic shifts can affect availability and customer impact, so approval is required"
+
+[[rules]]
+name = "require-human-approval-for-deploy-rollback"
+kind = "action"
+subject = "deploy.rollback"
+decision = "human_approval"
+reason = "production rollback changes require human approval and linked operational evidence"
+
+[[rules]]
+name = "require-poa-for-secret-rotation"
+kind = "action"
+subject = "secret.rotate"
+decision = "require_poa"
+reason = "secret rotation is a critical credential action and must carry proof of authority"
+
+[[rules]]
+name = "require-poa-for-data-purge"
+kind = "action"
+subject = "data.purge"
+decision = "require_poa"
+reason = "irreversible data purges require proof of authority and traceable retention evidence"
+
+[[rules]]
+name = "deny-unlisted-cloud-ops-actions"
+kind = "action"
+subject = "*"
+decision = "deny"
+reason = "cloud-ops pack denies unlisted actions by default"

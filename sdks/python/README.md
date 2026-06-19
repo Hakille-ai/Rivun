@@ -49,8 +49,32 @@ package is installed. Install both optional crypto backends with:
 python -m pip install -e "sdks/python[crypto]"
 ```
 
+## Shared fixtures and conformance
+
+The Python tests read the shared protocol fixtures from the repository-level
+`fixtures/` directory. They currently assert:
+
+- `zenv-control-registry-bundle-manifest-request.json` matches the Python
+  ZapStore request helper and round-trips through `ControlFrame`.
+- `control-subjects-v1.json` stays aligned with the registry control subjects
+  exposed by the SDK.
+- `agent-intent-message-v1.json` can be carried as an
+  `application/zap-agent+json` control envelope.
+
+To add a fixture, create a small deterministic JSON file in `fixtures/`, then
+add or extend a test in `sdks/python/tests/test_protocol.py` that loads it via
+the shared fixture helper and checks the subject, media type, schema version,
+and body fields that must remain stable.
+
 ## Test
 
 ```bash
 python -m unittest discover -s sdks/python/tests
+```
+
+Install optional crypto dependencies before running tests that need canonical
+BLAKE3 hashing or Ed25519 signature verification:
+
+```bash
+python -m pip install -e "sdks/python[crypto]"
 ```

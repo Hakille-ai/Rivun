@@ -1,0 +1,93 @@
+schema_version = 1
+id = "zap-pack-personal-ai"
+name = "Personal AI"
+version = "0.1.0"
+status = "preview"
+description = "Auditable personal assistant workflows for calendar, email, files, browser automation, local memory, and proposal-only commerce."
+
+[compatibility]
+zap_protocol = ">=0.1.0,<1.0.0"
+driver_abi = ">=1,<=2"
+
+[[capabilities]]
+id = "calendar.read"
+risk = "low"
+description = "Read bounded calendar availability, event metadata, and reminders from approved accounts."
+
+[[capabilities]]
+id = "email.read"
+risk = "low"
+description = "Read bounded email headers, thread metadata, and message snippets from approved mailboxes."
+
+[[capabilities]]
+id = "memory.read"
+risk = "low"
+description = "Read scoped local memory entries, preferences, and assistant context with explicit grants."
+
+[[capabilities]]
+id = "email.draft"
+risk = "medium"
+requires = ["email.read"]
+description = "Create or update email drafts without sending them."
+
+[[capabilities]]
+id = "calendar.propose"
+risk = "medium"
+requires = ["calendar.read"]
+description = "Draft calendar invitations, proposed time blocks, or meeting changes without committing them."
+
+[[capabilities]]
+id = "file.write"
+risk = "medium"
+description = "Create or update bounded local files, notes, exports, and assistant artifacts."
+
+[[capabilities]]
+id = "memory.write"
+risk = "medium"
+requires = ["memory.read"]
+description = "Store bounded personal preferences, task state, and durable local assistant memory."
+
+[[capabilities]]
+id = "email.send"
+risk = "high"
+requires = ["email.read", "email.draft"]
+description = "Send an email, reply, forward, or otherwise transmit a message to recipients."
+
+[[capabilities]]
+id = "file.share"
+risk = "high"
+requires = ["file.write"]
+description = "Share, publish, upload, or expose a file outside the local private workspace."
+
+[[capabilities]]
+id = "browser.automate"
+risk = "high"
+description = "Interact with websites, forms, authenticated sessions, or third-party services on behalf of the user."
+
+[[capabilities]]
+id = "commerce.propose"
+risk = "high"
+description = "Prepare carts, quotes, booking candidates, or payment proposals without final purchase or payment execution."
+
+[[capabilities]]
+id = "money.execute"
+risk = "critical"
+description = "Execute payments, purchases, transfers, subscriptions, bookings, bids, trades, or other monetary commitments."
+
+[[capabilities]]
+id = "credential.use"
+risk = "critical"
+description = "Use, reveal, rotate, export, or delegate credentials, passwords, tokens, passkeys, keys, or recovery material."
+
+[[capabilities]]
+id = "data.destroy"
+risk = "critical"
+description = "Delete, purge, overwrite, revoke, or irreversibly destroy personal data, files, accounts, or memory."
+
+[[policies]]
+path = "policies/action-policy.toml"
+description = "Baseline fail-closed policy for personal assistant actions and approval gates."
+
+[[schemas]]
+path = "schemas/subjects.md"
+description = "Pack subject catalog and expected payload shape."

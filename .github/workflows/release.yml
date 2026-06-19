@@ -75,9 +75,36 @@ jobs:
             exit 1
           fi
 
+  release-readiness:
+    name: release readiness
+    needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            sdks/typescript/package-lock.json
+            website/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: sdks/go/go.mod
+      - name: Run release-readiness checklist
+        run: cargo run --locked -p xtask -- release readiness --require-go
+
   package:
     name: package ${{ matrix.target }}
-    needs: validate-version
+    needs:
+      - validate-version
+      - release-readiness
     strategy:
       fail-fast: false
       matrix:

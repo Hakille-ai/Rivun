@@ -1,0 +1,65 @@
+schema_version = 1
+id = "zap-pack-finance"
+name = "Finance"
+version = "0.1.0"
+status = "preview"
+description = "Auditable finance workflows for proposals, risk checks, approvals, execution, reconciliation, and regulator-friendly evidence."
+
+[compatibility]
+zap_protocol = ">=0.1.0,<1.0.0"
+driver_abi = ">=1,<=2"
+
+[[capabilities]]
+id = "account.read"
+risk = "low"
+description = "Read bounded account, position, balance, transaction, and reconciliation metadata."
+
+[[capabilities]]
+id = "risk.check"
+risk = "medium"
+requires = ["account.read"]
+description = "Run policy, limit, exposure, sanctions, suitability, or counterparty risk checks."
+
+[[capabilities]]
+id = "trade.propose"
+risk = "medium"
+requires = ["account.read", "risk.check"]
+description = "Prepare trade, transfer, payment, or rebalance proposals without execution."
+
+[[capabilities]]
+id = "payment.propose"
+risk = "medium"
+requires = ["account.read", "risk.check"]
+description = "Prepare payment or funds-movement proposals without releasing funds."
+
+[[capabilities]]
+id = "approval.record"
+risk = "high"
+requires = ["risk.check"]
+description = "Record operator, compliance, or quorum approval for a proposed financial action."
+
+[[capabilities]]
+id = "trade.execute"
+risk = "critical"
+requires = ["account.read", "risk.check", "approval.record"]
+description = "Execute a trade, rebalance, order, transfer, or market-facing instruction."
+
+[[capabilities]]
+id = "payment.execute"
+risk = "critical"
+requires = ["account.read", "risk.check", "approval.record"]
+description = "Execute funds movement, settlement, payout, subscription, or payment release."
+
+[[capabilities]]
+id = "reconciliation.finalize"
+risk = "critical"
+requires = ["account.read", "risk.check"]
+description = "Finalize reconciliation, ledger adjustment, reversal, or regulatory evidence package."
+
+[[policies]]
+path = "policies/action-policy.toml"
+description = "Baseline fail-closed policy for financial automation and execution gates."
+
+[[schemas]]
+path = "schemas/subjects.md"
+description = "Pack subject catalog and expected payload shape."

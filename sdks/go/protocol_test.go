@@ -1,8 +1,11 @@
 package zap
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +44,210 @@ func TestRegistryBundleManifestControlFrameRoundTrips(t *testing.T) {
 	if !body.RequirePublication || !body.RequireDrivers {
 		raw, _ := json.Marshal(body)
 		t.Fatalf("body = %s", raw)
+	}
+}
+
+func TestRegistryBundleManifestRequestFixtureMatchesSDK(t *testing.T) {
+	var fixture struct {
+		Envelope struct {
+			KindName    string `json:"kind_name"`
+			KindValue   uint16 `json:"kind_value"`
+			Subject     string `json:"subject"`
+			ContentType string `json:"content_type"`
+			BodyJSON    RegistryBundleManifestRequest `json:"body_json"`
+		} `json:"envelope"`
+	}
+	loadRootFixture(t, "zenv-control-registry-bundle-manifest-request.json", &fixture)
+
+	frame, err := RegistryBundleManifestRequestFrame(
+		fixture.Envelope.BodyJSON.RequirePublication,
+		fixture.Envelope.BodyJSON.RequireDrivers,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := frame.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeControlFrame(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.Envelope.KindName != "control" || fixture.Envelope.KindValue != uint16(KindControl) {
+		t.Fatalf("fixture kind mismatch: %+v", fixture.Envelope)
+	}
+	if decoded.Subject != fixture.Envelope.Subject {
+		t.Fatalf("subject = %q, fixture = %q", decoded.Subject, fixture.Envelope.Subject)
+	}
+	if decoded.ContentType != fixture.Envelope.ContentType {
+		t.Fatalf("content_type = %q, fixture = %q", decoded.ContentType, fixture.Envelope.ContentType)
+	}
+	var body RegistryBundleManifestRequest
+	if err := decoded.JSONBody(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body != fixture.Envelope.BodyJSON {
+		t.Fatalf("body = %+v, fixture = %+v", body, fixture.Envelope.BodyJSON)
+	}
+}
+
+func TestControlSubjectFixtureContainsSDKRegistrySubjects(t *testing.T) {
+	var fixture struct {
+		Envelope struct {
+			KindValue uint16 `json:"kind_value"`
+		} `json:"envelope"`
+		Subjects []struct {
+			Subject     string `json:"subject"`
+			ContentType string `json:"content_type"`
+		} `json:"subjects"`
+	}
+	loadRootFixture(t, "control-subjects-v1.json", &fixture)
+
+	if fixture.Envelope.KindValue != uint16(KindControl) {
+		t.Fatalf("control fixture kind = %d", fixture.Envelope.KindValue)
+	}
+	subjects := map[string]string{}
+	for _, entry := range fixture.Subjects {
+		subjects[entry.Subject] = entry.ContentType
+	}
+	expected := map[string]string{
+		RegistryIndexRequestSubject:   RegistryIndexContentType,
+		RegistryIndexResponseSubject:  RegistryIndexContentType,
+		BundleManifestRequestSubject:  RegistryBundleContentType,
+		BundleManifestResponseSubject: RegistryBundleContentType,
+	}
+	for subject, contentType := range expected {
+		if subjects[subject] != contentType {
+			t.Fatalf("fixture subject %s content type = %q, want %q", subject, subjects[subject], contentType)
+		}
+	}
+}
+
+func TestUnsignedControlFrameFixtureRoundTripsWithoutSecurityTrailers(t *testing.T) {
+	var fixture struct {
+		FixtureSchemaVersion uint8 `json:"fixture_schema_version"`
+		Envelope             struct {
+			Magic         string               `json:"magic"`
+			Version       uint16               `json:"version"`
+			KindName      string               `json:"kind_name"`
+			KindValue     uint16               `json:"kind_value"`
+			ID            UUID                 `json:"id"`
+			CorrelationID UUID                 `json:"correlation_id"`
+			CausationID   UUID                 `json:"causation_id"`
+			Subject       string               `json:"subject"`
+			ContentType   string               `json:"content_type"`
+			Metadata      string               `json:"metadata_base64"`
+			BodyJSON      RegistryIndexRequest `json:"body_json"`
+		} `json:"envelope"`
+		Security struct {
+			Signed           bool    `json:"signed"`
+			Encrypted        bool    `json:"encrypted"`
+			SignatureHintHex string  `json:"signature_hint_hex"`
+			AuthTrailer      *string `json:"auth_trailer"`
+			POATrailer       *string `json:"poa_trailer"`
+		} `json:"security"`
+	}
+	loadRootFixture(t, filepath.Join("protocol", "zenv-unsigned-control-frame-v1.json"), &fixture)
+
+	frame, err := RegistryIndexRequestFrame(fixture.Envelope.BodyJSON.RequireSignature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame.ID = fixture.Envelope.ID
+	encoded, err := frame.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeEnvelope(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fixture.FixtureSchemaVersion != 1 {
+		t.Fatalf("fixture schema version = %d", fixture.FixtureSchemaVersion)
+	}
+	if fixture.Envelope.Magic != EnvelopeMagic || fixture.Envelope.Version != EnvelopeVersion {
+		t.Fatalf("fixture envelope version mismatch: %+v", fixture.Envelope)
+	}
+	if decoded.Kind != KindControl || fixture.Envelope.KindName != "control" || fixture.Envelope.KindValue != uint16(KindControl) {
+		t.Fatalf("kind mismatch decoded=%d fixture=%+v", decoded.Kind, fixture.Envelope)
+	}
+	if decoded.ID != fixture.Envelope.ID || decoded.CorrelationID != nil || decoded.CausationID != nil {
+		t.Fatalf("decoded ids mismatch: %+v", decoded)
+	}
+	if decoded.Subject != RegistryIndexRequestSubject || decoded.Subject != fixture.Envelope.Subject {
+		t.Fatalf("subject = %q", decoded.Subject)
+	}
+	if decoded.ContentType != RegistryIndexContentType || decoded.ContentType != fixture.Envelope.ContentType {
+		t.Fatalf("content type = %q", decoded.ContentType)
+	}
+	var body RegistryIndexRequest
+	if err := json.Unmarshal(decoded.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body != fixture.Envelope.BodyJSON {
+		t.Fatalf("body = %+v, fixture = %+v", body, fixture.Envelope.BodyJSON)
+	}
+	if fixture.Security.Signed || fixture.Security.Encrypted || fixture.Security.AuthTrailer != nil || fixture.Security.POATrailer != nil {
+		t.Fatalf("fixture should document absent security trailers: %+v", fixture.Security)
+	}
+	if fixture.Security.SignatureHintHex != "0000000000000000" {
+		t.Fatalf("signature hint = %q", fixture.Security.SignatureHintHex)
+	}
+}
+
+func TestReceiptSampleFixtureHasStableResponseShape(t *testing.T) {
+	var fixture struct {
+		FixtureSchemaVersion uint8  `json:"fixture_schema_version"`
+		Subject              string `json:"subject"`
+		ContentType          string `json:"content_type"`
+		BodyJSON             struct {
+			SchemaVersion uint8  `json:"schema_version"`
+			RequestID     UUID   `json:"request_id"`
+			Truncated     bool   `json:"truncated"`
+			Receipts      []struct {
+				SchemaVersion        uint8                  `json:"schema_version"`
+				ReceiptID            UUID                   `json:"receipt_id"`
+				NodeID               UUID                   `json:"node_id"`
+				FrameID              UUID                   `json:"frame_id"`
+				Subject              string                 `json:"subject"`
+				ContentType          string                 `json:"content_type"`
+				BodyHash             string                 `json:"body_hash"`
+				PolicyDecision       string                 `json:"policy_decision"`
+				Outcome              string                 `json:"outcome"`
+				StartedAtUnixMicros  uint64                 `json:"started_at_unix_micros"`
+				FinishedAtUnixMicros uint64                 `json:"finished_at_unix_micros"`
+				Metadata             map[string]interface{} `json:"metadata"`
+				SignerPublicKey      string                 `json:"signer_public_key"`
+				Signature            string                 `json:"signature"`
+			} `json:"receipts"`
+		} `json:"body_json"`
+	}
+	loadRootFixture(t, filepath.Join("protocol", "receipt-sample-v1.json"), &fixture)
+
+	if fixture.FixtureSchemaVersion != 1 || fixture.BodyJSON.SchemaVersion != 1 {
+		t.Fatalf("fixture schema mismatch: %+v", fixture)
+	}
+	if fixture.Subject != "zap.receipts.response" || fixture.ContentType != "application/zap-receipts+json" {
+		t.Fatalf("receipt fixture route mismatch: %s %s", fixture.Subject, fixture.ContentType)
+	}
+	if fixture.BodyJSON.Truncated || len(fixture.BodyJSON.Receipts) != 1 {
+		t.Fatalf("receipt collection mismatch: %+v", fixture.BodyJSON)
+	}
+	receipt := fixture.BodyJSON.Receipts[0]
+	if receipt.SchemaVersion != 1 || receipt.Subject != RegistryIndexRequestSubject || receipt.ContentType != RegistryIndexContentType {
+		t.Fatalf("receipt protocol fields mismatch: %+v", receipt)
+	}
+	if receipt.PolicyDecision != "allow" || receipt.Outcome != "accepted" {
+		t.Fatalf("receipt decision mismatch: %+v", receipt)
+	}
+	if !ValidateArtifactHash(receipt.BodyHash) {
+		t.Fatalf("invalid body hash %q", receipt.BodyHash)
+	}
+	if receipt.FinishedAtUnixMicros < receipt.StartedAtUnixMicros {
+		t.Fatalf("receipt timestamps inverted: %+v", receipt)
 	}
 }
 
@@ -125,17 +332,21 @@ func TestInstallPlanTypesCarryABIRequirementsAndMigrations(t *testing.T) {
 		Migrations:              []DriverRegistryMigration{migration},
 	}
 
-	raw, err := json.Marshal(struct {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(struct {
 		Request RegistryInstallPlanRequest `json:"request"`
 		Entry   RegistryInstallPlanEntry   `json:"entry"`
 	}{Request: request, Entry: entry})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"abi_requirement":">=2,<4"`) {
+	raw := buf.String()
+	if !strings.Contains(raw, `"abi_requirement":">=2,<4"`) {
 		t.Fatalf("abi requirement missing from json: %s", raw)
 	}
-	if !strings.Contains(string(raw), `"migration_driver_action":"echo.migrate"`) {
+	if !strings.Contains(raw, `"migration_driver_action":"echo.migrate"`) {
 		t.Fatalf("migration missing from json: %s", raw)
 	}
 }
@@ -176,5 +387,17 @@ func TestUDPClientSendsControlEnvelope(t *testing.T) {
 	}
 	if response.Subject != BundleManifestRequestSubject {
 		t.Fatalf("subject = %q", response.Subject)
+	}
+}
+
+func loadRootFixture(t *testing.T, name string, out any) {
+	t.Helper()
+	path := filepath.Join("..", "..", "fixtures", name)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		t.Fatalf("parse fixture %s: %v", name, err)
 	}
 }

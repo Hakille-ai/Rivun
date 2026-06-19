@@ -20,6 +20,8 @@ pub enum ZapPolicyError {
     EmptyContentType(String),
     #[error("policy rule `{0}` uses require_grant without required_capability")]
     MissingRequiredCapability(String),
+    #[error("policy default_decision must be allow or deny")]
+    InvalidDefaultDecision,
     #[error("failed to parse TOML policy: {0}")]
     Toml(String),
 }
@@ -29,12 +31,24 @@ pub type Result<T> = std::result::Result<T, ZapPolicyError>;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PolicySet {
     #[serde(default)]
+    pub default_decision: PolicyDecision,
+    #[serde(default)]
     pub rules: Vec<PolicyRule>,
 }
 
 impl PolicySet {
     pub fn new(rules: Vec<PolicyRule>) -> Result<Self> {
-        let set = Self { rules };
+        Self::new_with_default(PolicyDecision::Allow, rules)
+    }
+
+    pub fn new_with_default(
+        default_decision: PolicyDecision,
+        rules: Vec<PolicyRule>,
+    ) -> Result<Self> {
+        let set = Self {
+            default_decision,
+            rules,
+        };
         set.validate()?;
         Ok(set)
     }
@@ -47,6 +61,12 @@ impl PolicySet {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if !matches!(
+            self.default_decision,
+            PolicyDecision::Allow | PolicyDecision::Deny
+        ) {
+            return Err(ZapPolicyError::InvalidDefaultDecision);
+        }
         for (index, rule) in self.rules.iter().enumerate() {
             rule.validate(&format!("#{index}"))?;
         }
@@ -59,12 +79,17 @@ impl PolicySet {
                 return PolicyEvaluation::from_rule(index, rule, input);
             }
         }
+        let allowed = self.default_decision == PolicyDecision::Allow;
         PolicyEvaluation {
-            decision: PolicyDecision::Allow,
-            allowed: true,
+            decision: self.default_decision,
+            allowed,
             matched_rule_index: None,
             matched_rule_name: None,
-            reason: "default allow".to_string(),
+            reason: if allowed {
+                "default allow".to_string()
+            } else {
+                "default deny".to_string()
+            },
             required_poa: false,
             required_capability: None,
             human_approval_required: false,
@@ -257,6 +282,36 @@ mod tests {
             human_approved: false,
             simulation_passed: false,
         }
+    }
+
+    #[test]
+    fn unmatched_message_uses_default_allow_for_compatibility() {
+        let policy = PolicySet::default();
+        let grants = BTreeSet::new();
+        let evaluation = policy.evaluate(&input(false, &grants));
+
+        assert_eq!(evaluation.decision, PolicyDecision::Allow);
+        assert!(evaluation.allowed);
+        assert_eq!(evaluation.reason, "default allow");
+    }
+
+    #[test]
+    fn unmatched_message_can_default_deny() {
+        let policy = PolicySet::new_with_default(PolicyDecision::Deny, Vec::new()).unwrap();
+        let grants = BTreeSet::new();
+        let evaluation = policy.evaluate(&input(false, &grants));
+
+        assert_eq!(evaluation.decision, PolicyDecision::Deny);
+        assert!(!evaluation.allowed);
+        assert_eq!(evaluation.reason, "default deny");
+    }
+
+    #[test]
+    fn policy_rejects_non_terminal_default_decision() {
+        let error =
+            PolicySet::new_with_default(PolicyDecision::RequirePoa, Vec::new()).unwrap_err();
+
+        assert_eq!(error, ZapPolicyError::InvalidDefaultDecision);
     }
 
     #[test]

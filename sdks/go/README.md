@@ -39,8 +39,26 @@ func main() {
 `VerifyEd25519Signature` verifies base64/base64-no-pad Ed25519 signatures with
 Go's standard `crypto/ed25519` package.
 
+## Shared fixtures and conformance
+
+The Go tests read the shared protocol fixtures from the repository-level
+`fixtures/` directory. They currently assert:
+
+- `zenv-control-registry-bundle-manifest-request.json` matches the Go ZapStore
+  request helper and round-trips through `ControlFrame`.
+- `control-subjects-v1.json` includes the Go registry subjects and expected
+  media types.
+
+To add a fixture, create a small deterministic JSON file in `fixtures/`, then
+add or extend a test in `sdks/go/protocol_test.go` that loads it with
+`loadRootFixture` and checks the schema version, subject, media type, and body
+fields that define the contract.
+
 ## Test
 
 ```bash
 go test ./sdks/go/...
 ```
+
+This command requires a local Go toolchain. CI installs Go before running the
+SDK workflow; local machines without `go` installed cannot execute these tests.

@@ -1,0 +1,45 @@
+[[rules]]
+name = "allow-repository-read"
+kind = "action"
+subject = "repo.read"
+decision = "require_grant"
+required_capability = "repo.read"
+reason = "repository reads must be attached to an explicit agent grant"
+
+[[rules]]
+name = "allow-ci-inspection"
+kind = "action"
+subject = "ci.inspect"
+decision = "require_grant"
+required_capability = "ci.inspect"
+reason = "CI inspection must be attached to an explicit agent grant"
+
+[[rules]]
+name = "gate-source-patching"
+kind = "action"
+subject = "repo.patch"
+decision = "require_grant"
+required_capability = "repo.patch"
+reason = "source patches require an explicit scoped patch grant"
+
+[[rules]]
+name = "gate-test-execution"
+kind = "action"
+subject = "test.run"
+decision = "require_grant"
+required_capability = "test.run"
+reason = "test execution must be bounded by an explicit grant"
+
+[[rules]]
+name = "require-human-approval-for-pr"
+kind = "action"
+subject = "pr.create"
+decision = "human_approval"
+reason = "pull request publication requires human approval"
+
+[[rules]]
+name = "deny-unlisted-agentic-dev-actions"
+kind = "action"
+subject = "*"
+decision = "deny"
+reason = "agentic-dev pack denies unlisted actions by default"

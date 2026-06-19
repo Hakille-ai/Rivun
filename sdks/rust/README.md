@@ -19,6 +19,21 @@ assert_eq!(parsed.subject(), "zap.registry.bundle.manifest.request");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## Shared fixtures and conformance
+
+The Rust SDK reuses the canonical local ZAP crates through path dependencies,
+so its conformance coverage comes from those crates plus SDK round-trip tests.
+It currently covers ZENV control frame construction, ZapStore request/response
+types, canonical artifact hashing, and signature verification through the
+reference implementation.
+
+The repository-level `fixtures/` directory is the shared source of readable
+SDK examples. Rust root fixture tests are not mirrored in this SDK yet; when
+adding one, keep the fixture JSON deterministic and add a test under
+`sdks/rust/src/lib.rs` or a dedicated integration test that checks the fixture
+schema version, subject, media type, and decoded body against the canonical
+types.
+
 ## Test
 
 ```bash

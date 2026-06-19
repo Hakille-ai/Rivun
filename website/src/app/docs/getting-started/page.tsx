@@ -112,7 +112,7 @@ cargo build --release -p zap-cli`}</code>
                 <h3 className="text-white font-semibold">Generate Cryptographic Node Identity</h3>
               </div>
               <p className="text-sm text-zinc-400">
-                Every node requires an Ed25519 identity key. The public key is hashed using BLAKE3 to derive your node's UUID.
+                Every node requires an Ed25519 identity key. The public key is hashed using BLAKE3 to derive your node&apos;s UUID.
               </p>
             </div>
             <div className="flex-1">

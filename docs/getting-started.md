@@ -2,6 +2,8 @@
 
 This guide walks you through setting up ZAP, compiling the workspace, running a local two-node cluster, sending typed messages, and executing a sandboxed WASM driver.
 
+For a shorter source-install checklist, start with [Install ZAP](install.md).
+
 ---
 
 ## Prerequisites

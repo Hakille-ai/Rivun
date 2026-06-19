@@ -24,23 +24,54 @@ should be clear.
 2. Confirm version numbers in workspace `Cargo.toml` are correct.
 3. Confirm governance approval for the release policy in
    [governance.md](governance.md).
-4. Run:
+4. Run the release-readiness gate:
+
+   ```bash
+   cargo run --locked -p xtask -- release readiness --require-go
+   ```
+
+   For local preparation on machines without Go installed, run the same command
+   without `--require-go` and record the Go SDK caveat in the release evidence.
+   CI release readiness always requires Go.
+
+5. Run the core Rust and container gates:
 
    ```bash
    cargo fmt --all -- --check
-   cargo test --workspace --all-targets
-   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace --all-targets --locked
+   cargo clippy --workspace --all-targets --locked -- -D warnings
    docker build -t zap:release-candidate .
    ```
 
-5. Run `zap check-config` against any updated example configs.
-6. Verify docs mention any behavior, config, or security posture changes.
-7. Tag the release as `vMAJOR.MINOR.PATCH`.
-8. Publish release notes with:
+6. Run `zap check-config` against any updated example configs.
+7. Verify docs mention any behavior, config, or security posture changes.
+8. Tag the release as `vMAJOR.MINOR.PATCH`.
+9. Publish release notes with:
    - compatibility notes;
    - security notes;
    - Docker image digest, if an image is published;
+   - migration notes for config, protocol, SDK, or CLI changes;
+   - checksum, signature, and SBOM locations;
    - known limitations.
+
+## Release Readiness Gate
+
+`cargo run --locked -p xtask -- release readiness --require-go` is the
+verifiable Phase 7 release-readiness checklist. It must pass before packaging a
+stable release. The command verifies:
+
+- protocol fixtures with
+  `cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --json`;
+- the domain pack catalog with
+  `cargo run --locked -p zap-cli -- pack list --root examples/domain-packs --json`;
+- SDK conformance for Python, TypeScript, Rust, and Go;
+- website documentation lint with `npm run lint` in `website`.
+
+When investigating a local failure, `--skip-sdks` and `--skip-website` may be
+used only to isolate a problem. They are not valid stable-release evidence.
+
+The release evidence bundle should include the command output, the workflow run
+URL, the Git commit SHA, and a note confirming whether Go was available locally.
 
 ## Version Gate
 
@@ -71,6 +102,31 @@ The publish job creates:
 
 Consumers should verify the checksum first, then verify the Sigstore bundle
 against the GitHub workflow identity that produced the release.
+
+## Checksums, Signatures, and SBOM
+
+Every published archive must have a SHA-256 entry in `SHA256SUMS` and a Sigstore
+bundle produced by GitHub OIDC. Release notes should identify the workflow file,
+repository, ref, and commit SHA used to produce the signature.
+
+If an SBOM generator is available in the release environment, attach the SBOM to
+the GitHub release and list it next to `SHA256SUMS`. If SBOM generation is not
+yet enabled for a preview release, state that explicitly in the notes instead of
+leaving the supply-chain evidence ambiguous.
+
+## Migration Notes
+
+Migration notes are required when a release changes:
+
+- CLI command names, flags, output JSON, or exit behavior;
+- policy defaults such as `message_policy.default_decision`;
+- protocol fixtures, envelope fields, or parser rejection behavior;
+- domain pack schema, required metadata, or risk levels;
+- SDK public methods, package layout, or fixture expectations;
+- website or docs routes used by operators.
+
+Each migration note should state the old behavior, the new behavior, the command
+or file to update, and the rollback path.
 
 ## Registry and Bundle Releases
 

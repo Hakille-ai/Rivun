@@ -26,9 +26,63 @@ Each SDK also includes base ZapStore types for registry index entries, bundle
 manifests, bundle entries, install plan requests, install plans, and install
 plan entries.
 
+Shared protocol fixtures live in `fixtures/`. They provide readable JSON
+examples for ZENV control envelopes, agent protocol payloads, and the current
+control subject catalogue so SDK tests can converge on the same field names,
+media types, receipt shapes, and signing-message helpers.
+
+## Shared Fixtures
+
+The fixture directory is the SDK conformance source of truth for stable protocol
+examples:
+
+- `zenv-control-registry-bundle-manifest-request.json`: a v1 `ZENV` control
+  envelope carrying `zap.registry.bundle.manifest.request`.
+- `control-subjects-v1.json`: the current v1 control subject catalogue and
+  media types.
+- `agent-intent-message-v1.json`: a v1 `application/zap-agent+json` intent
+  payload that can be carried by SDK control envelope helpers.
+- `protocol/zenv-unsigned-control-frame-v1.json`: a deterministic unsigned
+  registry index request frame for header and body round-trip checks.
+- `protocol/receipt-sample-v1.json`: a deterministic receipt replication
+  response used by SDK receipt shape and signing-message helper tests.
+
+When adding a fixture, keep it small, readable, and deterministic. Include a
+`fixture_schema_version`, a short `description`, the protocol subject and media
+type, and a JSON body that can be asserted by at least one SDK test. Prefer
+adding or updating tests in every SDK that can parse the fixture without pulling
+in extra runtime services.
+
+## Conformance Matrix
+
+| SDK | ZENV encode/decode | ZapStore payloads | Shared fixture tests | Integrity helpers | Local test command |
+| --- | --- | --- | --- | --- | --- |
+| Python | Yes | Yes | `zenv`, `control-subjects`, `agent-intent`, `receipt` | Shape validation always; receipt signing-message helpers; BLAKE3 and Ed25519 with `crypto` extra | `python -m unittest discover -s sdks/python/tests` |
+| TypeScript | Yes | Yes | `zenv`, `control-subjects`, `agent-intent`, `receipt` | BLAKE3, receipt signing-message helpers, and Ed25519 through Noble packages | `npm --prefix sdks/typescript test` |
+| Go | Yes | Yes | `zenv`, `control-subjects` | BLAKE3 and standard Ed25519 | `go test ./sdks/go/...` |
+| Rust | Yes, via canonical crates | Yes, via canonical crates | Protocol round-trip tests in crate; root fixture tests not yet mirrored | Canonical ZAP crate helpers | `cargo test --manifest-path sdks/rust/Cargo.toml` |
+
+Known limitations:
+
+- Go checks require a local Go toolchain. CI installs Go before running the SDK
+  workflow, but a workstation without `go` cannot run `go test ./sdks/go/...`.
+- Python cryptographic hashing and signature verification require
+  `python -m pip install -e "sdks/python[crypto]"`.
+- Rust intentionally depends on local path crates, so it is the reference SDK
+  for canonical behavior rather than a dependency-free client package.
+
 ## Integrity Helpers
 
 ZapStore artifact hashes are canonical `blake3:<64 hex chars>` values.
+
+Python and TypeScript expose constants for the receipt replication subjects
+(`zap.receipts.request`, `zap.receipts.response`), the receipt media type
+(`application/zap-receipts+json`), and the agent message media type/subjects.
+They also expose receipt response shape validation helpers and
+`receipt_signing_message` / `receiptSigningMessage`, which builds the exact
+domain-prefixed message bytes that Ed25519 verification expects for current
+receipt payloads. The helper does not invent missing signature material; callers
+must still provide the canonical receipt JSON, signer public key, and signature.
 
 The Rust SDK reuses `zap-store` and can compute canonical BLAKE3 hashes and run
 existing signature verification methods. Python can compute/verify when its

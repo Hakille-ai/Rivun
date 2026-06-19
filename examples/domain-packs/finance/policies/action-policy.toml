@@ -1,0 +1,61 @@
+default_decision = "deny"
+
+[[rules]]
+name = "read account state"
+kind = "data"
+subject = "account.read"
+decision = "require_grant"
+required_capability = "account.read"
+reason = "account reads require scoped grant and audit"
+
+[[rules]]
+name = "run risk check"
+kind = "action"
+subject = "risk.check"
+decision = "require_grant"
+required_capability = "risk.check"
+reason = "risk checks must be scoped to an approved policy context"
+
+[[rules]]
+name = "trade proposal"
+kind = "action"
+subject = "trade.propose"
+decision = "require_grant"
+required_capability = "trade.propose"
+reason = "proposal-only trade workflow is reversible but still audited"
+
+[[rules]]
+name = "payment proposal"
+kind = "action"
+subject = "payment.propose"
+decision = "require_grant"
+required_capability = "payment.propose"
+reason = "proposal-only payment workflow requires scoped grant"
+
+[[rules]]
+name = "approval record"
+kind = "action"
+subject = "approval.record"
+decision = "human_approval"
+reason = "approval records require explicit human/compliance approval"
+
+[[rules]]
+name = "trade execution"
+kind = "action"
+subject = "trade.execute"
+decision = "require_poa"
+reason = "market-facing execution requires Proof-of-Action"
+
+[[rules]]
+name = "payment execution"
+kind = "action"
+subject = "payment.execute"
+decision = "require_poa"
+reason = "funds movement requires Proof-of-Action"
+
+[[rules]]
+name = "final reconciliation"
+kind = "action"
+subject = "reconciliation.finalize"
+decision = "require_poa"
+reason = "final reconciliation and ledger adjustment require Proof-of-Action"

@@ -71,7 +71,7 @@ export default function Home() {
                 <div><span className="text-blue-400">magic:</span> 0x5A41505F</div>
                 <div><span className="text-blue-400">version:</span> 1</div>
                 <div><span className="text-blue-400">flags:</span> SIGNED | ENCRYPT</div>
-                <div><span className="text-blue-400">action:</span> "thermostat.set"</div>
+                <div><span className="text-blue-400">action:</span> &quot;thermostat.set&quot;</div>
               </div>
             </CardContent>
           </Card>
@@ -157,7 +157,7 @@ export default function Home() {
         <div className="text-center mb-16">
           <h2 className="text-3xl md:text-5xl font-bold mb-4">Beyond the Limits of Legacy</h2>
           <p className="text-zinc-400 text-lg max-w-2xl mx-auto">
-            Traditional architectures like MQTT, gRPC, and Kafka weren't designed for zero-trust edge networks and autonomous agent coordination.
+            Traditional architectures like MQTT, gRPC, and Kafka weren&apos;t designed for zero-trust edge networks and autonomous agent coordination.
           </p>
         </div>
         
@@ -313,7 +313,7 @@ impl ZapDriver for EchoDriver {
             </div>
             <h2 className="text-3xl md:text-5xl font-bold mb-6">Built for Nanosecond Latency</h2>
             <p className="text-zinc-400 text-lg mb-6">
-              ZAP's hot-path packet processing is rigorously benchmarked. Regression thresholds strictly enforce a 7% max regression on the 64-byte header parser and frame encoding.
+              ZAP&apos;s hot-path packet processing is rigorously benchmarked. Regression thresholds strictly enforce a 7% max regression on the 64-byte header parser and frame encoding.
             </p>
             <ul className="space-y-4">
               <li className="flex items-center gap-3"><div className="w-2 h-2 rounded-full bg-blue-500"></div> <span className="text-zinc-300">Zero-copy wire frame parsing</span></li>

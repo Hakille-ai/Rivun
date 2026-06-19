@@ -1,0 +1,34 @@
+# ZAP CODEOWNERS
+#
+# Replace these team handles if the GitHub organization uses different names.
+# Keep protocol, crypto, release, and governance paths owned separately from
+# general application code so risky changes get explicit review.
+
+* @Hakille-ai/zap-maintainers
+
+# Protocol, crypto, policy, fixtures, and governance-sensitive surfaces.
+/crates/zap-wire/ @Hakille-ai/zap-protocol @Hakille-ai/zap-security
+/crates/zap-envelope/ @Hakille-ai/zap-protocol @Hakille-ai/zap-security
+/crates/zap-crypto/ @Hakille-ai/zap-security
+/crates/zap-policy/ @Hakille-ai/zap-security @Hakille-ai/zap-maintainers
+/crates/zap-agent/ @Hakille-ai/zap-protocol @Hakille-ai/zap-maintainers
+/fixtures/ @Hakille-ai/zap-protocol @Hakille-ai/zap-security
+# Runtime, node, operations, and deployment.
+/crates/zap-node/ @Hakille-ai/zap-runtime @Hakille-ai/zap-security
+/crates/zap-runtime/ @Hakille-ai/zap-runtime @Hakille-ai/zap-security
+/crates/zap-ops/ @Hakille-ai/zap-runtime @Hakille-ai/zap-security
+
+# CLI, SDKs, website, and examples.
+/crates/zap-cli/ @Hakille-ai/zap-maintainers
+/sdks/ @Hakille-ai/zap-sdk
+/website/ @Hakille-ai/zap-docs
+/docs/ @Hakille-ai/zap-docs @Hakille-ai/zap-maintainers
+/examples/domain-packs/ @Hakille-ai/zap-domain-packs @Hakille-ai/zap-security
+/docs/security.md @Hakille-ai/zap-security
+/docs/rfc-process.md @Hakille-ai/zap-protocol @Hakille-ai/zap-security
+/docs/operations.md @Hakille-ai/zap-runtime
+/docs/deployment.md @Hakille-ai/zap-runtime
+
+# CI, release, dependency, and contribution process.
+/.github/ @Hakille-ai/zap-maintainers @Hakille-ai/zap-security
+/CODEOWNERS @Hakille-ai/zap-maintainers

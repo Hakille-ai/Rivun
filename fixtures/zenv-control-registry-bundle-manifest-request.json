@@ -1,0 +1,22 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Readable fixture for a v1 ZENV control envelope carrying a registry bundle manifest request.",
+  "envelope": {
+    "magic": "ZENV",
+    "version": 1,
+    "kind_name": "control",
+    "kind_value": 8,
+    "reserved": 0,
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "correlation_id": "00000000-0000-0000-0000-000000000000",
+    "causation_id": "00000000-0000-0000-0000-000000000000",
+    "subject": "zap.registry.bundle.manifest.request",
+    "content_type": "application/zap-registry-bundle-manifest+json",
+    "metadata_base64": "",
+    "body_json": {
+      "schema_version": 1,
+      "require_publication": true,
+      "require_drivers": true
+    }
+  }
+}

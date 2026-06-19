@@ -1,0 +1,45 @@
+schema_version = 1
+id = "zap-pack-agentic-dev"
+name = "Agentic Development"
+version = "0.1.0"
+status = "preview"
+description = "Auditable coding-agent workflows over ZAP."
+
+[compatibility]
+zap_protocol = ">=0.1.0,<1.0.0"
+driver_abi = ">=1,<=2"
+
+[[capabilities]]
+id = "repo.read"
+risk = "low"
+description = "Read repository files, metadata, and dependency manifests."
+
+[[capabilities]]
+id = "repo.patch"
+risk = "medium"
+requires = ["repo.read"]
+description = "Prepare or apply scoped source patches."
+
+[[capabilities]]
+id = "test.run"
+risk = "medium"
+description = "Run bounded project tests or linters."
+
+[[capabilities]]
+id = "ci.inspect"
+risk = "low"
+description = "Inspect CI status, logs, and check metadata."
+
+[[capabilities]]
+id = "pr.create"
+risk = "high"
+requires = ["repo.read", "repo.patch", "test.run"]
+description = "Create or update a pull request from reviewed changes."
+
+[[policies]]
+path = "policies/action-policy.toml"
+description = "Baseline policy for development-agent actions."
+
+[[schemas]]
+path = "schemas/subjects.md"
+description = "Pack subject catalog and expected payload shape."

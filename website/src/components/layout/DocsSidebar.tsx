@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Key, Shield, Terminal, Cpu, Activity, Network, Database, Lock, HelpCircle, Milestone, Compass, Server, Archive, Info } from 'lucide-react';
+import { BookOpen, Key, Shield, Terminal, Cpu, Activity, Network, Database, Lock, HelpCircle, Milestone, Compass, Server, Archive, Info, Download, Package, Bot, FileCheck2, GitBranch } from 'lucide-react';
 const groups = [
   {
     title: "Getting Started",
     items: [
       { title: "Introduction", href: "/docs", icon: BookOpen },
+      { title: "Install", href: "/docs/install", icon: Download },
       { title: "Getting Started", href: "/docs/getting-started", icon: Terminal },
       { title: "End-to-End Tutorial", href: "/docs/tutorial", icon: Compass },
       { title: "Use Cases", href: "/docs/use-cases", icon: Activity },
@@ -18,16 +19,21 @@ const groups = [
     title: "Core Protocol",
     items: [
       { title: "Protocol Specs", href: "/docs/protocol", icon: Shield },
+      { title: "Agent Protocol", href: "/docs/agent-protocol", icon: Bot },
+      { title: "Message Policy", href: "/docs/message-policy", icon: Shield },
       { title: "Security Model", href: "/docs/security", icon: Lock },
+      { title: "RFC / ZEP Process", href: "/docs/rfc-process", icon: FileCheck2 },
       { title: "Signed Receipts", href: "/docs/receipts", icon: Archive },
       { title: "Benchmarks", href: "/docs/benchmarks", icon: Activity },
       { title: "Roadmap", href: "/docs/roadmap", icon: Milestone },
+      { title: "Roadmap Status", href: "/docs/roadmap-status", icon: GitBranch },
     ]
   },
   {
     title: "Services & Routing",
     items: [
       { title: "ZapStore & Registries", href: "/docs/zapstore", icon: Key },
+      { title: "Domain Packs", href: "/docs/domain-packs", icon: Package },
       { title: "Routing & Capabilities", href: "/docs/routing-memory", icon: Network },
     ]
   },
@@ -42,8 +48,10 @@ const groups = [
     title: "Operations",
     items: [
       { title: "Deployment", href: "/docs/deployment", icon: Server },
+      { title: "Observability", href: "/docs/observability", icon: Activity },
       { title: "CLI Operations", href: "/docs/operations", icon: Terminal },
       { title: "Versioning Policy", href: "/docs/versioning", icon: Info },
+      { title: "Release Readiness", href: "/docs/release", icon: Archive },
     ]
   }
 ];

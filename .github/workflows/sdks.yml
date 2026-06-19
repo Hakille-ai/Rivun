@@ -28,9 +28,9 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: sdks/typescript/package.json
+          cache-dependency-path: sdks/typescript/package-lock.json
       - working-directory: sdks/typescript
-        run: npm install
+        run: npm ci
       - working-directory: sdks/typescript
         run: npm run typecheck
       - working-directory: sdks/typescript
