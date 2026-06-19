@@ -1,6 +1,7 @@
 package zap
 
 import (
+	"bytes"
 	"encoding/json"
 	"net"
 	"os"
@@ -53,14 +54,14 @@ func TestRegistryBundleManifestRequestFixtureMatchesSDK(t *testing.T) {
 			KindValue   uint16 `json:"kind_value"`
 			Subject     string `json:"subject"`
 			ContentType string `json:"content_type"`
+			BodyJSON    RegistryBundleManifestRequest `json:"body_json"`
 		} `json:"envelope"`
-		BodyJSON RegistryBundleManifestRequest `json:"body_json"`
 	}
 	loadRootFixture(t, "zenv-control-registry-bundle-manifest-request.json", &fixture)
 
 	frame, err := RegistryBundleManifestRequestFrame(
-		fixture.BodyJSON.RequirePublication,
-		fixture.BodyJSON.RequireDrivers,
+		fixture.Envelope.BodyJSON.RequirePublication,
+		fixture.Envelope.BodyJSON.RequireDrivers,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -87,8 +88,8 @@ func TestRegistryBundleManifestRequestFixtureMatchesSDK(t *testing.T) {
 	if err := decoded.JSONBody(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body != fixture.BodyJSON {
-		t.Fatalf("body = %+v, fixture = %+v", body, fixture.BodyJSON)
+	if body != fixture.Envelope.BodyJSON {
+		t.Fatalf("body = %+v, fixture = %+v", body, fixture.Envelope.BodyJSON)
 	}
 }
 
@@ -331,17 +332,21 @@ func TestInstallPlanTypesCarryABIRequirementsAndMigrations(t *testing.T) {
 		Migrations:              []DriverRegistryMigration{migration},
 	}
 
-	raw, err := json.Marshal(struct {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	err := enc.Encode(struct {
 		Request RegistryInstallPlanRequest `json:"request"`
 		Entry   RegistryInstallPlanEntry   `json:"entry"`
 	}{Request: request, Entry: entry})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"abi_requirement":">=2,<4"`) {
+	raw := buf.String()
+	if !strings.Contains(raw, `"abi_requirement":">=2,<4"`) {
 		t.Fatalf("abi requirement missing from json: %s", raw)
 	}
-	if !strings.Contains(string(raw), `"migration_driver_action":"echo.migrate"`) {
+	if !strings.Contains(raw, `"migration_driver_action":"echo.migrate"`) {
 		t.Fatalf("migration missing from json: %s", raw)
 	}
 }
