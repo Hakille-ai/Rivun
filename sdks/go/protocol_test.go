@@ -50,10 +50,10 @@ func TestRegistryBundleManifestControlFrameRoundTrips(t *testing.T) {
 func TestRegistryBundleManifestRequestFixtureMatchesSDK(t *testing.T) {
 	var fixture struct {
 		Envelope struct {
-			KindName    string `json:"kind_name"`
-			KindValue   uint16 `json:"kind_value"`
-			Subject     string `json:"subject"`
-			ContentType string `json:"content_type"`
+			KindName    string                        `json:"kind_name"`
+			KindValue   uint16                        `json:"kind_value"`
+			Subject     string                        `json:"subject"`
+			ContentType string                        `json:"content_type"`
 			BodyJSON    RegistryBundleManifestRequest `json:"body_json"`
 		} `json:"envelope"`
 	}
@@ -117,6 +117,7 @@ func TestControlSubjectFixtureContainsSDKRegistrySubjects(t *testing.T) {
 		RegistryIndexResponseSubject:  RegistryIndexContentType,
 		BundleManifestRequestSubject:  RegistryBundleContentType,
 		BundleManifestResponseSubject: RegistryBundleContentType,
+		PactBundleSubject:             PactContentType,
 	}
 	for subject, contentType := range expected {
 		if subjects[subject] != contentType {
@@ -204,9 +205,9 @@ func TestReceiptSampleFixtureHasStableResponseShape(t *testing.T) {
 		Subject              string `json:"subject"`
 		ContentType          string `json:"content_type"`
 		BodyJSON             struct {
-			SchemaVersion uint8  `json:"schema_version"`
-			RequestID     UUID   `json:"request_id"`
-			Truncated     bool   `json:"truncated"`
+			SchemaVersion uint8 `json:"schema_version"`
+			RequestID     UUID  `json:"request_id"`
+			Truncated     bool  `json:"truncated"`
 			Receipts      []struct {
 				SchemaVersion        uint8                  `json:"schema_version"`
 				ReceiptID            UUID                   `json:"receipt_id"`
@@ -248,6 +249,101 @@ func TestReceiptSampleFixtureHasStableResponseShape(t *testing.T) {
 	}
 	if receipt.FinishedAtUnixMicros < receipt.StartedAtUnixMicros {
 		t.Fatalf("receipt timestamps inverted: %+v", receipt)
+	}
+}
+
+func TestPactFixturesReproduceHashAndVerify(t *testing.T) {
+	var record struct {
+		Subject     string  `json:"subject"`
+		ContentType string  `json:"content_type"`
+		BodyJSON    ZapPact `json:"body_json"`
+	}
+	var bundle struct {
+		Subject     string        `json:"subject"`
+		ContentType string        `json:"content_type"`
+		BodyJSON    ZapPactBundle `json:"body_json"`
+	}
+	loadRootFixture(t, "pact-record-v1.json", &record)
+	loadRootFixture(t, "pact-bundle-v1.json", &bundle)
+
+	if record.Subject != PactRecordSubject || record.ContentType != PactContentType {
+		t.Fatalf("PACT record fixture route mismatch: %s %s", record.Subject, record.ContentType)
+	}
+	hash, err := PactHash(record.BodyJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash != record.BodyJSON.Hash {
+		t.Fatalf("hash = %s, want %s", hash, record.BodyJSON.Hash)
+	}
+	now := uint64(1893457000000000)
+	ok, err := VerifyPact(record.BodyJSON, &now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected PACT record to verify")
+	}
+	if bundle.Subject != PactBundleSubject || bundle.ContentType != PactContentType {
+		t.Fatalf("PACT bundle fixture route mismatch: %s %s", bundle.Subject, bundle.ContentType)
+	}
+	ok, err = VerifyPactBundle(bundle.BodyJSON, &now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected PACT bundle to verify")
+	}
+}
+
+func TestSecurityProtocolFixturesCoverSignedPoaCapabilityAndDatagramShapes(t *testing.T) {
+	var signed struct {
+		Security struct {
+			Signed      bool `json:"signed"`
+			AuthTrailer struct {
+				Algorithm string `json:"algorithm"`
+			} `json:"auth_trailer"`
+		} `json:"security"`
+	}
+	var poa struct {
+		Security struct {
+			Signed     bool `json:"signed"`
+			POATrailer struct {
+				Threshold uint16 `json:"threshold"`
+			} `json:"poa_trailer"`
+		} `json:"security"`
+	}
+	var capability struct {
+		Subject     string `json:"subject"`
+		ContentType string `json:"content_type"`
+		BodyJSON    struct {
+			Capabilities []string `json:"capabilities"`
+		} `json:"body_json"`
+	}
+	var datagram struct {
+		Cipher   string `json:"cipher"`
+		NonceHex string `json:"nonce_hex"`
+	}
+
+	loadRootFixture(t, filepath.Join("protocol", "signed-control-frame-v1.json"), &signed)
+	loadRootFixture(t, filepath.Join("protocol", "poa-control-frame-v1.json"), &poa)
+	loadRootFixture(t, filepath.Join("protocol", "capability-response-v1.json"), &capability)
+	loadRootFixture(t, filepath.Join("protocol", "encrypted-datagram-v1.json"), &datagram)
+
+	if !signed.Security.Signed || signed.Security.AuthTrailer.Algorithm != "ed25519" {
+		t.Fatalf("signed fixture mismatch: %+v", signed.Security)
+	}
+	if !poa.Security.Signed || poa.Security.POATrailer.Threshold != 1 {
+		t.Fatalf("poa fixture mismatch: %+v", poa.Security)
+	}
+	if capability.Subject != "zap.capability.response" || capability.ContentType != "application/zap-capability+json" {
+		t.Fatalf("capability fixture route mismatch: %+v", capability)
+	}
+	if !containsString(capability.BodyJSON.Capabilities, "driver.execute:echo") {
+		t.Fatalf("capability fixture missing driver capability: %+v", capability.BodyJSON.Capabilities)
+	}
+	if datagram.Cipher != "ChaCha20-Poly1305" || len(datagram.NonceHex) != 24 {
+		t.Fatalf("datagram fixture mismatch: %+v", datagram)
 	}
 }
 
@@ -400,4 +496,13 @@ func loadRootFixture(t *testing.T, name string, out any) {
 	if err := json.Unmarshal(raw, out); err != nil {
 		t.Fatalf("parse fixture %s: %v", name, err)
 	}
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }

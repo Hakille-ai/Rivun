@@ -15,4 +15,5 @@ serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
 zap-core = { path = "../../crates/zap-core" }
 zap-envelope = { path = "../../crates/zap-envelope" }
+zap-pact = { path = "../../crates/zap-pact" }
 zap-store = { path = "../../crates/zap-store" }

@@ -5,8 +5,11 @@ import {
   REGISTRY_INDEX_CONTENT_TYPE,
   REGISTRY_INDEX_REQUEST_SUBJECT,
 } from "./protocol.ts";
-import { verify as verifyEd25519 } from "@noble/ed25519";
+import * as ed25519 from "@noble/ed25519";
 import { blake3 } from "@noble/hashes/blake3";
+import { sha512 } from "@noble/hashes/sha512";
+
+ed25519.etc.sha512Sync = (...messages: Uint8Array[]) => sha512(ed25519.etc.concatBytes(...messages));
 
 export const REGISTRY_INDEX_SYNC_SCHEMA_VERSION = 1;
 export const REGISTRY_BUNDLE_SCHEMA_VERSION = 1;
@@ -23,6 +26,41 @@ export const AGENT_CONTENT_TYPE = "application/zap-agent+json";
 export const AGENT_INTENT_SUBJECT = "zap.agent.intent";
 export const AGENT_STATUS_SUBJECT = "zap.agent.status";
 export const AGENT_RESULT_SUBJECT = "zap.agent.result";
+export const PACT_SCHEMA_VERSION = 1;
+export const PACT_CONTENT_TYPE = "application/zap-pact+json";
+export const PACT_RECORD_SUBJECT = "zap.pact.record";
+export const PACT_VERIFY_SUBJECT = "zap.pact.verify";
+export const PACT_REVOKE_SUBJECT = "zap.pact.revoke";
+export const PACT_BUNDLE_SUBJECT = "zap.pact.bundle";
+export const PACT_SIGNATURE_DOMAIN = "ZAP-PACT-v1";
+
+export type ZapPactStatus = "draft" | "active" | "expired" | "revoked" | "invalid";
+
+export type ZapPact = {
+  schema_version: number;
+  pact_id: string;
+  actor: string;
+  target: string;
+  intent: string;
+  object?: unknown;
+  terms?: unknown;
+  consent?: unknown;
+  proof?: unknown;
+  created_at_micros: number;
+  expires_at_micros?: number | null;
+  actor_public_key?: string;
+  hash?: string;
+  signature?: string;
+  status?: ZapPactStatus;
+};
+
+export type ZapPactBundle = {
+  schema_version: number;
+  pact: ZapPact;
+  verifications?: unknown[];
+  revocations?: unknown[];
+  metadata?: Record<string, unknown>;
+};
 
 export type DriverRegistryStatus = "active" | "deprecated" | "revoked";
 
@@ -285,6 +323,75 @@ export function artifactHash(bytes: Uint8Array): string {
   return `${DRIVER_HASH_PREFIX}${Buffer.from(blake3(bytes)).toString("hex")}`;
 }
 
+export function pactCanonicalSigningBytes(pact: ZapPact): Uint8Array {
+  validatePactShape(pact);
+  const payload = {
+    pact_id: pact.pact_id,
+    actor: pact.actor,
+    target: pact.target,
+    intent: pact.intent,
+    object: normalizeJsonValue(pact.object ?? null),
+    terms: normalizeJsonValue(pact.terms ?? null),
+    consent: normalizeJsonValue(pact.consent ?? null),
+    proof: normalizeJsonValue(pact.proof ?? null),
+    created_at_micros: pact.created_at_micros,
+    expires_at_micros: pact.expires_at_micros ?? null,
+  };
+  return Buffer.from(JSON.stringify(payload), "utf8");
+}
+
+export function pactHash(pact: ZapPact): string {
+  return artifactHash(pactCanonicalSigningBytes(pact));
+}
+
+export function validatePactShape(pact: ZapPact): void {
+  if (pact.schema_version !== PACT_SCHEMA_VERSION) {
+    throw new Error(`unsupported PACT schema version ${String(pact.schema_version)}`);
+  }
+  validateUuid(pact.pact_id, "pact_id");
+  for (const field of ["actor", "target", "intent"] as const) {
+    if (typeof pact[field] !== "string" || pact[field].trim() === "") {
+      throw new Error(`PACT ${field} must be a non-empty string`);
+    }
+  }
+  if (!Number.isSafeInteger(pact.created_at_micros) || pact.created_at_micros < 0) {
+    throw new Error("PACT created_at_micros must be a non-negative integer");
+  }
+  if (
+    pact.expires_at_micros !== undefined &&
+    pact.expires_at_micros !== null &&
+    (!Number.isSafeInteger(pact.expires_at_micros) || pact.expires_at_micros <= pact.created_at_micros)
+  ) {
+    throw new Error("PACT expires_at_micros must be greater than created_at_micros");
+  }
+  if (pact.hash !== undefined && !validateArtifactHash(pact.hash)) {
+    throw new Error(`invalid PACT hash ${pact.hash}`);
+  }
+}
+
+export async function verifyPact(pact: ZapPact, nowMicros?: number): Promise<boolean> {
+  validatePactShape(pact);
+  if (pact.status === "revoked") return false;
+  if (pact.expires_at_micros !== undefined && pact.expires_at_micros !== null && nowMicros !== undefined) {
+    if (nowMicros > pact.expires_at_micros) return false;
+  }
+  if (!pact.hash || pact.hash !== pactHash(pact)) return false;
+  if (!pact.signature || !pact.actor_public_key) return false;
+  return verifyEd25519Signature(
+    zapDomainMessage(PACT_SIGNATURE_DOMAIN, pactCanonicalSigningBytes(pact)),
+    pact.signature,
+    pact.actor_public_key,
+  );
+}
+
+export async function verifyPactBundle(bundle: ZapPactBundle, nowMicros?: number): Promise<boolean> {
+  if (bundle.schema_version !== PACT_SCHEMA_VERSION) {
+    throw new Error(`unsupported PACT bundle schema version ${String(bundle.schema_version)}`);
+  }
+  if (Array.isArray(bundle.revocations) && bundle.revocations.length > 0) return false;
+  return verifyPact(bundle.pact, nowMicros);
+}
+
 export function zapDomainMessage(domain: Uint8Array | string, message: Uint8Array): Uint8Array {
   const domainBytes = typeof domain === "string" ? Buffer.from(domain, "utf8") : Buffer.from(domain);
   return Buffer.concat([domainBytes, Buffer.from([0]), Buffer.from(message)]);
@@ -358,7 +465,7 @@ export async function verifyEd25519Signature(
   signatureBase64: string,
   publicKeyBase64: string,
 ): Promise<boolean> {
-  return verifyEd25519(decodeBase64NoPad(signatureBase64), message, decodeBase64NoPad(publicKeyBase64));
+  return ed25519.verify(decodeBase64NoPad(signatureBase64), message, decodeBase64NoPad(publicKeyBase64));
 }
 
 export function signatureVerificationPlaceholder(kind: string): SignatureVerificationStatus {
@@ -376,6 +483,18 @@ function validateRelativePath(path: string): void {
   if (parts.some((part) => part === "" || part === "." || part === "..")) {
     throw new Error(`bundle path ${path} is not a safe relative path`);
   }
+}
+
+function normalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => normalizeJsonValue(item));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, normalizeJsonValue(nested)]),
+    );
+  }
+  return value;
 }
 
 function decodeBase64NoPad(value: string): Uint8Array {

@@ -8,6 +8,10 @@ from uuid import UUID
 from zap_sdk import (
     AGENT_CONTENT_TYPE,
     AGENT_INTENT_SUBJECT,
+    MissingCryptoBackend,
+    PACT_BUNDLE_SUBJECT,
+    PACT_CONTENT_TYPE,
+    PACT_RECORD_SUBJECT,
     REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
     REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT,
     RECEIPT_REPLICATION_CONTENT_TYPE,
@@ -26,14 +30,18 @@ from zap_sdk import (
     ZapEnvelope,
     ZapMessageKind,
     ZapUdpClient,
+    pact_hash,
     registry_index_request_frame,
     registry_bundle_manifest_request_frame,
     receipt_body_hash,
     receipt_signing_message,
     validate_artifact_hash,
+    validate_pact_shape,
     validate_receipt_response_shape,
     validate_receipt_shape,
     verify_signature_placeholder,
+    verify_pact,
+    verify_pact_bundle,
     zap_domain_message,
 )
 
@@ -218,6 +226,22 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(AGENT_INTENT_SUBJECT, "zap.agent.intent")
         self.assertEqual(AGENT_CONTENT_TYPE, "application/zap-agent+json")
 
+    def test_pact_fixtures_reproduce_hash_and_verify(self):
+        record = load_fixture("pact-record-v1.json")
+        bundle = load_fixture("pact-bundle-v1.json")
+        pact = record["body_json"]
+
+        self.assertEqual(record["subject"], PACT_RECORD_SUBJECT)
+        self.assertEqual(record["content_type"], PACT_CONTENT_TYPE)
+        self.assertEqual(bundle["subject"], PACT_BUNDLE_SUBJECT)
+        validate_pact_shape(pact)
+        try:
+            self.assertEqual(pact_hash(pact), pact["hash"])
+            self.assertTrue(verify_pact(pact, 1893457000000000))
+            self.assertTrue(verify_pact_bundle(bundle["body_json"], 1893457000000000))
+        except MissingCryptoBackend as exc:
+            self.skipTest(str(exc))
+
     def test_receipt_response_shape_rejects_invalid_body_hash(self):
         fixture = load_fixture("protocol/receipt-sample-v1.json")
         body = dict(fixture["body_json"])
@@ -227,6 +251,21 @@ class ProtocolTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "invalid receipt body hash"):
             validate_receipt_response_shape(body)
+
+    def test_security_protocol_fixtures_cover_signed_poa_capability_and_datagram_shapes(self):
+        signed = load_fixture("protocol/signed-control-frame-v1.json")
+        poa = load_fixture("protocol/poa-control-frame-v1.json")
+        capability = load_fixture("protocol/capability-response-v1.json")
+        datagram = load_fixture("protocol/encrypted-datagram-v1.json")
+
+        self.assertTrue(signed["security"]["signed"])
+        self.assertEqual(signed["security"]["auth_trailer"]["algorithm"], "ed25519")
+        self.assertTrue(poa["security"]["signed"])
+        self.assertEqual(poa["security"]["poa_trailer"]["threshold"], 1)
+        self.assertEqual(capability["subject"], "zap.capability.response")
+        self.assertIn("driver.execute:echo", capability["body_json"]["capabilities"])
+        self.assertEqual(datagram["cipher"], "ChaCha20-Poly1305")
+        self.assertEqual(len(datagram["nonce_hex"]), 24)
 
     def test_hash_and_signature_helpers_are_explicit(self):
         self.assertTrue(validate_artifact_hash(HASH))

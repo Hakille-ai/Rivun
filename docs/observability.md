@@ -60,10 +60,18 @@ error rate and receipt/PoA failures for production paging.
 `zap-node` exposes this contract as an in-process readiness surface through
 `ZapNode::metrics_snapshot()`, `ZapNode::metrics_prometheus_text()`,
 `ZapNode::health_snapshot()`, `ZapNode::health_json()`, and
-`ZapNode::healthz_text()`. The daemon does not open a metrics or health HTTP
-endpoint by itself; deployments that need Prometheus scraping or `/healthz`
-should mount the text/JSON output behind their existing sidecar, supervisor, or
-embedding service and apply the bind/path policy from
+`ZapNode::healthz_text()`. When `[observability].http_bind` is configured,
+`zap run` also starts a small HTTP listener with:
+
+- `GET /metrics`: Prometheus text from `metrics_prometheus_text()`.
+- `GET /healthz`: text health status from `healthz_text()`.
+- `GET /healthz.json`: JSON health snapshot from `health_json()`.
+
+`/healthz` and `/healthz.json` return HTTP `503` only when the node status is
+`critical`; `healthy` and `degraded` return `200` so operators can page on the
+named checks while keeping the process discoverable. Embedding services can
+still mount the same in-process text/JSON output behind their existing sidecar
+or supervisor and apply the bind/path policy from
 `crates/zap-ops/config/observability/production.toml`.
 
 ## Health Checks

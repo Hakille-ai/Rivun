@@ -13,6 +13,7 @@ members = [
     "crates/zap-net",
     "crates/zap-node",
     "crates/zap-ops",
+    "crates/zap-pact",
     "crates/zap-policy",
     "crates/zap-router",
     "crates/zap-runtime",
@@ -59,6 +60,7 @@ zap-agent = { path = "crates/zap-agent" }
 zap-capability = { path = "crates/zap-capability" }
 zap-memory = { path = "crates/zap-memory" }
 zap-ops = { path = "crates/zap-ops" }
+zap-pact = { path = "crates/zap-pact" }
 zap-policy = { path = "crates/zap-policy" }
 zap-router = { path = "crates/zap-router" }
 zap-schema = { path = "crates/zap-schema" }

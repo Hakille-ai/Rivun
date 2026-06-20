@@ -23,11 +23,11 @@ Status values:
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
-| Node metrics text | partial | `ZapNode::metrics_snapshot()`, `ZapNode::metrics_prometheus_text()` | Add daemon HTTP `/metrics` endpoint or documented embedding adapter |
-| Health endpoint | planned | `doctor --strict` readiness checks | Add daemon or embedding `/healthz` response contract |
+| Node metrics text | done | `ZapNode::metrics_snapshot()`, `ZapNode::metrics_prometheus_text()`, optional `[observability].http_bind` `/metrics`, `node_observability_http_serves_metrics_and_healthz` | Keep Prometheus assets aligned with emitted names |
+| Health endpoint | done | `ZapNode::health_snapshot()`, `ZapNode::health_json()`, `ZapNode::healthz_text()`, optional `/healthz` and `/healthz.json`, `doctor` observability check | Add fleet-level health aggregation |
 | Prometheus/Grafana assets | done | `crates/zap-ops/config`, `docs/observability.md`, `crates/zap-ops/tests/configs.rs` | Add new rules only with emitted-metric validation |
 | Fail-closed message policy | done | `message_policy.default_decision`, policy tests, docs | Add more production profile examples |
-| Receipt fsync/segments/index | partial | `ReceiptFsyncPolicy`, `[receipts] fsync`, node config validation, fsync cadence tests | Add segment manifests and indexed bounded pulls |
+| Receipt fsync/segments/index | partial | `ReceiptFsyncPolicy`, `[receipts] fsync`, `ReceiptSegmentManifest`, `SignedReceiptSegmentManifest`, `ReceiptSegmentIndex`, bounded `until_processed_at_micros`, pull cursor tests | Add daemon segment rotation and disk-backed index maintenance |
 | Durable replay window | partial | In-memory replay guard and datagram nonce cache | Add optional restart-persistent replay windows |
 | Runtime host-call limits | partial | Host call byte limit and runtime bounds exist | Add per-action budget profiles and richer error taxonomy |
 
@@ -35,17 +35,17 @@ Status values:
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
-| Shared fixtures | partial | `fixtures/`, `fixtures/protocol/`, Rust/Python/TypeScript/Go tests | Add signature, PoA, capability, and datagram golden vectors |
+| Shared fixtures | partial | `fixtures/`, agent session/delegation/negotiation fixtures, `fixtures/protocol/`, Rust/Python/TypeScript/Go tests | Add signature, PoA, capability, and datagram golden vectors |
 | `zap fixtures verify` | done | CLI command and tests | Add SDK-path conformance mode |
 | SDK matrix | partial | `docs/sdks.md`, SDK README updates | Expand SDKs to signing, receipt verification, and capability helpers |
-| `zap schema export` | partial | CLI export of compiled protocol constants, agent schema, control subjects, fixture catalog | Add external domain-pack schema registry and SDK-generated schema parity |
+| `zap schema export` | partial | CLI export of compiled protocol constants, agent schema, control subjects, expanded agent fixture catalog | Add external domain-pack schema registry and SDK-generated schema parity |
 
 ## Phase 3: Agent Gateway
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
 | Agent intent/status/result | done | `zap-agent`, `zap agent intent/status/result`, tests, docs | Keep SDK fixture coverage in sync |
-| Agent session/delegate/negotiate | partial | `zap agent session/delegate/negotiate`, CLI tests | Add fixtures, receipt links, storage, and persistent orchestration |
+| Agent session/delegate/negotiate | partial | `zap agent session/delegate/negotiate`, CLI tests, session/delegation/negotiation fixtures | Add receipt links, storage, and persistent orchestration |
 | Agent receipt linkage | partial | Receipts record message kind/subject and PoA | Link intent/session/capabilities/output artifacts explicitly |
 | Evidence export | partial | `zap memory export-evidence` emits payload-free memory and receipt summaries | Add signed bundle manifest and optional encrypted raw evidence archive |
 | Agent framework adapters | planned | Architecture docs only | Add adapters outside the wire protocol core |
@@ -86,10 +86,10 @@ Status values:
 
 ## Next Highest-Value Implementation Blocks
 
-1. Add agent session, delegate, and negotiate contracts with CLI commands and fixtures.
-2. Add receipt fsync modes and segment/index primitives.
-3. Add `zap schema export` and a machine-readable protocol source of truth.
-4. Add daemon or embedding-ready `/metrics` and `/healthz` adapters.
-5. Expand fixtures to frame/signature/PoA/receipt/capability/datagram golden vectors.
-6. Add `zap memory export-evidence` and `zap incident snapshot`.
+1. Wire receipt segment manifests into daemon log rotation and disk-backed indexes.
+2. Expand fixtures to frame/signature/PoA/receipt/capability/datagram golden vectors.
+3. Add SDK-path conformance mode for `zap fixtures verify`.
+4. Add durable restart-persistent replay windows.
+5. Add fleet topology inspection and fleet-wide incident snapshots.
+6. Add signed evidence bundle manifests and optional encrypted raw evidence archive.
 7. Extend ZapStore with signed domain-pack build/sign/verify/install workflows.

@@ -10,12 +10,16 @@ use std::{
     io::{ErrorKind, Write},
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
 use zap_agent::{
-    AGENT_CONTENT_TYPE, AGENT_PROTOCOL_SCHEMA_VERSION, AgentErrorInfo, AgentId, AgentIntent,
+    AGENT_CAPABILITY_NEGOTIATION_REQUEST_SUBJECT, AGENT_CAPABILITY_NEGOTIATION_RESPONSE_SUBJECT,
+    AGENT_CONTENT_TYPE, AGENT_DELEGATION_REQUEST_SUBJECT, AGENT_DELEGATION_RESPONSE_SUBJECT,
+    AGENT_INTENT_SUBJECT, AGENT_PROTOCOL_SCHEMA_VERSION, AGENT_RESULT_SUBJECT,
+    AGENT_SESSION_SUBJECT, AGENT_STATUS_SUBJECT, AgentErrorInfo, AgentId, AgentIntent,
     AgentMessage, AgentResult, AgentSession, AgentStatusUpdate, CapabilityNegotiationRequest,
     CapabilityNegotiationResponse, DelegationRequest, DelegationResponse, IntentKind,
     agent_message_json_schema,
@@ -54,6 +58,11 @@ use zap_node::{
     DiscoveryService, PeerConfig, PeerTrustConfig, PeerTrustStatus, SignedDiscoveryAdvertisement,
     ZapNode, ZapNodeConfig, build_discovery_advertisement, describe_capabilities,
     sign_discovery_advertisement,
+};
+use zap_pact::{
+    PACT_BUNDLE_SUBJECT, PACT_CONTENT_TYPE, PACT_RECORD_SUBJECT, PACT_REVOKE_SUBJECT,
+    PACT_SCHEMA_VERSION, PACT_VERIFY_SUBJECT, Validate as ZapPactValidate, ZapPact, ZapPactBundle,
+    ZapPactRevocation, pact_json_schema,
 };
 use zap_policy::{PolicyDecision, PolicyInput, PolicySet};
 use zap_router::{RouteMessage, RouteTable};
@@ -212,6 +221,11 @@ enum Commands {
     Agent {
         #[command(subcommand)]
         command: AgentCommand,
+    },
+    /// Create, sign, verify, revoke, and bundle ZAP PACT records.
+    Pact {
+        #[command(subcommand)]
+        command: PactCommand,
     },
     /// Evaluate deterministic message policies.
     Policy {
@@ -552,6 +566,114 @@ enum AgentCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum PactCommand {
+    /// Build an unsigned PACT record JSON document.
+    Create {
+        #[arg(long)]
+        pact_id: Option<Uuid>,
+        #[arg(long)]
+        actor: String,
+        #[arg(long)]
+        target: String,
+        #[arg(long)]
+        intent: String,
+        /// JSON value describing the object of the action.
+        #[arg(long)]
+        object: Option<String>,
+        /// JSON value describing value, limits, or terms.
+        #[arg(long)]
+        terms: Option<String>,
+        /// JSON value describing consent evidence.
+        #[arg(long)]
+        consent: Option<String>,
+        /// JSON value describing proof evidence.
+        #[arg(long)]
+        proof: Option<String>,
+        #[arg(long)]
+        created_at_micros: Option<u64>,
+        #[arg(long)]
+        expires_at_micros: Option<u64>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Sign a PACT record with an existing ZAP node key.
+    Sign {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        key: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Verify a signed PACT record offline.
+    Verify {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        now_micros: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Attach signed revocation evidence to a PACT record.
+    Revoke {
+        #[arg(long)]
+        input: PathBuf,
+        #[arg(long)]
+        revoked_by: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        key: PathBuf,
+        #[arg(long)]
+        revoked_at_micros: Option<u64>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Export or verify portable PACT bundles.
+    Bundle {
+        #[command(subcommand)]
+        command: PactBundleCommand,
+    },
+    /// Export the PACT JSON schema.
+    Schema {
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PactBundleCommand {
+    /// Export a bundle containing a signed PACT and optional revocation evidence.
+    Export {
+        #[arg(long)]
+        pact: PathBuf,
+        #[arg(long = "revocation")]
+        revocations: Vec<PathBuf>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Verify a PACT bundle offline.
+    Verify {
+        #[arg(long)]
+        bundle: PathBuf,
+        #[arg(long)]
+        now_micros: Option<u64>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum DiscoveryCommand {
     /// Send this node's signed service advertisement to one configured peer.
     Announce {
@@ -679,6 +801,12 @@ enum MemoryCommand {
         path: PathBuf,
         #[arg(long)]
         receipts: Option<PathBuf>,
+        /// Write a signed evidence manifest to this file.
+        #[arg(long)]
+        manifest_out: Option<PathBuf>,
+        /// Node key used to sign --manifest-out.
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
         /// Write the bundle to a file instead of stdout.
         #[arg(long)]
         out: Option<PathBuf>,
@@ -932,6 +1060,9 @@ enum FixturesCommand {
     Verify {
         #[arg(long)]
         fixtures: PathBuf,
+        /// Also verify that a local SDK path contains expected fixture conformance coverage.
+        #[arg(long)]
+        sdk: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -1336,6 +1467,8 @@ enum ReceiptsCommand {
         out: PathBuf,
         #[arg(long)]
         after_processed_at_micros: Option<u64>,
+        #[arg(long)]
+        until_processed_at_micros: Option<u64>,
         #[arg(long, default_value_t = DEFAULT_RECEIPT_REPLICATION_LIMIT)]
         limit: usize,
         #[arg(long)]
@@ -1587,6 +1720,7 @@ async fn async_main() -> Result<()> {
         Commands::Peer { command } => peer(command),
         Commands::Schema { command } => schema(command),
         Commands::Agent { command } => agent(command),
+        Commands::Pact { command } => pact(command),
         Commands::Policy { command } => policy(command),
         Commands::Pack { command } => pack(command),
         Commands::Fixtures { command } => fixtures(command),
@@ -1666,7 +1800,19 @@ async fn run(config_path: &Path, strict: bool) -> Result<()> {
         let report = config.validate()?;
         fail_on_config_warnings(config_path, &report)?;
     }
-    let node = ZapNode::from_config(config).await?;
+    let observability_http_bind = config
+        .observability
+        .http_bind
+        .as_deref()
+        .map(|bind| {
+            bind.parse::<SocketAddr>()
+                .with_context(|| format!("invalid observability.http_bind address {bind}"))
+        })
+        .transpose()?;
+    let node = Arc::new(ZapNode::from_config(config).await?);
+    let _observability_http = observability_http_bind
+        .map(|bind| node.clone().spawn_observability_http(bind))
+        .transpose()?;
     node.run_forever().await
 }
 
@@ -1694,6 +1840,13 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             report.registry_signature_required
         );
         println!("receipt_log_enabled={}", report.receipt_log_enabled);
+        println!(
+            "observability_http_bind={}",
+            report
+                .observability_http_bind
+                .map(|addr| addr.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
         println!("memory_enabled={}", report.memory_enabled);
         println!("routes={}", report.route_count);
         println!("capabilities={}", report.capability_count);
@@ -1844,6 +1997,14 @@ fn build_doctor_report(
         DoctorCheck::pass("receipt audit", "signed receipt log enabled")
     } else {
         DoctorCheck::warn("receipt audit", "receipts.path is not configured")
+    });
+    checks.push(if let Some(addr) = report.observability_http_bind {
+        DoctorCheck::pass("observability HTTP", format!("http_bind={addr}"))
+    } else {
+        DoctorCheck::warn(
+            "observability HTTP",
+            "observability.http_bind is not configured; /metrics and /healthz will not be served by zap run",
+        )
     });
     checks.push(if report.poa_validator_count > 0 {
         DoctorCheck::pass(
@@ -2798,6 +2959,7 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
             target,
             out,
             after_processed_at_micros,
+            until_processed_at_micros,
             limit,
             kind,
             subject,
@@ -2812,6 +2974,7 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
                 target,
                 out: &out,
                 after_processed_at_micros,
+                until_processed_at_micros,
                 limit,
                 kind,
                 subject,
@@ -2845,6 +3008,7 @@ struct ReceiptPullOptions<'a> {
     target: Uuid,
     out: &'a Path,
     after_processed_at_micros: Option<u64>,
+    until_processed_at_micros: Option<u64>,
     limit: usize,
     kind: Option<String>,
     subject: Option<String>,
@@ -2863,6 +3027,7 @@ struct ReceiptPullReport {
     truncated: bool,
     earliest_processed_at_micros: Option<u64>,
     latest_processed_at_micros: Option<u64>,
+    next_after_processed_at_micros: Option<u64>,
 }
 
 async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
@@ -2871,6 +3036,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         target,
         out,
         after_processed_at_micros,
+        until_processed_at_micros,
         limit,
         kind,
         subject,
@@ -2898,6 +3064,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
     let request = ReceiptReplicationRequest {
         schema_version: zap_ledger::RECEIPT_REPLICATION_SCHEMA_VERSION,
         after_processed_at_micros,
+        until_processed_at_micros,
         limit: Some(limit),
         kind,
         subject,
@@ -2982,6 +3149,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         truncated: response.truncated,
         earliest_processed_at_micros: earliest,
         latest_processed_at_micros: latest,
+        next_after_processed_at_micros: response.next_after_processed_at_micros,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -3001,6 +3169,13 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
             "latest_processed_at_micros={}",
             report
                 .latest_processed_at_micros
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+        println!(
+            "next_after_processed_at_micros={}",
+            report
+                .next_after_processed_at_micros
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "none".to_string())
         );
@@ -3228,6 +3403,7 @@ struct IncidentConfigSummary {
     registry_enabled: bool,
     registry_signature_required: bool,
     receipt_log_enabled: bool,
+    observability_http_bind: Option<String>,
     memory_enabled: bool,
     capability_cache_enabled: bool,
     message_policy_default_decision: &'static str,
@@ -3310,6 +3486,7 @@ fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
         registry_enabled: report.registry_enabled,
         registry_signature_required: report.registry_signature_required,
         receipt_log_enabled: report.receipt_log_enabled,
+        observability_http_bind: report.observability_http_bind.map(|addr| addr.to_string()),
         memory_enabled: report.memory_enabled,
         capability_cache_enabled: report.capability_cache_enabled,
         message_policy_default_decision: policy_decision_name(
@@ -4602,9 +4779,18 @@ fn memory(command: MemoryCommand) -> Result<()> {
         MemoryCommand::ExportEvidence {
             path,
             receipts,
+            manifest_out,
+            signing_key,
             out,
             force,
-        } => memory_export_evidence(&path, receipts.as_deref(), out.as_deref(), force),
+        } => memory_export_evidence(MemoryExportEvidenceOptions {
+            path: &path,
+            receipts: receipts.as_deref(),
+            manifest_out: manifest_out.as_deref(),
+            signing_key: signing_key.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
     }
 }
 
@@ -4756,6 +4942,42 @@ struct EvidenceBundle {
     limitations: Vec<String>,
 }
 
+struct MemoryExportEvidenceOptions<'a> {
+    path: &'a Path,
+    receipts: Option<&'a Path>,
+    manifest_out: Option<&'a Path>,
+    signing_key: Option<&'a Path>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+const EVIDENCE_MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-EVIDENCE-BUNDLE-MANIFEST-v1";
+
+#[derive(Debug, Serialize)]
+struct SignedEvidenceBundleManifest {
+    schema_version: u8,
+    payload: EvidenceBundleManifestPayload,
+    signer_node_id: Uuid,
+    signer_public_key: String,
+    signature: String,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceBundleManifestPayload {
+    schema_version: u8,
+    generated_at_micros: u64,
+    bundle_path: Option<String>,
+    bundle_hash: String,
+    bundle_valid: bool,
+    memory_path: String,
+    memory_entries: usize,
+    memory_records: usize,
+    memory_tombstones: usize,
+    receipts_path: Option<String>,
+    receipts_count: Option<usize>,
+    limitations: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct EvidenceMemorySummary {
     path: String,
@@ -4806,12 +5028,27 @@ struct EvidenceReceiptSummary {
     errors: Vec<String>,
 }
 
-fn memory_export_evidence(
-    path: &Path,
-    receipts: Option<&Path>,
-    out: Option<&Path>,
-    force: bool,
-) -> Result<()> {
+fn memory_export_evidence(options: MemoryExportEvidenceOptions<'_>) -> Result<()> {
+    let MemoryExportEvidenceOptions {
+        path,
+        receipts,
+        manifest_out,
+        signing_key,
+        out,
+        force,
+    } = options;
+    match (manifest_out, signing_key) {
+        (Some(_), Some(_)) => {}
+        (Some(_), None) => bail!("--manifest-out requires --signing-key"),
+        (None, Some(_)) => bail!("--signing-key requires --manifest-out"),
+        (None, None) => {}
+    }
+    if let (Some(out), Some(manifest_out)) = (out, manifest_out)
+        && out == manifest_out
+    {
+        bail!("--out and --manifest-out must be different paths");
+    }
+
     let memory = summarize_memory_evidence(path);
     let receipts = receipts.map(summarize_receipt_evidence);
     let valid = memory.verified
@@ -4830,7 +5067,53 @@ fn memory_export_evidence(
             "re-verify the referenced memory JSONL with `zap memory verify` and receipts with `zap receipts verify`".to_string(),
         ],
     };
-    write_json_output(&bundle, out, force)
+    let bundle_output = format!("{}\n", serde_json::to_string_pretty(&bundle)?);
+    if let (Some(manifest_out), Some(signing_key)) = (manifest_out, signing_key) {
+        let signing_key = load_keypair(signing_key)?;
+        let manifest = sign_evidence_bundle_manifest(&bundle, out, &bundle_output, &signing_key)?;
+        write_json_output(&manifest, Some(manifest_out), force)?;
+    }
+    match out {
+        Some(path) => write_text_file(path, &bundle_output, force),
+        None => {
+            print!("{bundle_output}");
+            Ok(())
+        }
+    }
+}
+
+fn sign_evidence_bundle_manifest(
+    bundle: &EvidenceBundle,
+    bundle_path: Option<&Path>,
+    bundle_output: &str,
+    signer: &Keypair,
+) -> Result<SignedEvidenceBundleManifest> {
+    let payload = EvidenceBundleManifestPayload {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        bundle_path: bundle_path.map(|path| path.display().to_string()),
+        bundle_hash: hash_bytes_for_report(bundle_output.as_bytes()),
+        bundle_valid: bundle.valid,
+        memory_path: bundle.memory.path.clone(),
+        memory_entries: bundle.memory.entries,
+        memory_records: bundle.memory.records,
+        memory_tombstones: bundle.memory.tombstones,
+        receipts_path: bundle
+            .receipts
+            .as_ref()
+            .map(|receipts| receipts.path.clone()),
+        receipts_count: bundle.receipts.as_ref().map(|receipts| receipts.receipts),
+        limitations: bundle.limitations.clone(),
+    };
+    let payload_bytes = serde_json::to_vec(&payload)?;
+    let signature = signer.sign_domain_message(EVIDENCE_MANIFEST_SIGNATURE_DOMAIN, &payload_bytes);
+    Ok(SignedEvidenceBundleManifest {
+        schema_version: 1,
+        payload,
+        signer_node_id: signer.node_id(),
+        signer_public_key: STANDARD_NO_PAD.encode(signer.verifying_key().to_bytes()),
+        signature: STANDARD_NO_PAD.encode(signature),
+    })
 }
 
 fn summarize_memory_evidence(path: &Path) -> EvidenceMemorySummary {
@@ -6292,6 +6575,204 @@ fn agent_schema(out: Option<&Path>, force: bool) -> Result<()> {
     }
 }
 
+fn pact(command: PactCommand) -> Result<()> {
+    match command {
+        PactCommand::Create {
+            pact_id,
+            actor,
+            target,
+            intent,
+            object,
+            terms,
+            consent,
+            proof,
+            created_at_micros,
+            expires_at_micros,
+            out,
+            force,
+        } => pact_create(PactCreateOptions {
+            pact_id,
+            actor,
+            target,
+            intent,
+            object: object.as_deref(),
+            terms: terms.as_deref(),
+            consent: consent.as_deref(),
+            proof: proof.as_deref(),
+            created_at_micros,
+            expires_at_micros,
+            out: out.as_deref(),
+            force,
+        }),
+        PactCommand::Sign {
+            input,
+            key,
+            out,
+            force,
+        } => pact_sign(&input, &key, out.as_deref(), force),
+        PactCommand::Verify {
+            input,
+            now_micros,
+            json,
+        } => pact_verify(&input, now_micros, json),
+        PactCommand::Revoke {
+            input,
+            revoked_by,
+            reason,
+            key,
+            revoked_at_micros,
+            out,
+            force,
+        } => pact_revoke(PactRevokeOptions {
+            input: &input,
+            revoked_by: &revoked_by,
+            reason: &reason,
+            key: &key,
+            revoked_at_micros,
+            out: out.as_deref(),
+            force,
+        }),
+        PactCommand::Bundle { command } => pact_bundle(command),
+        PactCommand::Schema { out, force } => {
+            write_json_output(&pact_json_schema(), out.as_deref(), force)
+        }
+    }
+}
+
+struct PactCreateOptions<'a> {
+    pact_id: Option<Uuid>,
+    actor: String,
+    target: String,
+    intent: String,
+    object: Option<&'a str>,
+    terms: Option<&'a str>,
+    consent: Option<&'a str>,
+    proof: Option<&'a str>,
+    created_at_micros: Option<u64>,
+    expires_at_micros: Option<u64>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+fn pact_create(options: PactCreateOptions<'_>) -> Result<()> {
+    let mut pact = ZapPact::new(
+        options.actor,
+        options.target,
+        options.intent,
+        options.created_at_micros.unwrap_or(now_micros()?),
+    );
+    if let Some(pact_id) = options.pact_id {
+        pact.pact_id = pact_id;
+    }
+    pact.object = parse_optional_json_value("object", options.object)?;
+    pact.terms = parse_optional_json_value("terms", options.terms)?;
+    pact.consent = parse_optional_json_value("consent", options.consent)?;
+    pact.proof = parse_optional_json_value("proof", options.proof)?;
+    pact.expires_at_micros = options.expires_at_micros;
+    pact.validate()?;
+    write_json_output(&pact, options.out, options.force)
+}
+
+fn pact_sign(input: &Path, key: &Path, out: Option<&Path>, force: bool) -> Result<()> {
+    let mut pact = load_pact(input)?;
+    pact.sign(&load_keypair(key)?)?;
+    write_json_output(&pact, out, force)
+}
+
+fn pact_verify(input: &Path, now_micros: Option<u64>, json: bool) -> Result<()> {
+    let pact = load_pact(input)?;
+    let verification = pact.verify(now_micros)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&verification)?);
+    } else {
+        println!("pact_id={}", verification.pact_id);
+        println!("valid={}", verification.valid);
+        println!("status={:?}", verification.status);
+        println!("hash={}", verification.hash);
+    }
+    Ok(())
+}
+
+struct PactRevokeOptions<'a> {
+    input: &'a Path,
+    revoked_by: &'a str,
+    reason: &'a str,
+    key: &'a Path,
+    revoked_at_micros: Option<u64>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+fn pact_revoke(options: PactRevokeOptions<'_>) -> Result<()> {
+    let mut pact = load_pact(options.input)?;
+    let mut revocation = ZapPactRevocation::new(
+        pact.pact_id,
+        options.revoked_by,
+        options.reason,
+        options.revoked_at_micros.unwrap_or(now_micros()?),
+    );
+    revocation.sign(&load_keypair(options.key)?)?;
+    pact.revocation = Some(revocation);
+    pact.status = zap_pact::ZapPactStatus::Revoked;
+    write_json_output(&pact, options.out, options.force)
+}
+
+fn pact_bundle(command: PactBundleCommand) -> Result<()> {
+    match command {
+        PactBundleCommand::Export {
+            pact,
+            revocations,
+            out,
+            force,
+        } => pact_bundle_export(&pact, &revocations, out.as_deref(), force),
+        PactBundleCommand::Verify {
+            bundle,
+            now_micros,
+            json,
+        } => pact_bundle_verify(&bundle, now_micros, json),
+    }
+}
+
+fn pact_bundle_export(
+    pact_path: &Path,
+    revocation_paths: &[PathBuf],
+    out: Option<&Path>,
+    force: bool,
+) -> Result<()> {
+    let pact = load_pact(pact_path)?;
+    let mut bundle = ZapPactBundle::new(pact);
+    for path in revocation_paths {
+        bundle.revocations.push(load_json_file(path)?);
+    }
+    bundle.validate()?;
+    write_json_output(&bundle, out, force)
+}
+
+fn pact_bundle_verify(input: &Path, now_micros: Option<u64>, json: bool) -> Result<()> {
+    let bundle: ZapPactBundle = load_json_file(input)?;
+    let verification = bundle.verify(now_micros)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&verification)?);
+    } else {
+        println!("pact_id={}", verification.pact_id);
+        println!("valid={}", verification.valid);
+        println!("status={:?}", verification.status);
+        println!("hash={}", verification.hash);
+    }
+    Ok(())
+}
+
+fn load_pact(path: &Path) -> Result<ZapPact> {
+    let pact: ZapPact = load_json_file(path)?;
+    pact.validate()?;
+    Ok(pact)
+}
+
+fn load_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    serde_json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))
+}
+
 fn schema(command: SchemaCommand) -> Result<()> {
     match command {
         SchemaCommand::Validate {
@@ -6311,6 +6792,7 @@ struct SchemaExport {
     protocol: SchemaProtocolExport,
     envelope: SchemaEnvelopeExport,
     agent: SchemaAgentExport,
+    pact: SchemaPactExport,
     controls: SchemaControlsExport,
     fixtures: Vec<SchemaFixtureExport>,
     limitations: Vec<String>,
@@ -6337,6 +6819,21 @@ struct SchemaAgentExport {
     protocol_schema_version: u8,
     subjects: Vec<&'static str>,
     json_schema: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaPactExport {
+    content_type: &'static str,
+    protocol_schema_version: u8,
+    subjects: Vec<SchemaPactSubjectExport>,
+    json_schema: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+struct SchemaPactSubjectExport {
+    subject: &'static str,
+    kind: &'static str,
+    purpose: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -6389,16 +6886,43 @@ fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
             content_type: AGENT_CONTENT_TYPE,
             protocol_schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
             subjects: vec![
-                "zap.agent.session",
-                "zap.agent.intent",
-                "zap.agent.status",
-                "zap.agent.result",
-                "zap.agent.delegation.request",
-                "zap.agent.delegation.response",
-                "zap.agent.capability.negotiation.request",
-                "zap.agent.capability.negotiation.response",
+                AGENT_SESSION_SUBJECT,
+                AGENT_INTENT_SUBJECT,
+                AGENT_STATUS_SUBJECT,
+                AGENT_RESULT_SUBJECT,
+                AGENT_DELEGATION_REQUEST_SUBJECT,
+                AGENT_DELEGATION_RESPONSE_SUBJECT,
+                AGENT_CAPABILITY_NEGOTIATION_REQUEST_SUBJECT,
+                AGENT_CAPABILITY_NEGOTIATION_RESPONSE_SUBJECT,
             ],
             json_schema: agent_message_json_schema(),
+        },
+        pact: SchemaPactExport {
+            content_type: PACT_CONTENT_TYPE,
+            protocol_schema_version: PACT_SCHEMA_VERSION,
+            subjects: vec![
+                SchemaPactSubjectExport {
+                    subject: PACT_RECORD_SUBJECT,
+                    kind: "action",
+                    purpose: "portable signed action record",
+                },
+                SchemaPactSubjectExport {
+                    subject: PACT_VERIFY_SUBJECT,
+                    kind: "control",
+                    purpose: "offline verification request or result exchange",
+                },
+                SchemaPactSubjectExport {
+                    subject: PACT_REVOKE_SUBJECT,
+                    kind: "control",
+                    purpose: "signed revocation evidence exchange",
+                },
+                SchemaPactSubjectExport {
+                    subject: PACT_BUNDLE_SUBJECT,
+                    kind: "control",
+                    purpose: "portable PACT bundle exchange",
+                },
+            ],
+            json_schema: pact_json_schema(),
         },
         controls: SchemaControlsExport {
             capability: vec![
@@ -6493,6 +7017,34 @@ fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
                 purpose: "agent intent message contract",
             },
             SchemaFixtureExport {
+                path: "fixtures/agent-session-message-v1.json",
+                purpose: "agent session message contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-delegation-request-message-v1.json",
+                purpose: "agent delegation request contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-delegation-response-message-v1.json",
+                purpose: "agent delegation response contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-capability-negotiation-request-message-v1.json",
+                purpose: "agent capability negotiation request contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-capability-negotiation-response-message-v1.json",
+                purpose: "agent capability negotiation response contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/pact-record-v1.json",
+                purpose: "signed PACT record contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/pact-bundle-v1.json",
+                purpose: "signed PACT bundle contract",
+            },
+            SchemaFixtureExport {
                 path: "fixtures/control-subjects-v1.json",
                 purpose: "control subject registry",
             },
@@ -6507,6 +7059,10 @@ fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
             SchemaFixtureExport {
                 path: "fixtures/protocol/receipt-sample-v1.json",
                 purpose: "signed action receipt sample",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/protocol/signed-pact-record-frame-v1.json",
+                purpose: "signed PACT record inside a ZENV action frame",
             },
         ],
         limitations: vec![
@@ -7067,13 +7623,18 @@ fn validate_pack_refs(
 
 fn fixtures(command: FixturesCommand) -> Result<()> {
     match command {
-        FixturesCommand::Verify { fixtures, json } => fixtures_verify(&fixtures, json),
+        FixturesCommand::Verify {
+            fixtures,
+            sdk,
+            json,
+        } => fixtures_verify(&fixtures, sdk.as_deref(), json),
     }
 }
 
 #[derive(Debug, Serialize)]
 struct FixturesVerificationReport {
     fixtures: Vec<FixtureVerification>,
+    sdk: Option<SdkFixtureVerification>,
     valid: bool,
     errors: Vec<String>,
 }
@@ -7086,8 +7647,22 @@ struct FixtureVerification {
     errors: Vec<String>,
 }
 
-fn fixtures_verify(fixtures_dir: &Path, json: bool) -> Result<()> {
-    let report = verify_fixtures(fixtures_dir);
+#[derive(Debug, Serialize)]
+struct SdkFixtureVerification {
+    path: String,
+    kind: String,
+    valid: bool,
+    checks: Vec<String>,
+    errors: Vec<String>,
+}
+
+fn fixtures_verify(fixtures_dir: &Path, sdk_dir: Option<&Path>, json: bool) -> Result<()> {
+    let mut report = verify_fixtures(fixtures_dir);
+    if let Some(sdk_dir) = sdk_dir {
+        let sdk = verify_sdk_fixture_coverage(sdk_dir);
+        report.valid = report.valid && sdk.valid;
+        report.sdk = Some(sdk);
+    }
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -7106,6 +7681,15 @@ fn fixtures_verify(fixtures_dir: &Path, json: bool) -> Result<()> {
         for error in &report.errors {
             println!("error={error}");
         }
+        if let Some(sdk) = &report.sdk {
+            println!("sdk={} kind={} valid={}", sdk.path, sdk.kind, sdk.valid);
+            for check in &sdk.checks {
+                println!("sdk_check={check}");
+            }
+            for error in &sdk.errors {
+                println!("sdk_error={error}");
+            }
+        }
     }
 
     if report.valid {
@@ -7118,6 +7702,7 @@ fn fixtures_verify(fixtures_dir: &Path, json: bool) -> Result<()> {
 fn verify_fixtures(fixtures_dir: &Path) -> FixturesVerificationReport {
     let mut report = FixturesVerificationReport {
         fixtures: Vec::new(),
+        sdk: None,
         valid: false,
         errors: Vec::new(),
     };
@@ -7130,34 +7715,7 @@ fn verify_fixtures(fixtures_dir: &Path) -> FixturesVerificationReport {
         return report;
     }
 
-    let mut paths = match fs::read_dir(fixtures_dir) {
-        Ok(entries) => entries
-            .filter_map(|entry| match entry {
-                Ok(entry) => {
-                    let path = entry.path();
-                    if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
-                        Some(path)
-                    } else {
-                        None
-                    }
-                }
-                Err(error) => {
-                    report.errors.push(format!(
-                        "failed to read fixture directory entry in {}: {error}",
-                        fixtures_dir.display()
-                    ));
-                    None
-                }
-            })
-            .collect::<Vec<_>>(),
-        Err(error) => {
-            report.errors.push(format!(
-                "failed to read fixtures directory {}: {error}",
-                fixtures_dir.display()
-            ));
-            return report;
-        }
-    };
+    let mut paths = collect_fixture_json_paths(fixtures_dir, &mut report.errors);
     paths.sort();
 
     if paths.is_empty() {
@@ -7175,12 +7733,50 @@ fn verify_fixtures(fixtures_dir: &Path) -> FixturesVerificationReport {
     report
 }
 
+fn collect_fixture_json_paths(fixtures_dir: &Path, errors: &mut Vec<String>) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    collect_fixture_json_paths_inner(fixtures_dir, errors, &mut paths);
+    paths
+}
+
+fn collect_fixture_json_paths_inner(
+    dir: &Path,
+    errors: &mut Vec<String>,
+    paths: &mut Vec<PathBuf>,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            errors.push(format!(
+                "failed to read fixtures directory {}: {error}",
+                dir.display()
+            ));
+            return;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                errors.push(format!(
+                    "failed to read fixture directory entry in {}: {error}",
+                    dir.display()
+                ));
+                continue;
+            }
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            collect_fixture_json_paths_inner(&path, errors, paths);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+            paths.push(path);
+        }
+    }
+}
+
 fn verify_fixture_file(path: &Path) -> FixtureVerification {
-    let name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_string();
+    let name = fixture_display_name(path);
     let mut fixture = FixtureVerification {
         path: path.display().to_string(),
         name,
@@ -7219,10 +7815,35 @@ fn verify_fixture_file(path: &Path) -> FixtureVerification {
     validate_non_empty_json_string(&value, "description", &mut fixture.errors);
 
     match fixture.name.as_str() {
-        "agent-intent-message-v1.json" => verify_agent_intent_fixture(&value, &mut fixture.errors),
+        name if name.starts_with("agent-") && name.ends_with("-message-v1.json") => {
+            verify_agent_message_fixture(&value, &mut fixture.errors)
+        }
+        "pact-record-v1.json" => verify_pact_record_fixture(&value, &mut fixture.errors),
+        "pact-bundle-v1.json" => verify_pact_bundle_fixture(&value, &mut fixture.errors),
         "control-subjects-v1.json" => verify_control_subjects_fixture(&value, &mut fixture.errors),
         "zenv-control-registry-bundle-manifest-request.json" => {
             verify_registry_bundle_manifest_request_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/zenv-unsigned-control-frame-v1.json" => {
+            verify_unsigned_control_frame_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/receipt-sample-v1.json" => {
+            verify_receipt_sample_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/signed-control-frame-v1.json" => {
+            verify_signed_control_frame_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/poa-control-frame-v1.json" => {
+            verify_poa_control_frame_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/capability-response-v1.json" => {
+            verify_capability_response_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/encrypted-datagram-v1.json" => {
+            verify_encrypted_datagram_fixture(&value, &mut fixture.errors)
+        }
+        "protocol/signed-pact-record-frame-v1.json" => {
+            verify_signed_pact_record_frame_fixture(&value, &mut fixture.errors)
         }
         _ => fixture
             .errors
@@ -7233,9 +7854,27 @@ fn verify_fixture_file(path: &Path) -> FixtureVerification {
     fixture
 }
 
-fn verify_agent_intent_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
-    validate_json_string_equals(value, "subject", "zap.agent.intent", errors);
+fn fixture_display_name(path: &Path) -> String {
+    let components = path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    if components.len() >= 2 && components[components.len() - 2] == "protocol" {
+        format!("protocol/{}", components[components.len() - 1])
+    } else {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string()
+    }
+}
+
+fn verify_agent_message_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
     validate_json_string_equals(value, "content_type", AGENT_CONTENT_TYPE, errors);
+    let Some(subject) = value.get("subject").and_then(|value| value.as_str()) else {
+        errors.push("subject must be a string".to_string());
+        return;
+    };
     let Some(body) = value.get("body_json") else {
         errors.push("body_json must be present".to_string());
         return;
@@ -7244,9 +7883,89 @@ fn verify_agent_intent_fixture(value: &serde_json::Value, errors: &mut Vec<Strin
         .ok()
         .and_then(|bytes| AgentMessage::from_json_slice(&bytes).ok())
     {
-        Some(AgentMessage::Intent(_)) => {}
-        Some(_) => errors.push("body_json must be an agent intent message".to_string()),
+        Some(message) if message.subject() == subject => {}
+        Some(message) => errors.push(format!(
+            "subject {subject} does not match agent message subject {}",
+            message.subject()
+        )),
         None => errors.push("body_json must parse as a zap-agent message".to_string()),
+    }
+}
+
+fn verify_pact_record_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(value, "subject", PACT_RECORD_SUBJECT, errors);
+    validate_json_string_equals(value, "content_type", PACT_CONTENT_TYPE, errors);
+    let Some(body) = value.get("body_json") else {
+        errors.push("body_json must be present".to_string());
+        return;
+    };
+    verify_pact_record_body(body, errors);
+}
+
+fn verify_pact_bundle_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(value, "subject", PACT_BUNDLE_SUBJECT, errors);
+    validate_json_string_equals(value, "content_type", PACT_CONTENT_TYPE, errors);
+    let Some(body) = value.get("body_json") else {
+        errors.push("body_json must be present".to_string());
+        return;
+    };
+    match serde_json::from_value::<ZapPactBundle>(body.clone()) {
+        Ok(bundle) => {
+            if let Err(error) = bundle.verify(None) {
+                errors.push(format!(
+                    "body_json must verify as a zap-pact bundle: {error}"
+                ));
+            }
+        }
+        Err(error) => errors.push(format!(
+            "body_json must parse as a zap-pact bundle: {error}"
+        )),
+    }
+}
+
+fn verify_signed_pact_record_frame_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    let Some(envelope) = value.get("envelope") else {
+        errors.push("envelope must be present".to_string());
+        return;
+    };
+    verify_action_envelope(envelope, errors);
+    validate_json_string_equals(envelope, "subject", PACT_RECORD_SUBJECT, errors);
+    validate_json_string_equals(envelope, "content_type", PACT_CONTENT_TYPE, errors);
+    let Some(body) = envelope.get("body_json") else {
+        errors.push("envelope.body_json must be present".to_string());
+        return;
+    };
+    verify_pact_record_body(body, errors);
+
+    let Some(header) = value.get("wire_header") else {
+        errors.push("wire_header must be present".to_string());
+        return;
+    };
+    validate_json_string_equals(header, "magic", "ZAP_", errors);
+    validate_json_u64_equals(header, "version", 1, errors);
+    validate_non_empty_json_string(header, "source_node", errors);
+    validate_non_empty_json_string(header, "target_node", errors);
+
+    let Some(security) = value.get("security") else {
+        errors.push("security must be present".to_string());
+        return;
+    };
+    validate_json_bool_equals(security, "signed", true, errors);
+    validate_non_empty_json_string(security, "auth_trailer.signature_base64", errors);
+}
+
+fn verify_pact_record_body(body: &serde_json::Value, errors: &mut Vec<String>) {
+    match serde_json::from_value::<ZapPact>(body.clone()) {
+        Ok(pact) => {
+            if let Err(error) = pact.verify(None) {
+                errors.push(format!(
+                    "body_json must verify as a zap-pact record: {error}"
+                ));
+            }
+        }
+        Err(error) => errors.push(format!(
+            "body_json must parse as a zap-pact record: {error}"
+        )),
     }
 }
 
@@ -7342,6 +8061,123 @@ fn verify_registry_bundle_manifest_request_fixture(
     }
 }
 
+fn verify_unsigned_control_frame_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    verify_protocol_control_fixture(value, errors);
+    let Some(security) = value.get("security") else {
+        errors.push("security must be present".to_string());
+        return;
+    };
+    validate_json_bool_equals(security, "signed", false, errors);
+    validate_json_bool_equals(security, "encrypted", false, errors);
+    validate_json_string_equals(security, "signature_hint_hex", "0000000000000000", errors);
+}
+
+fn verify_signed_control_frame_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    verify_protocol_control_fixture(value, errors);
+    let Some(security) = value.get("security") else {
+        errors.push("security must be present".to_string());
+        return;
+    };
+    validate_json_bool_equals(security, "signed", true, errors);
+    validate_json_bool_equals(security, "encrypted", false, errors);
+    validate_non_empty_json_string(security, "signature_hint_hex", errors);
+    validate_non_empty_json_string(security, "auth_trailer.algorithm", errors);
+    validate_non_empty_json_string(security, "auth_trailer.public_key_base64", errors);
+    validate_non_empty_json_string(security, "auth_trailer.signature_base64", errors);
+}
+
+fn verify_poa_control_frame_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    verify_signed_control_frame_fixture(value, errors);
+    let Some(poa) = value
+        .get("security")
+        .and_then(|security| security.get("poa_trailer"))
+    else {
+        errors.push("security.poa_trailer must be present".to_string());
+        return;
+    };
+    validate_json_u64_equals(poa, "threshold", 1, errors);
+    validate_non_empty_json_string(poa, "frame_digest_hex", errors);
+    let Some(attestations) = poa.get("attestations").and_then(|value| value.as_array()) else {
+        errors.push("security.poa_trailer.attestations must be an array".to_string());
+        return;
+    };
+    if attestations.is_empty() {
+        errors.push("security.poa_trailer.attestations must not be empty".to_string());
+    }
+}
+
+fn verify_capability_response_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(value, "subject", CAPABILITY_RESPONSE_SUBJECT, errors);
+    validate_json_string_equals(value, "content_type", CAPABILITY_CONTENT_TYPE, errors);
+    let Some(body) = value.get("body_json") else {
+        errors.push("body_json must be present".to_string());
+        return;
+    };
+    validate_json_u64_equals(body, "schema_version", 1, errors);
+    validate_non_empty_json_string(body, "node_id", errors);
+    let Some(capabilities) = body.get("capabilities").and_then(|value| value.as_array()) else {
+        errors.push("body_json.capabilities must be an array".to_string());
+        return;
+    };
+    if capabilities.is_empty() {
+        errors.push("body_json.capabilities must not be empty".to_string());
+    }
+}
+
+fn verify_encrypted_datagram_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_u64_equals(value, "datagram_version", 1, errors);
+    validate_json_string_equals(value, "cipher", "ChaCha20-Poly1305", errors);
+    validate_non_empty_json_string(value, "source_node", errors);
+    validate_non_empty_json_string(value, "target_node", errors);
+    validate_non_empty_json_string(value, "nonce_hex", errors);
+    validate_non_empty_json_string(value, "ciphertext_hex", errors);
+    validate_non_empty_json_string(value, "aad_hex", errors);
+}
+
+fn verify_receipt_sample_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(
+        value,
+        "subject",
+        RECEIPT_REPLICATION_RESPONSE_SUBJECT,
+        errors,
+    );
+    validate_json_string_equals(
+        value,
+        "content_type",
+        RECEIPT_REPLICATION_CONTENT_TYPE,
+        errors,
+    );
+    let Some(body) = value.get("body_json") else {
+        errors.push("body_json must be present".to_string());
+        return;
+    };
+    validate_json_u64_equals(
+        body,
+        "schema_version",
+        RECEIPT_SCHEMA_VERSION as u64,
+        errors,
+    );
+    let Some(receipts) = body.get("receipts").and_then(|value| value.as_array()) else {
+        errors.push("body_json.receipts must be an array".to_string());
+        return;
+    };
+    if receipts.is_empty() {
+        errors.push("body_json.receipts must not be empty".to_string());
+    }
+}
+
+fn verify_protocol_control_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
+    verify_control_envelope(value.get("envelope"), errors);
+    let Some(header) = value.get("wire_header") else {
+        errors.push("wire_header must be present".to_string());
+        return;
+    };
+    validate_json_string_equals(header, "magic", "ZAP_", errors);
+    validate_json_u64_equals(header, "version", 1, errors);
+    validate_non_empty_json_string(header, "source_node", errors);
+    validate_non_empty_json_string(header, "target_node", errors);
+}
+
 fn verify_control_envelope(envelope: Option<&serde_json::Value>, errors: &mut Vec<String>) {
     let Some(envelope) = envelope else {
         errors.push("envelope must be present".to_string());
@@ -7351,6 +8187,13 @@ fn verify_control_envelope(envelope: Option<&serde_json::Value>, errors: &mut Ve
     validate_json_u64_equals(envelope, "version", 1, errors);
     validate_json_string_equals(envelope, "kind_name", "control", errors);
     validate_json_u64_equals(envelope, "kind_value", 8, errors);
+}
+
+fn verify_action_envelope(envelope: &serde_json::Value, errors: &mut Vec<String>) {
+    validate_json_string_equals(envelope, "magic", "ZENV", errors);
+    validate_json_u64_equals(envelope, "version", 1, errors);
+    validate_json_string_equals(envelope, "kind_name", "action", errors);
+    validate_json_u64_equals(envelope, "kind_value", 7, errors);
 }
 
 fn validate_non_empty_json_string(
@@ -7377,6 +8220,19 @@ fn validate_json_string_equals(
     }
 }
 
+fn validate_json_bool_equals(
+    value: &serde_json::Value,
+    field: &str,
+    expected: bool,
+    errors: &mut Vec<String>,
+) {
+    match get_dotted_json_field(value, field).and_then(|value| value.as_bool()) {
+        Some(actual) if actual == expected => {}
+        Some(actual) => errors.push(format!("{field} must be {expected}, got {actual}")),
+        None => errors.push(format!("{field} must be {expected}")),
+    }
+}
+
 fn validate_json_u64_equals(
     value: &serde_json::Value,
     field: &str,
@@ -7397,6 +8253,156 @@ fn get_dotted_json_field<'a>(
     field
         .split('.')
         .try_fold(value, |current, part| current.get(part))
+}
+
+fn verify_sdk_fixture_coverage(sdk_dir: &Path) -> SdkFixtureVerification {
+    let mut sdk = SdkFixtureVerification {
+        path: sdk_dir.display().to_string(),
+        kind: "unknown".to_string(),
+        valid: false,
+        checks: Vec::new(),
+        errors: Vec::new(),
+    };
+
+    if !sdk_dir.is_dir() {
+        sdk.errors
+            .push(format!("SDK path does not exist: {}", sdk_dir.display()));
+        return sdk;
+    }
+
+    if sdk_dir.join("package.json").exists() && sdk_dir.join("test").is_dir() {
+        sdk.kind = "typescript".to_string();
+        verify_sdk_file_contains(
+            sdk_dir,
+            "test/fixtures.test.ts",
+            &[
+                "zenv-control-registry-bundle-manifest-request.json",
+                "control-subjects-v1.json",
+                "agent-intent-message-v1.json",
+                "pact-record-v1.json",
+                "protocol/zenv-unsigned-control-frame-v1.json",
+                "protocol/receipt-sample-v1.json",
+            ],
+            &mut sdk,
+        );
+        verify_sdk_manifest_script(sdk_dir, "package.json", "test", &mut sdk);
+        verify_sdk_manifest_script(sdk_dir, "package.json", "typecheck", &mut sdk);
+    } else if sdk_dir.join("pyproject.toml").exists() && sdk_dir.join("tests").is_dir() {
+        sdk.kind = "python".to_string();
+        verify_sdk_file_contains(
+            sdk_dir,
+            "tests/test_protocol.py",
+            &[
+                "zenv-control-registry-bundle-manifest-request.json",
+                "agent-intent-message-v1.json",
+                "pact-record-v1.json",
+                "zenv-unsigned-control-frame-v1.json",
+                "receipt-sample-v1.json",
+            ],
+            &mut sdk,
+        );
+        verify_sdk_file_contains(sdk_dir, "pyproject.toml", &["zap-sdk"], &mut sdk);
+    } else if sdk_dir.join("go.mod").exists() {
+        sdk.kind = "go".to_string();
+        verify_sdk_file_contains(
+            sdk_dir,
+            "protocol_test.go",
+            &[
+                "zenv-control-registry-bundle-manifest-request.json",
+                "control-subjects-v1.json",
+                "pact-record-v1.json",
+                "zenv-unsigned-control-frame-v1.json",
+                "receipt-sample-v1.json",
+            ],
+            &mut sdk,
+        );
+        verify_sdk_file_contains(sdk_dir, "go.mod", &["module "], &mut sdk);
+    } else if sdk_dir.join("Cargo.toml").exists() && sdk_dir.join("src").is_dir() {
+        sdk.kind = "rust".to_string();
+        verify_sdk_file_contains(
+            sdk_dir,
+            "src/lib.rs",
+            &[
+                "ControlFrame",
+                "pact-record-v1.json",
+                "registry_bundle_manifest_request_frame",
+                "artifact_hash_uses_canonical_zap_store_blake3",
+            ],
+            &mut sdk,
+        );
+        verify_sdk_file_contains(
+            sdk_dir,
+            "Cargo.toml",
+            &["zap-core", "zap-envelope"],
+            &mut sdk,
+        );
+    } else {
+        sdk.errors.push(
+            "could not detect SDK kind; expected TypeScript, Python, Go, or Rust SDK layout"
+                .to_string(),
+        );
+    }
+
+    sdk.valid = sdk.errors.is_empty();
+    sdk
+}
+
+fn verify_sdk_manifest_script(
+    sdk_dir: &Path,
+    relative: &str,
+    script: &str,
+    sdk: &mut SdkFixtureVerification,
+) {
+    let path = sdk_dir.join(relative);
+    let Ok(input) = fs::read_to_string(&path) else {
+        sdk.errors
+            .push(format!("missing required SDK file {}", path.display()));
+        return;
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&input) else {
+        sdk.errors
+            .push(format!("invalid JSON in SDK file {}", path.display()));
+        return;
+    };
+    if json
+        .get("scripts")
+        .and_then(|scripts| scripts.get(script))
+        .and_then(|value| value.as_str())
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        sdk.checks
+            .push(format!("{relative} defines script `{script}`"));
+    } else {
+        sdk.errors
+            .push(format!("{relative} must define script `{script}`"));
+    }
+}
+
+fn verify_sdk_file_contains(
+    sdk_dir: &Path,
+    relative: &str,
+    required: &[&str],
+    sdk: &mut SdkFixtureVerification,
+) {
+    let path = sdk_dir.join(relative);
+    let input = match fs::read_to_string(&path) {
+        Ok(input) => input,
+        Err(error) => {
+            sdk.errors.push(format!(
+                "failed to read SDK file {}: {error}",
+                path.display()
+            ));
+            return;
+        }
+    };
+
+    for needle in required {
+        if input.contains(needle) {
+            sdk.checks.push(format!("{relative} covers `{needle}`"));
+        } else {
+            sdk.errors.push(format!("{relative} must cover `{needle}`"));
+        }
+    }
 }
 
 fn driver_manifest(command: DriverManifestCommand) -> Result<()> {

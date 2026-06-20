@@ -108,6 +108,9 @@ include:
 | `zap.capability.response` | `application/zap-capability+json` | Return a signed peer capability advertisement |
 | `zap.poa.validator_set.request` | `application/zap-poa-validator-set+json` | Request a signed versioned PoA validator set from a peer |
 | `zap.poa.validator_set.response` | `application/zap-poa-validator-set+json` | Return a signed PoA validator set or an unavailable reason |
+| `zap.pact.verify` | `application/zap-pact+json` | Exchange offline PACT verification requests or results |
+| `zap.pact.revoke` | `application/zap-pact+json` | Exchange signed PACT revocation evidence |
+| `zap.pact.bundle` | `application/zap-pact+json` | Exchange portable PACT bundles for offline verification |
 | `zap.registry.index.request` | `application/zap-registry-index+json` | Request a peer's ZapStore registry index |
 | `zap.registry.index.response` | `application/zap-registry-index+json` | Return a registry index or an unavailable reason |
 | `zap.registry.bundle.manifest.request` | `application/zap-registry-bundle-manifest+json` | Request a peer's ZapStore bundle manifest |
@@ -133,10 +136,32 @@ artifact entries. Responses are signed as normal frames and carry a
 checksums. Receivers should treat the manifest as discovery metadata, then
 verify downloaded bundle files with `registry bundle verify` before import.
 
-Receipt replication requests can filter by `after_processed_at_micros`, `kind`,
-`subject`, `source_node`, and `target_node`, and include a bounded `limit`.
-Responses contain signed receipt objects. Receivers must verify the response
-frame signature and each nested receipt signature before archiving or merging.
+Receipt replication requests can filter by `after_processed_at_micros`,
+`until_processed_at_micros`, `kind`, `subject`, `source_node`, and
+`target_node`, and include a bounded `limit`. Responses contain signed receipt
+objects, a `truncated` flag, and optionally `next_after_processed_at_micros`
+for cursor-style bounded pulls. Receivers must verify the response frame
+signature and each nested receipt signature before archiving or merging.
+
+## PACT Profile
+
+PACT is a ZAP-native profile for portable signed action records. A
+`zap.pact.record` message uses `kind = action`, subject `zap.pact.record`, and
+content type `application/zap-pact+json`. Verification, revocation, and bundle
+exchange use `kind = control` with `zap.pact.verify`, `zap.pact.revoke`, and
+`zap.pact.bundle`.
+
+The canonical PACT signature payload contains only these ordered fields:
+`pact_id`, `actor`, `target`, `intent`, `object`, `terms`, `consent`, `proof`,
+`created_at_micros`, and `expires_at_micros`. Mutable audit fields such as
+`status`, `hash`, `signature`, `verification`, `revocation`, and `timeline` are
+excluded. Nested JSON object keys are sorted before hashing so Rust,
+TypeScript, Python, and Go SDKs reproduce the same BLAKE3 digest.
+
+PACT signatures reuse the existing ZAP Ed25519 domain-message transcript with
+domain `ZAP-PACT-v1`. PACT execution evidence is recorded as optional receipt
+metadata; it does not replace the signed receipt schema or introduce a
+financial ledger.
 
 ## Encrypted UDP Datagram
 

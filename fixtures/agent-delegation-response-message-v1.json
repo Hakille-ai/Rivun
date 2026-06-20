@@ -1,0 +1,22 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Agent delegation response payload for the zap.agent.delegation.response ZENV subject.",
+  "subject": "zap.agent.delegation.response",
+  "content_type": "application/zap-agent+json",
+  "body_json": {
+    "type": "delegation_response",
+    "payload": {
+      "schema_version": 1,
+      "delegation_id": "33333333-3333-4333-8333-333333333333",
+      "session_id": "11111111-1111-4111-8111-111111111111",
+      "respondent_agent": "executor.safety",
+      "decision": "accepted",
+      "assigned_agent": "executor.safety",
+      "accepted_capabilities": [
+        "driver.execute:valve.open"
+      ],
+      "estimated_completion_unix_micros": 1710000005000000,
+      "metadata": {}
+    }
+  }
+}

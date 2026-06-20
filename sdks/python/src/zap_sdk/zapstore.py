@@ -30,6 +30,13 @@ AGENT_CONTENT_TYPE = "application/zap-agent+json"
 AGENT_INTENT_SUBJECT = "zap.agent.intent"
 AGENT_STATUS_SUBJECT = "zap.agent.status"
 AGENT_RESULT_SUBJECT = "zap.agent.result"
+PACT_SCHEMA_VERSION = 1
+PACT_CONTENT_TYPE = "application/zap-pact+json"
+PACT_RECORD_SUBJECT = "zap.pact.record"
+PACT_VERIFY_SUBJECT = "zap.pact.verify"
+PACT_REVOKE_SUBJECT = "zap.pact.revoke"
+PACT_BUNDLE_SUBJECT = "zap.pact.bundle"
+PACT_SIGNATURE_DOMAIN = b"ZAP-PACT-v1"
 
 _HASH_RE = re.compile(r"^blake3:[0-9a-f]{64}$")
 
@@ -396,6 +403,72 @@ def registry_hash(registry: DriverRegistry) -> str:
     return artifact_hash(encoded)
 
 
+def pact_canonical_signing_bytes(pact: Mapping[str, Any]) -> bytes:
+    validate_pact_shape(pact)
+    payload = {
+        "pact_id": str(pact["pact_id"]),
+        "actor": pact["actor"],
+        "target": pact["target"],
+        "intent": pact["intent"],
+        "object": _normalize_json_value(pact.get("object")),
+        "terms": _normalize_json_value(pact.get("terms")),
+        "consent": _normalize_json_value(pact.get("consent")),
+        "proof": _normalize_json_value(pact.get("proof")),
+        "created_at_micros": pact["created_at_micros"],
+        "expires_at_micros": pact.get("expires_at_micros"),
+    }
+    return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def pact_hash(pact: Mapping[str, Any]) -> str:
+    return artifact_hash(pact_canonical_signing_bytes(pact))
+
+
+def validate_pact_shape(pact: Mapping[str, Any]) -> None:
+    if pact.get("schema_version") != PACT_SCHEMA_VERSION:
+        raise ValueError(f"unsupported PACT schema version {pact.get('schema_version')!r}")
+    UUID(str(pact["pact_id"]))
+    for field_name in ("actor", "target", "intent"):
+        _required_str(pact, field_name)
+    created = _required_int(pact, "created_at_micros")
+    expires = pact.get("expires_at_micros")
+    if expires is not None and (not isinstance(expires, int) or expires <= created):
+        raise ValueError("PACT expires_at_micros must be greater than created_at_micros")
+    if "hash" in pact and not validate_artifact_hash(str(pact["hash"])):
+        raise ValueError(f"invalid PACT hash {pact['hash']!r}")
+
+
+def verify_pact(pact: Mapping[str, Any], now_micros: int | None = None) -> bool:
+    validate_pact_shape(pact)
+    if pact.get("status") == "revoked":
+        return False
+    expires = pact.get("expires_at_micros")
+    if now_micros is not None and isinstance(expires, int) and now_micros > expires:
+        return False
+    if pact.get("hash") != pact_hash(pact):
+        return False
+    signature = pact.get("signature")
+    public_key = pact.get("actor_public_key")
+    if not isinstance(signature, str) or not isinstance(public_key, str):
+        return False
+    return verify_ed25519_signature(
+        zap_domain_message(PACT_SIGNATURE_DOMAIN, pact_canonical_signing_bytes(pact)),
+        signature,
+        public_key,
+    )
+
+
+def verify_pact_bundle(bundle: Mapping[str, Any], now_micros: int | None = None) -> bool:
+    if bundle.get("schema_version") != PACT_SCHEMA_VERSION:
+        raise ValueError(f"unsupported PACT bundle schema version {bundle.get('schema_version')!r}")
+    if bundle.get("revocations"):
+        return False
+    pact = bundle.get("pact")
+    if not isinstance(pact, Mapping):
+        raise ValueError("PACT bundle pact must be an object")
+    return verify_pact(pact, now_micros)
+
+
 def verify_signature_placeholder(kind: str) -> SignatureVerificationStatus:
     return SignatureVerificationStatus(
         supported=False,
@@ -506,6 +579,16 @@ def _to_plain(value: Any) -> Any:
         return [_to_plain(item) for item in value]
     if isinstance(value, dict):
         return {key: _to_plain(item) for key, item in value.items() if item is not None}
+    return value
+
+
+def _normalize_json_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return {key: _normalize_json_value(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [_normalize_json_value(item) for item in value]
     return value
 
 

@@ -410,7 +410,7 @@ fn run_step(
     envs: &[(&str, &str)],
 ) -> Result<()> {
     println!("==> {label}");
-    let mut command = Command::new(program);
+    let mut command = Command::new(platform_program(program));
     command.args(args).current_dir(cwd);
     for (key, value) in envs {
         command.env(key, value);
@@ -425,10 +425,23 @@ fn run_step(
 }
 
 fn command_available(program: &str) -> bool {
-    Command::new(program)
-        .arg("--version")
+    let version_arg = if program == "go" {
+        "version"
+    } else {
+        "--version"
+    };
+    Command::new(platform_program(program))
+        .arg(version_arg)
         .status()
         .is_ok_and(|status| status.success())
+}
+
+fn platform_program(program: &str) -> String {
+    if cfg!(windows) && matches!(program, "npm" | "npx") {
+        format!("{program}.cmd")
+    } else {
+        program.to_string()
+    }
 }
 
 fn bench_run(options: RunOptions) -> Result<()> {

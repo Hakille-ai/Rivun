@@ -1,0 +1,17 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Readable fixture for a v1 capability response body advertised by a peer.",
+  "subject": "zap.capability.response",
+  "content_type": "application/zap-capability+json",
+  "body_json": {
+    "schema_version": 1,
+    "node_id": "22222222-2222-4222-8222-222222222222",
+    "capabilities": [
+      "driver.execute:echo",
+      "memory.write:agent.session"
+    ],
+    "issued_at_micros": 1893456000000300,
+    "expires_at_micros": 1893459600000300,
+    "grants": []
+  }
+}

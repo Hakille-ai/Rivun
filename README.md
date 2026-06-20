@@ -19,6 +19,26 @@ case, ZAP is not limited to action dispatch — it carries data, events, command
 queries, responses, stream chunks, actions, and control messages through a
 unified wire format.
 
+## Use ZAP When
+
+- You need typed messages with cryptographic provenance between nodes.
+- Actions must be checked by deterministic policy before execution.
+- High-risk operations need Proof-of-Action, human approval, simulation, or
+  explicit grants.
+- Untrusted extensions should run in a resource-bounded WASM sandbox.
+- Operators need signed receipts, replay protection, and audit evidence.
+- SDKs and gateways must agree on stable protocol fixtures across languages.
+
+## Do Not Use ZAP When
+
+- You only need a generic message broker, queue, or RPC framework.
+- Natural-language planning should decide authority inside the protocol.
+- You need a database, hidden model memory store, financial ledger, or payment
+  rail.
+- An integration would bypass identity, policy, grants, PoA, or receipts for
+  convenience.
+- You cannot tolerate pre-1.0 API and CLI evolution.
+
 
 ## ❓ Why ZAP?
 

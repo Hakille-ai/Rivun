@@ -611,9 +611,11 @@ and live packet captures; archive the referenced source files separately.
 
 Embedding services can expose the node health surface directly from
 `ZapNode::health_snapshot()`, `ZapNode::health_json()`, or
-`ZapNode::healthz_text()`. Treat `critical` as a traffic-freeze signal and use
-the named check to choose the runbook below. Treat `degraded` as an operator
-investigation signal unless the same check is rising across the fleet.
+`ZapNode::healthz_text()`. Daemons can expose the same contract by setting
+`[observability].http_bind`; `zap run` then serves `/metrics`, `/healthz`, and
+`/healthz.json` on that TCP address. Treat `critical` as a traffic-freeze signal
+and use the named check to choose the runbook below. Treat `degraded` as an
+operator investigation signal unless the same check is rising across the fleet.
 
 ### Policy Default Allow In Production
 

@@ -97,6 +97,7 @@ impl NodeBench {
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
             discovery: DiscoveryConfig::default(),
+            observability: zap_node::ObservabilityConfig::default(),
             memory: MemoryConfig::default(),
             capability_policy: zap_node::CapabilityPolicyConfig::default(),
             capability_cache: zap_node::CapabilityCacheConfig::default(),

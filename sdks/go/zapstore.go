@@ -7,22 +7,79 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"lukechampine.com/blake3"
 )
 
 const (
-	RegistryIndexSyncSchemaVersion = 1
-	RegistryBundleSchemaVersion    = 1
+	RegistryIndexSyncSchemaVersion   = 1
+	RegistryBundleSchemaVersion      = 1
 	RegistryInstallPlanSchemaVersion = 1
-	DriverABIVersion               = 1
-	DriverHashPrefix               = "blake3:"
+	DriverABIVersion                 = 1
+	DriverHashPrefix                 = "blake3:"
+	PactSchemaVersion                = 1
+	PactContentType                  = "application/zap-pact+json"
+	PactRecordSubject                = "zap.pact.record"
+	PactVerifySubject                = "zap.pact.verify"
+	PactRevokeSubject                = "zap.pact.revoke"
+	PactBundleSubject                = "zap.pact.bundle"
+	PactSignatureDomain              = "ZAP-PACT-v1"
 )
 
 var artifactHashPattern = regexp.MustCompile(`^blake3:[0-9a-f]{64}$`)
 
 type DriverRegistryStatus string
+
+type ZapPactStatus string
+
+const (
+	ZapPactStatusDraft   ZapPactStatus = "draft"
+	ZapPactStatusActive  ZapPactStatus = "active"
+	ZapPactStatusExpired ZapPactStatus = "expired"
+	ZapPactStatusRevoked ZapPactStatus = "revoked"
+	ZapPactStatusInvalid ZapPactStatus = "invalid"
+)
+
+type ZapPact struct {
+	SchemaVersion   uint8         `json:"schema_version"`
+	PactID          UUID          `json:"pact_id"`
+	Actor           string        `json:"actor"`
+	Target          string        `json:"target"`
+	Intent          string        `json:"intent"`
+	Object          any           `json:"object"`
+	Terms           any           `json:"terms"`
+	Consent         any           `json:"consent"`
+	Proof           any           `json:"proof"`
+	CreatedAtMicros uint64        `json:"created_at_micros"`
+	ExpiresAtMicros *uint64       `json:"expires_at_micros,omitempty"`
+	ActorPublicKey  string        `json:"actor_public_key,omitempty"`
+	Hash            string        `json:"hash,omitempty"`
+	Signature       string        `json:"signature,omitempty"`
+	Status          ZapPactStatus `json:"status,omitempty"`
+}
+
+type ZapPactBundle struct {
+	SchemaVersion uint8          `json:"schema_version"`
+	Pact          ZapPact        `json:"pact"`
+	Verifications []any          `json:"verifications,omitempty"`
+	Revocations   []any          `json:"revocations,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
+type zapPactSigningPayload struct {
+	PactID          UUID    `json:"pact_id"`
+	Actor           string  `json:"actor"`
+	Target          string  `json:"target"`
+	Intent          string  `json:"intent"`
+	Object          any     `json:"object"`
+	Terms           any     `json:"terms"`
+	Consent         any     `json:"consent"`
+	Proof           any     `json:"proof"`
+	CreatedAtMicros uint64  `json:"created_at_micros"`
+	ExpiresAtMicros *uint64 `json:"expires_at_micros"`
+}
 
 const (
 	DriverRegistryStatusActive     DriverRegistryStatus = "active"
@@ -65,26 +122,26 @@ type RegistryBundleManifestResponse struct {
 }
 
 type DriverRegistryEntry struct {
-	Name             string               `json:"name"`
-	Version          string               `json:"version"`
-	Action           string               `json:"action"`
-	ABIVersion       uint16               `json:"abi_version"`
-	WASMHash         string               `json:"wasm_hash"`
-	ManifestPath     string               `json:"manifest_path,omitempty"`
-	AuthorNodeID     UUID                 `json:"author_node_id"`
-	Status           DriverRegistryStatus `json:"status,omitempty"`
-	RevokedReason    string               `json:"revoked_reason,omitempty"`
-	DeprecatedReason string               `json:"deprecated_reason,omitempty"`
+	Name             string                    `json:"name"`
+	Version          string                    `json:"version"`
+	Action           string                    `json:"action"`
+	ABIVersion       uint16                    `json:"abi_version"`
+	WASMHash         string                    `json:"wasm_hash"`
+	ManifestPath     string                    `json:"manifest_path,omitempty"`
+	AuthorNodeID     UUID                      `json:"author_node_id"`
+	Status           DriverRegistryStatus      `json:"status,omitempty"`
+	RevokedReason    string                    `json:"revoked_reason,omitempty"`
+	DeprecatedReason string                    `json:"deprecated_reason,omitempty"`
 	Migrations       []DriverRegistryMigration `json:"migrations,omitempty"`
 }
 
 type DriverRegistry struct {
-	SchemaVersion    uint8                 `json:"schema_version"`
-	GeneratedBy      string                `json:"generated_by,omitempty"`
-	OperatorNodeID   *UUID                 `json:"operator_node_id,omitempty"`
-	OperatorPublicKey string               `json:"operator_public_key,omitempty"`
-	Signature        string                `json:"signature,omitempty"`
-	Entries          []DriverRegistryEntry `json:"entries"`
+	SchemaVersion     uint8                 `json:"schema_version"`
+	GeneratedBy       string                `json:"generated_by,omitempty"`
+	OperatorNodeID    *UUID                 `json:"operator_node_id,omitempty"`
+	OperatorPublicKey string                `json:"operator_public_key,omitempty"`
+	Signature         string                `json:"signature,omitempty"`
+	Entries           []DriverRegistryEntry `json:"entries"`
 }
 
 type RegistryBundleManifest struct {
@@ -133,18 +190,18 @@ type RegistryInstallPlanEntry struct {
 }
 
 type RegistryInstallPlan struct {
-	SchemaVersion         uint8                      `json:"schema_version"`
-	RegistryHash          string                     `json:"registry_hash"`
-	RegistryEntries       int                        `json:"registry_entries"`
-	RegistryOperatorNodeID *UUID                     `json:"registry_operator_node_id,omitempty"`
-	PublicationHash       string                     `json:"publication_hash,omitempty"`
-	RequestedAtMicros     uint64                     `json:"requested_at_micros"`
-	Target                string                     `json:"target,omitempty"`
-	Labels                []string                   `json:"labels"`
-	Entries               []RegistryInstallPlanEntry `json:"entries"`
-	PlannerNodeID         UUID                       `json:"planner_node_id"`
-	PlannerPublicKey      string                     `json:"planner_public_key"`
-	Signature             string                     `json:"signature"`
+	SchemaVersion          uint8                      `json:"schema_version"`
+	RegistryHash           string                     `json:"registry_hash"`
+	RegistryEntries        int                        `json:"registry_entries"`
+	RegistryOperatorNodeID *UUID                      `json:"registry_operator_node_id,omitempty"`
+	PublicationHash        string                     `json:"publication_hash,omitempty"`
+	RequestedAtMicros      uint64                     `json:"requested_at_micros"`
+	Target                 string                     `json:"target,omitempty"`
+	Labels                 []string                   `json:"labels"`
+	Entries                []RegistryInstallPlanEntry `json:"entries"`
+	PlannerNodeID          UUID                       `json:"planner_node_id"`
+	PlannerPublicKey       string                     `json:"planner_public_key"`
+	Signature              string                     `json:"signature"`
 }
 
 type SignatureVerificationStatus struct {
@@ -300,6 +357,100 @@ func RegistryHash(registry DriverRegistry) (string, error) {
 	return ArtifactHash(encoded)
 }
 
+func PactCanonicalSigningBytes(pact ZapPact) ([]byte, error) {
+	if err := ValidatePactShape(pact); err != nil {
+		return nil, err
+	}
+	payload := zapPactSigningPayload{
+		PactID:          pact.PactID,
+		Actor:           pact.Actor,
+		Target:          pact.Target,
+		Intent:          pact.Intent,
+		Object:          normalizeJSONValue(pact.Object),
+		Terms:           normalizeJSONValue(pact.Terms),
+		Consent:         normalizeJSONValue(pact.Consent),
+		Proof:           normalizeJSONValue(pact.Proof),
+		CreatedAtMicros: pact.CreatedAtMicros,
+		ExpiresAtMicros: pact.ExpiresAtMicros,
+	}
+	return json.Marshal(payload)
+}
+
+func PactHash(pact ZapPact) (string, error) {
+	encoded, err := PactCanonicalSigningBytes(pact)
+	if err != nil {
+		return "", err
+	}
+	return ArtifactHash(encoded)
+}
+
+func ValidatePactShape(pact ZapPact) error {
+	if pact.SchemaVersion != PactSchemaVersion {
+		return fmt.Errorf("unsupported PACT schema version %d", pact.SchemaVersion)
+	}
+	if pact.PactID == (UUID{}) {
+		return errors.New("PACT pact_id must not be nil")
+	}
+	if strings.TrimSpace(pact.Actor) == "" {
+		return errors.New("PACT actor must not be empty")
+	}
+	if strings.TrimSpace(pact.Target) == "" {
+		return errors.New("PACT target must not be empty")
+	}
+	if strings.TrimSpace(pact.Intent) == "" {
+		return errors.New("PACT intent must not be empty")
+	}
+	if pact.ExpiresAtMicros != nil && *pact.ExpiresAtMicros <= pact.CreatedAtMicros {
+		return errors.New("PACT expires_at_micros must be greater than created_at_micros")
+	}
+	if pact.Hash != "" && !ValidateArtifactHash(pact.Hash) {
+		return fmt.Errorf("invalid PACT hash %q", pact.Hash)
+	}
+	return nil
+}
+
+func VerifyPact(pact ZapPact, nowMicros *uint64) (bool, error) {
+	if err := ValidatePactShape(pact); err != nil {
+		return false, err
+	}
+	if pact.Status == ZapPactStatusRevoked {
+		return false, nil
+	}
+	if nowMicros != nil && pact.ExpiresAtMicros != nil && *nowMicros > *pact.ExpiresAtMicros {
+		return false, nil
+	}
+	hash, err := PactHash(pact)
+	if err != nil {
+		return false, err
+	}
+	if pact.Hash == "" || pact.Hash != hash || pact.Signature == "" || pact.ActorPublicKey == "" {
+		return false, nil
+	}
+	message, err := PactCanonicalSigningBytes(pact)
+	if err != nil {
+		return false, err
+	}
+	return VerifyEd25519Signature(ZapDomainMessage([]byte(PactSignatureDomain), message), pact.Signature, pact.ActorPublicKey)
+}
+
+func VerifyPactBundle(bundle ZapPactBundle, nowMicros *uint64) (bool, error) {
+	if bundle.SchemaVersion != PactSchemaVersion {
+		return false, fmt.Errorf("unsupported PACT bundle schema version %d", bundle.SchemaVersion)
+	}
+	if len(bundle.Revocations) > 0 {
+		return false, nil
+	}
+	return VerifyPact(bundle.Pact, nowMicros)
+}
+
+func ZapDomainMessage(domain []byte, message []byte) []byte {
+	output := make([]byte, 0, len(domain)+1+len(message))
+	output = append(output, domain...)
+	output = append(output, 0)
+	output = append(output, message...)
+	return output
+}
+
 func SignatureVerificationPlaceholder(kind string) SignatureVerificationStatus {
 	return SignatureVerificationStatus{
 		Supported: false,
@@ -343,4 +494,28 @@ func validateRelativePath(path string) error {
 		}
 	}
 	return nil
+}
+
+func normalizeJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		normalized := make(map[string]any, len(typed))
+		for _, key := range keys {
+			normalized[key] = normalizeJSONValue(typed[key])
+		}
+		return normalized
+	case []any:
+		normalized := make([]any, len(typed))
+		for index, item := range typed {
+			normalized[index] = normalizeJSONValue(item)
+		}
+		return normalized
+	default:
+		return value
+	}
 }

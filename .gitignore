@@ -1,8 +1,8 @@
-/target/
+target/
 /.zap/
 /.env
 /.env.*
-/dist/
+dist/
 /coverage/
 *.log
 *.tmp
@@ -12,3 +12,7 @@
 *.wasm
 !.gitkeep
 !.env.example
+node_modules/
+__pycache__/
+.pytest_cache/
+*.pyc

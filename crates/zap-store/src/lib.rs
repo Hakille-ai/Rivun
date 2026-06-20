@@ -1125,7 +1125,7 @@ impl DriverRegistry {
             ));
         }
 
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::with_capacity(self.entries.len());
         for entry in &self.entries {
             if entry.action.trim().is_empty() {
                 return Err(ZapStoreError::EmptyAction);
@@ -1134,7 +1134,7 @@ impl DriverRegistry {
             for migration in &entry.migrations {
                 migration.validate()?;
             }
-            if !seen.insert((entry.action.clone(), entry.version.clone())) {
+            if !seen.insert((entry.action.as_str(), entry.version.as_str())) {
                 return Err(ZapStoreError::DuplicateRegistryEntry {
                     action: entry.action.clone(),
                     version: entry.version.clone(),
@@ -1540,7 +1540,7 @@ impl RegistryPublication {
         compare_registry_publication_field(
             "registry_hash",
             self.registry_hash.as_str(),
-            registry_hash(registry)?.as_str(),
+            registry_hash_no_validate(registry)?.as_str(),
         )?;
         compare_registry_publication_field(
             "registry_entries",
@@ -1731,7 +1731,7 @@ impl RegistryInstallPlan {
         compare_registry_install_plan_field(
             "registry_hash",
             self.registry_hash.as_str(),
-            registry_hash(registry)?.as_str(),
+            registry_hash_no_validate(registry)?.as_str(),
         )?;
         compare_registry_install_plan_field(
             "registry_entries",
@@ -2114,10 +2114,10 @@ impl DomainPackRegistry {
             ));
         }
 
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::with_capacity(self.entries.len());
         for entry in &self.entries {
             entry.validate()?;
-            if !seen.insert((entry.id.clone(), entry.version.clone())) {
+            if !seen.insert((entry.id.as_str(), entry.version.as_str())) {
                 return Err(ZapStoreError::DuplicateDomainPackRegistryEntry {
                     id: entry.id.clone(),
                     version: entry.version.clone(),
@@ -2374,6 +2374,10 @@ pub fn artifact_hash(bytes: &[u8]) -> String {
 
 pub fn registry_hash(registry: &DriverRegistry) -> Result<String> {
     registry.validate()?;
+    registry_hash_no_validate(registry)
+}
+
+pub(crate) fn registry_hash_no_validate(registry: &DriverRegistry) -> Result<String> {
     Ok(artifact_hash(&serde_json::to_vec(registry)?))
 }
 
