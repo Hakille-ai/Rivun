@@ -213,10 +213,8 @@ impl ZapPact {
         if self.status == ZapPactStatus::Revoked || self.revocation.is_some() {
             return Err(ZapPactError::Revoked);
         }
-        if let (Some(expires), Some(now)) = (self.expires_at_micros, now_micros) {
-            if now > expires {
-                return Err(ZapPactError::Expired);
-            }
+        if self.expires_at_micros.zip(now_micros).is_some_and(|(expires, now)| now > expires) {
+            return Err(ZapPactError::Expired);
         }
         let expected_hash = self.canonical_hash()?;
         let actual_hash = self.hash.as_ref().ok_or(ZapPactError::MissingField {
@@ -305,14 +303,12 @@ impl Validate for ZapPact {
         validate_text("pact", "actor", &self.actor)?;
         validate_text("pact", "target", &self.target)?;
         validate_text("pact", "intent", &self.intent)?;
-        if let Some(expires) = self.expires_at_micros {
-            if expires <= self.created_at_micros {
-                return Err(ZapPactError::InvalidField {
-                    entity: "pact",
-                    field: "expires_at_micros",
-                    expected: "a timestamp greater than created_at_micros",
-                });
-            }
+        if self.expires_at_micros.is_some_and(|expires| expires <= self.created_at_micros) {
+            return Err(ZapPactError::InvalidField {
+                entity: "pact",
+                field: "expires_at_micros",
+                expected: "a timestamp greater than created_at_micros",
+            });
         }
         if let Some(hash) = &self.hash {
             validate_hash("pact", "hash", hash)?;

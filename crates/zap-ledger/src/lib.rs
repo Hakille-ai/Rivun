@@ -640,6 +640,7 @@ impl SignedActionReceipt {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_message_with_pact(
         signer: &Keypair,
         frame: &ZapFrame,
