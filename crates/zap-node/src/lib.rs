@@ -11,11 +11,15 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     fs,
     fs::OpenOptions,
-    io::Write,
-    net::SocketAddr,
+    io::{Read, Write},
+    net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
-    sync::Mutex,
-    time::SystemTime,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::{Duration, SystemTime},
 };
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -90,6 +94,8 @@ pub struct ZapNodeConfig {
     pub capability_cache: CapabilityCacheConfig,
     #[serde(default)]
     pub discovery: DiscoveryConfig,
+    #[serde(default)]
+    pub observability: ObservabilityConfig,
     #[serde(default)]
     pub message_policy: MessagePolicyConfig,
     #[serde(default)]
@@ -418,6 +424,12 @@ pub struct CapabilityCacheConfig {
 pub struct DiscoveryConfig {
     #[serde(default)]
     pub announcement_cache: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ObservabilityConfig {
+    #[serde(default)]
+    pub http_bind: Option<String>,
 }
 
 pub const DISCOVERY_SCHEMA_VERSION: u8 = 1;
@@ -900,6 +912,7 @@ fn default_replay_cache_capacity() -> usize {
 pub struct ConfigValidationReport {
     pub bind: SocketAddr,
     pub node_id: Uuid,
+    pub observability_http_bind: Option<SocketAddr>,
     pub peer_count: usize,
     pub trusted_peer_count: usize,
     pub restricted_peer_count: usize,
@@ -1473,6 +1486,120 @@ fn health_text_escape(value: &str) -> String {
         .collect()
 }
 
+fn handle_observability_http_connection(node: &ZapNode, mut stream: TcpStream) -> Result<()> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .context("failed to set observability HTTP read timeout")?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .context("failed to set observability HTTP write timeout")?;
+
+    let mut buffer = [0_u8; 2048];
+    let read = stream
+        .read(&mut buffer)
+        .context("failed to read observability HTTP request")?;
+    if read == 0 {
+        return Ok(());
+    }
+    let request = std::str::from_utf8(&buffer[..read]).unwrap_or("");
+    let mut request_parts = request.lines().next().unwrap_or("").split_whitespace();
+    let method = request_parts.next().unwrap_or("");
+    let path = request_parts
+        .next()
+        .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/");
+
+    if method != "GET" && method != "HEAD" {
+        return write_observability_http_response(
+            &mut stream,
+            method,
+            405,
+            "text/plain; charset=utf-8",
+            "method not allowed\n".to_string(),
+        );
+    }
+
+    match path {
+        "/metrics" => write_observability_http_response(
+            &mut stream,
+            method,
+            200,
+            "text/plain; version=0.0.4; charset=utf-8",
+            node.metrics_prometheus_text(),
+        ),
+        "/healthz" => {
+            let snapshot = node.health_snapshot();
+            let status_code = if snapshot.status == ZapNodeHealthStatus::Critical {
+                503
+            } else {
+                200
+            };
+            write_observability_http_response(
+                &mut stream,
+                method,
+                status_code,
+                "text/plain; charset=utf-8",
+                snapshot.to_healthz_text(),
+            )
+        }
+        "/healthz.json" => {
+            let snapshot = node.health_snapshot();
+            let status_code = if snapshot.status == ZapNodeHealthStatus::Critical {
+                503
+            } else {
+                200
+            };
+            write_observability_http_response(
+                &mut stream,
+                method,
+                status_code,
+                "application/json; charset=utf-8",
+                snapshot.to_json()?,
+            )
+        }
+        _ => write_observability_http_response(
+            &mut stream,
+            method,
+            404,
+            "text/plain; charset=utf-8",
+            "not found\n".to_string(),
+        ),
+    }
+}
+
+fn write_observability_http_response(
+    stream: &mut TcpStream,
+    method: &str,
+    status_code: u16,
+    content_type: &str,
+    body: String,
+) -> Result<()> {
+    let reason = match status_code {
+        200 => "OK",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        503 => "Service Unavailable",
+        _ => "OK",
+    };
+    let headers = format!(
+        "HTTP/1.1 {status_code} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(headers.as_bytes())
+        .context("failed to write observability HTTP response headers")?;
+    if method != "HEAD" {
+        stream
+            .write_all(body.as_bytes())
+            .context("failed to write observability HTTP response body")?;
+    }
+    stream
+        .flush()
+        .context("failed to flush observability HTTP response")
+}
+
 fn classify_processing_error(error: &anyhow::Error) -> &'static str {
     let details = format!("{error:#}");
     if details.contains("anti-replay") || details.contains("stale frame timestamp") {
@@ -1502,6 +1629,28 @@ struct NodeMetricsCounters {
     driver_execution_errors_by_action: BTreeMap<String, u64>,
     receipt_log_verify_failures_total: u64,
     poa_attestation_failures_total: u64,
+}
+
+#[derive(Debug)]
+pub struct ZapNodeObservabilityHttpServer {
+    addr: SocketAddr,
+    shutdown: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ZapNodeObservabilityHttpServer {
+    pub fn local_addr(&self) -> SocketAddr {
+        self.addr
+    }
+}
+
+impl Drop for ZapNodeObservabilityHttpServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl ZapNode {
@@ -1640,6 +1789,50 @@ impl ZapNode {
                 Err(error) => warn!(%error, "failed to process inbound ZAP frame"),
             }
         }
+    }
+
+    pub fn spawn_observability_http(
+        self: Arc<Self>,
+        bind: SocketAddr,
+    ) -> Result<ZapNodeObservabilityHttpServer> {
+        let listener = TcpListener::bind(bind)
+            .with_context(|| format!("failed to bind observability HTTP listener on {bind}"))?;
+        listener.set_nonblocking(true).with_context(|| {
+            format!("failed to set observability HTTP listener nonblocking on {bind}")
+        })?;
+        let addr = listener
+            .local_addr()
+            .context("failed to read observability HTTP listener address")?;
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let thread_shutdown = Arc::clone(&shutdown);
+        let handle = thread::Builder::new()
+            .name("zap-observability-http".to_string())
+            .spawn(move || {
+                info!(addr = %addr, "ZAP observability HTTP listener running");
+                while !thread_shutdown.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((stream, peer_addr)) => {
+                            if let Err(error) = handle_observability_http_connection(&self, stream)
+                            {
+                                warn!(%error, %peer_addr, "observability HTTP request failed");
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(20));
+                        }
+                        Err(error) => {
+                            warn!(%error, "observability HTTP accept failed");
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                    }
+                }
+            })
+            .context("failed to spawn observability HTTP listener thread")?;
+        Ok(ZapNodeObservabilityHttpServer {
+            addr,
+            shutdown,
+            handle: Some(handle),
+        })
     }
 
     pub async fn handle_once(&self) -> Result<NodeEvent> {
@@ -2366,7 +2559,19 @@ impl ZapNode {
         receipts.retain(|receipt| request.matches(receipt));
         let truncated = receipts.len() > limit;
         receipts.truncate(limit);
-        let response = ReceiptReplicationResponse::new(self.keypair.node_id(), receipts, truncated);
+        let next_after_processed_at_micros = truncated
+            .then(|| {
+                receipts
+                    .last()
+                    .map(|receipt| receipt.receipt.processed_at_micros)
+            })
+            .flatten();
+        let response = ReceiptReplicationResponse::new_with_cursor(
+            self.keypair.node_id(),
+            receipts,
+            truncated,
+            next_after_processed_at_micros,
+        );
         let envelope = ZapEnvelope::new(
             ZapMessageKind::Control,
             RECEIPT_REPLICATION_RESPONSE_SUBJECT,
@@ -3022,6 +3227,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
     validate_receipts(config)?;
     validate_memory(config)?;
     validate_capability_cache_config(config)?;
+    let observability_http_bind = validate_observability(config)?;
     validate_message_policy(config, &mut warnings)?;
     let message_contracts = load_message_contract_set(&config.message_schema)?;
     validate_runtime(config.runtime)?;
@@ -3050,6 +3256,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
     Ok(ConfigValidationReport {
         bind,
         node_id,
+        observability_http_bind,
         peer_count: config.peers.len(),
         trusted_peer_count: peer_trust_summary.trusted_peer_count,
         restricted_peer_count: peer_trust_summary.restricted_peer_count,
@@ -3083,6 +3290,16 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         peer_grant_route_count,
         warnings,
     })
+}
+
+fn validate_observability(config: &ZapNodeConfig) -> Result<Option<SocketAddr>> {
+    let Some(bind) = config.observability.http_bind.as_deref() else {
+        return Ok(None);
+    };
+    let addr = bind
+        .parse::<SocketAddr>()
+        .with_context(|| format!("invalid observability.http_bind address {bind}"))?;
+    Ok(Some(addr))
 }
 
 fn validate_runtime(runtime: RuntimeConfig) -> Result<()> {
@@ -4523,6 +4740,7 @@ mod tests {
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
             discovery: DiscoveryConfig::default(),
+            observability: ObservabilityConfig::default(),
             message_policy,
             message_schema,
             routes: Vec::new(),
@@ -4586,6 +4804,7 @@ mod tests {
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
             discovery: DiscoveryConfig::default(),
+            observability: ObservabilityConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
@@ -5820,6 +6039,49 @@ fsync = "always"
         assert!(healthz.contains("check{name=\"endpoint_bound\"}=healthy"));
     }
 
+    fn http_get(addr: SocketAddr, path: &str) -> String {
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
+
+    #[tokio::test]
+    async fn node_observability_http_serves_metrics_and_healthz() {
+        let mut harness = node_harness_with_poa_and_message_policy(
+            SecurityConfig::default(),
+            PoaConfig::default(),
+            MessagePolicyConfig {
+                default_decision: MessagePolicyDecision::Deny,
+                rules: Vec::new(),
+            },
+        )
+        .await;
+        harness.node.receipt_log_path = Some(harness._temp.path().join("receipts.jsonl"));
+        let node = Arc::new(harness.node);
+        let server = node
+            .clone()
+            .spawn_observability_http("127.0.0.1:0".parse().unwrap())
+            .unwrap();
+
+        let metrics = http_get(server.local_addr(), "/metrics");
+        assert!(metrics.starts_with("HTTP/1.1 200 OK"));
+        assert!(metrics.contains("Content-Type: text/plain; version=0.0.4"));
+        assert!(metrics.contains("zap_frames_received_total"));
+
+        let healthz = http_get(server.local_addr(), "/healthz");
+        assert!(healthz.starts_with("HTTP/1.1 200 OK"));
+        assert!(healthz.contains("status=healthy"));
+        assert!(healthz.contains("check{name=\"endpoint_bound\"}=healthy"));
+
+        let health_json = http_get(server.local_addr(), "/healthz.json");
+        assert!(health_json.starts_with("HTTP/1.1 200 OK"));
+        assert!(health_json.contains("Content-Type: application/json"));
+        assert!(health_json.contains("\"status\": \"healthy\""));
+    }
+
     #[tokio::test]
     async fn node_health_snapshot_reports_degraded_runtime_signals() {
         let mut harness = node_harness_with_poa_and_message_policy(
@@ -5953,6 +6215,7 @@ fsync = "always"
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
             discovery: DiscoveryConfig::default(),
+            observability: ObservabilityConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
@@ -6279,6 +6542,7 @@ fsync = "always"
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
             discovery: DiscoveryConfig::default(),
+            observability: ObservabilityConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: vec![RouteRule {
@@ -6810,6 +7074,7 @@ required_json_fields = ["message"]
             capability_policy: CapabilityPolicyConfig::default(),
             capability_cache: CapabilityCacheConfig::default(),
             discovery: DiscoveryConfig::default(),
+            observability: ObservabilityConfig::default(),
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),

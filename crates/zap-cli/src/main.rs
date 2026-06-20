@@ -10,12 +10,16 @@ use std::{
     io::{ErrorKind, Write},
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tracing_subscriber::{EnvFilter, fmt};
 use uuid::Uuid;
 use zap_agent::{
-    AGENT_CONTENT_TYPE, AGENT_PROTOCOL_SCHEMA_VERSION, AgentErrorInfo, AgentId, AgentIntent,
+    AGENT_CAPABILITY_NEGOTIATION_REQUEST_SUBJECT, AGENT_CAPABILITY_NEGOTIATION_RESPONSE_SUBJECT,
+    AGENT_CONTENT_TYPE, AGENT_DELEGATION_REQUEST_SUBJECT, AGENT_DELEGATION_RESPONSE_SUBJECT,
+    AGENT_INTENT_SUBJECT, AGENT_PROTOCOL_SCHEMA_VERSION, AGENT_RESULT_SUBJECT,
+    AGENT_SESSION_SUBJECT, AGENT_STATUS_SUBJECT, AgentErrorInfo, AgentId, AgentIntent,
     AgentMessage, AgentResult, AgentSession, AgentStatusUpdate, CapabilityNegotiationRequest,
     CapabilityNegotiationResponse, DelegationRequest, DelegationResponse, IntentKind,
     agent_message_json_schema,
@@ -679,6 +683,12 @@ enum MemoryCommand {
         path: PathBuf,
         #[arg(long)]
         receipts: Option<PathBuf>,
+        /// Write a signed evidence manifest to this file.
+        #[arg(long)]
+        manifest_out: Option<PathBuf>,
+        /// Node key used to sign --manifest-out.
+        #[arg(long)]
+        signing_key: Option<PathBuf>,
         /// Write the bundle to a file instead of stdout.
         #[arg(long)]
         out: Option<PathBuf>,
@@ -1336,6 +1346,8 @@ enum ReceiptsCommand {
         out: PathBuf,
         #[arg(long)]
         after_processed_at_micros: Option<u64>,
+        #[arg(long)]
+        until_processed_at_micros: Option<u64>,
         #[arg(long, default_value_t = DEFAULT_RECEIPT_REPLICATION_LIMIT)]
         limit: usize,
         #[arg(long)]
@@ -1666,7 +1678,19 @@ async fn run(config_path: &Path, strict: bool) -> Result<()> {
         let report = config.validate()?;
         fail_on_config_warnings(config_path, &report)?;
     }
-    let node = ZapNode::from_config(config).await?;
+    let observability_http_bind = config
+        .observability
+        .http_bind
+        .as_deref()
+        .map(|bind| {
+            bind.parse::<SocketAddr>()
+                .with_context(|| format!("invalid observability.http_bind address {bind}"))
+        })
+        .transpose()?;
+    let node = Arc::new(ZapNode::from_config(config).await?);
+    let _observability_http = observability_http_bind
+        .map(|bind| node.clone().spawn_observability_http(bind))
+        .transpose()?;
     node.run_forever().await
 }
 
@@ -1694,6 +1718,13 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             report.registry_signature_required
         );
         println!("receipt_log_enabled={}", report.receipt_log_enabled);
+        println!(
+            "observability_http_bind={}",
+            report
+                .observability_http_bind
+                .map(|addr| addr.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
         println!("memory_enabled={}", report.memory_enabled);
         println!("routes={}", report.route_count);
         println!("capabilities={}", report.capability_count);
@@ -1844,6 +1875,14 @@ fn build_doctor_report(
         DoctorCheck::pass("receipt audit", "signed receipt log enabled")
     } else {
         DoctorCheck::warn("receipt audit", "receipts.path is not configured")
+    });
+    checks.push(if let Some(addr) = report.observability_http_bind {
+        DoctorCheck::pass("observability HTTP", format!("http_bind={addr}"))
+    } else {
+        DoctorCheck::warn(
+            "observability HTTP",
+            "observability.http_bind is not configured; /metrics and /healthz will not be served by zap run",
+        )
     });
     checks.push(if report.poa_validator_count > 0 {
         DoctorCheck::pass(
@@ -2798,6 +2837,7 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
             target,
             out,
             after_processed_at_micros,
+            until_processed_at_micros,
             limit,
             kind,
             subject,
@@ -2812,6 +2852,7 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
                 target,
                 out: &out,
                 after_processed_at_micros,
+                until_processed_at_micros,
                 limit,
                 kind,
                 subject,
@@ -2845,6 +2886,7 @@ struct ReceiptPullOptions<'a> {
     target: Uuid,
     out: &'a Path,
     after_processed_at_micros: Option<u64>,
+    until_processed_at_micros: Option<u64>,
     limit: usize,
     kind: Option<String>,
     subject: Option<String>,
@@ -2863,6 +2905,7 @@ struct ReceiptPullReport {
     truncated: bool,
     earliest_processed_at_micros: Option<u64>,
     latest_processed_at_micros: Option<u64>,
+    next_after_processed_at_micros: Option<u64>,
 }
 
 async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
@@ -2871,6 +2914,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         target,
         out,
         after_processed_at_micros,
+        until_processed_at_micros,
         limit,
         kind,
         subject,
@@ -2898,6 +2942,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
     let request = ReceiptReplicationRequest {
         schema_version: zap_ledger::RECEIPT_REPLICATION_SCHEMA_VERSION,
         after_processed_at_micros,
+        until_processed_at_micros,
         limit: Some(limit),
         kind,
         subject,
@@ -2982,6 +3027,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         truncated: response.truncated,
         earliest_processed_at_micros: earliest,
         latest_processed_at_micros: latest,
+        next_after_processed_at_micros: response.next_after_processed_at_micros,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -3001,6 +3047,13 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
             "latest_processed_at_micros={}",
             report
                 .latest_processed_at_micros
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+        println!(
+            "next_after_processed_at_micros={}",
+            report
+                .next_after_processed_at_micros
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "none".to_string())
         );
@@ -3228,6 +3281,7 @@ struct IncidentConfigSummary {
     registry_enabled: bool,
     registry_signature_required: bool,
     receipt_log_enabled: bool,
+    observability_http_bind: Option<String>,
     memory_enabled: bool,
     capability_cache_enabled: bool,
     message_policy_default_decision: &'static str,
@@ -3310,6 +3364,7 @@ fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
         registry_enabled: report.registry_enabled,
         registry_signature_required: report.registry_signature_required,
         receipt_log_enabled: report.receipt_log_enabled,
+        observability_http_bind: report.observability_http_bind.map(|addr| addr.to_string()),
         memory_enabled: report.memory_enabled,
         capability_cache_enabled: report.capability_cache_enabled,
         message_policy_default_decision: policy_decision_name(
@@ -4602,9 +4657,18 @@ fn memory(command: MemoryCommand) -> Result<()> {
         MemoryCommand::ExportEvidence {
             path,
             receipts,
+            manifest_out,
+            signing_key,
             out,
             force,
-        } => memory_export_evidence(&path, receipts.as_deref(), out.as_deref(), force),
+        } => memory_export_evidence(MemoryExportEvidenceOptions {
+            path: &path,
+            receipts: receipts.as_deref(),
+            manifest_out: manifest_out.as_deref(),
+            signing_key: signing_key.as_deref(),
+            out: out.as_deref(),
+            force,
+        }),
     }
 }
 
@@ -4756,6 +4820,42 @@ struct EvidenceBundle {
     limitations: Vec<String>,
 }
 
+struct MemoryExportEvidenceOptions<'a> {
+    path: &'a Path,
+    receipts: Option<&'a Path>,
+    manifest_out: Option<&'a Path>,
+    signing_key: Option<&'a Path>,
+    out: Option<&'a Path>,
+    force: bool,
+}
+
+const EVIDENCE_MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-EVIDENCE-BUNDLE-MANIFEST-v1";
+
+#[derive(Debug, Serialize)]
+struct SignedEvidenceBundleManifest {
+    schema_version: u8,
+    payload: EvidenceBundleManifestPayload,
+    signer_node_id: Uuid,
+    signer_public_key: String,
+    signature: String,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceBundleManifestPayload {
+    schema_version: u8,
+    generated_at_micros: u64,
+    bundle_path: Option<String>,
+    bundle_hash: String,
+    bundle_valid: bool,
+    memory_path: String,
+    memory_entries: usize,
+    memory_records: usize,
+    memory_tombstones: usize,
+    receipts_path: Option<String>,
+    receipts_count: Option<usize>,
+    limitations: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct EvidenceMemorySummary {
     path: String,
@@ -4806,12 +4906,27 @@ struct EvidenceReceiptSummary {
     errors: Vec<String>,
 }
 
-fn memory_export_evidence(
-    path: &Path,
-    receipts: Option<&Path>,
-    out: Option<&Path>,
-    force: bool,
-) -> Result<()> {
+fn memory_export_evidence(options: MemoryExportEvidenceOptions<'_>) -> Result<()> {
+    let MemoryExportEvidenceOptions {
+        path,
+        receipts,
+        manifest_out,
+        signing_key,
+        out,
+        force,
+    } = options;
+    match (manifest_out, signing_key) {
+        (Some(_), Some(_)) => {}
+        (Some(_), None) => bail!("--manifest-out requires --signing-key"),
+        (None, Some(_)) => bail!("--signing-key requires --manifest-out"),
+        (None, None) => {}
+    }
+    if let (Some(out), Some(manifest_out)) = (out, manifest_out)
+        && out == manifest_out
+    {
+        bail!("--out and --manifest-out must be different paths");
+    }
+
     let memory = summarize_memory_evidence(path);
     let receipts = receipts.map(summarize_receipt_evidence);
     let valid = memory.verified
@@ -4830,7 +4945,50 @@ fn memory_export_evidence(
             "re-verify the referenced memory JSONL with `zap memory verify` and receipts with `zap receipts verify`".to_string(),
         ],
     };
-    write_json_output(&bundle, out, force)
+    let bundle_output = format!("{}\n", serde_json::to_string_pretty(&bundle)?);
+    if let (Some(manifest_out), Some(signing_key)) = (manifest_out, signing_key) {
+        let signing_key = load_keypair(signing_key)?;
+        let manifest = sign_evidence_bundle_manifest(&bundle, out, &bundle_output, &signing_key)?;
+        write_json_output(&manifest, Some(manifest_out), force)?;
+    }
+    match out {
+        Some(path) => write_text_file(path, &bundle_output, force),
+        None => {
+            print!("{bundle_output}");
+            Ok(())
+        }
+    }
+}
+
+fn sign_evidence_bundle_manifest(
+    bundle: &EvidenceBundle,
+    bundle_path: Option<&Path>,
+    bundle_output: &str,
+    signer: &Keypair,
+) -> Result<SignedEvidenceBundleManifest> {
+    let payload = EvidenceBundleManifestPayload {
+        schema_version: 1,
+        generated_at_micros: now_micros()?,
+        bundle_path: bundle_path.map(|path| path.display().to_string()),
+        bundle_hash: hash_bytes_for_report(bundle_output.as_bytes()),
+        bundle_valid: bundle.valid,
+        memory_path: bundle.memory.path.clone(),
+        memory_entries: bundle.memory.entries,
+        memory_records: bundle.memory.records,
+        memory_tombstones: bundle.memory.tombstones,
+        receipts_path: bundle.receipts.as_ref().map(|receipts| receipts.path.clone()),
+        receipts_count: bundle.receipts.as_ref().map(|receipts| receipts.receipts),
+        limitations: bundle.limitations.clone(),
+    };
+    let payload_bytes = serde_json::to_vec(&payload)?;
+    let signature = signer.sign_domain_message(EVIDENCE_MANIFEST_SIGNATURE_DOMAIN, &payload_bytes);
+    Ok(SignedEvidenceBundleManifest {
+        schema_version: 1,
+        payload,
+        signer_node_id: signer.node_id(),
+        signer_public_key: STANDARD_NO_PAD.encode(signer.verifying_key().to_bytes()),
+        signature: STANDARD_NO_PAD.encode(signature),
+    })
 }
 
 fn summarize_memory_evidence(path: &Path) -> EvidenceMemorySummary {
@@ -6389,14 +6547,14 @@ fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
             content_type: AGENT_CONTENT_TYPE,
             protocol_schema_version: AGENT_PROTOCOL_SCHEMA_VERSION,
             subjects: vec![
-                "zap.agent.session",
-                "zap.agent.intent",
-                "zap.agent.status",
-                "zap.agent.result",
-                "zap.agent.delegation.request",
-                "zap.agent.delegation.response",
-                "zap.agent.capability.negotiation.request",
-                "zap.agent.capability.negotiation.response",
+                AGENT_SESSION_SUBJECT,
+                AGENT_INTENT_SUBJECT,
+                AGENT_STATUS_SUBJECT,
+                AGENT_RESULT_SUBJECT,
+                AGENT_DELEGATION_REQUEST_SUBJECT,
+                AGENT_DELEGATION_RESPONSE_SUBJECT,
+                AGENT_CAPABILITY_NEGOTIATION_REQUEST_SUBJECT,
+                AGENT_CAPABILITY_NEGOTIATION_RESPONSE_SUBJECT,
             ],
             json_schema: agent_message_json_schema(),
         },
@@ -6491,6 +6649,26 @@ fn schema_export(out: Option<&Path>, force: bool) -> Result<()> {
             SchemaFixtureExport {
                 path: "fixtures/agent-intent-message-v1.json",
                 purpose: "agent intent message contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-session-message-v1.json",
+                purpose: "agent session message contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-delegation-request-message-v1.json",
+                purpose: "agent delegation request contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-delegation-response-message-v1.json",
+                purpose: "agent delegation response contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-capability-negotiation-request-message-v1.json",
+                purpose: "agent capability negotiation request contract",
+            },
+            SchemaFixtureExport {
+                path: "fixtures/agent-capability-negotiation-response-message-v1.json",
+                purpose: "agent capability negotiation response contract",
             },
             SchemaFixtureExport {
                 path: "fixtures/control-subjects-v1.json",
@@ -7219,7 +7397,9 @@ fn verify_fixture_file(path: &Path) -> FixtureVerification {
     validate_non_empty_json_string(&value, "description", &mut fixture.errors);
 
     match fixture.name.as_str() {
-        "agent-intent-message-v1.json" => verify_agent_intent_fixture(&value, &mut fixture.errors),
+        name if name.starts_with("agent-") && name.ends_with("-message-v1.json") => {
+            verify_agent_message_fixture(&value, &mut fixture.errors)
+        }
         "control-subjects-v1.json" => verify_control_subjects_fixture(&value, &mut fixture.errors),
         "zenv-control-registry-bundle-manifest-request.json" => {
             verify_registry_bundle_manifest_request_fixture(&value, &mut fixture.errors)
@@ -7233,9 +7413,12 @@ fn verify_fixture_file(path: &Path) -> FixtureVerification {
     fixture
 }
 
-fn verify_agent_intent_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
-    validate_json_string_equals(value, "subject", "zap.agent.intent", errors);
+fn verify_agent_message_fixture(value: &serde_json::Value, errors: &mut Vec<String>) {
     validate_json_string_equals(value, "content_type", AGENT_CONTENT_TYPE, errors);
+    let Some(subject) = value.get("subject").and_then(|value| value.as_str()) else {
+        errors.push("subject must be a string".to_string());
+        return;
+    };
     let Some(body) = value.get("body_json") else {
         errors.push("body_json must be present".to_string());
         return;
@@ -7244,8 +7427,11 @@ fn verify_agent_intent_fixture(value: &serde_json::Value, errors: &mut Vec<Strin
         .ok()
         .and_then(|bytes| AgentMessage::from_json_slice(&bytes).ok())
     {
-        Some(AgentMessage::Intent(_)) => {}
-        Some(_) => errors.push("body_json must be an agent intent message".to_string()),
+        Some(message) if message.subject() == subject => {}
+        Some(message) => errors.push(format!(
+            "subject {subject} does not match agent message subject {}",
+            message.subject()
+        )),
         None => errors.push("body_json must parse as a zap-agent message".to_string()),
     }
 }

@@ -1,0 +1,28 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Agent capability negotiation response payload for the zap.agent.capability_negotiation.response ZENV subject.",
+  "subject": "zap.agent.capability_negotiation.response",
+  "content_type": "application/zap-agent+json",
+  "body_json": {
+    "type": "capability_negotiation_response",
+    "payload": {
+      "schema_version": 1,
+      "negotiation_id": "44444444-4444-4444-8444-444444444444",
+      "session_id": "11111111-1111-4111-8111-111111111111",
+      "responder_agent": "executor.safety",
+      "decision": "partial",
+      "accepted_capabilities": [
+        "driver.execute:valve.open"
+      ],
+      "unsupported_capabilities": [
+        "sensor.read:valve.status"
+      ],
+      "supported_intents": [
+        "act"
+      ],
+      "expires_at_unix_micros": 1710000300000000,
+      "reason": "status sensor is not bound on this executor",
+      "metadata": {}
+    }
+  }
+}

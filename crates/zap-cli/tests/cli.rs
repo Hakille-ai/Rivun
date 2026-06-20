@@ -1,5 +1,6 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 use std::{net::UdpSocket, process::Command};
 use tempfile::tempdir;
 use tokio::time::{Duration, timeout};
@@ -7,7 +8,7 @@ use uuid::Uuid;
 use zap_core::{ZapFlags, ZapFrame};
 use zap_crypto::{
     Keypair, POA_VALIDATOR_SET_SCHEMA_VERSION, PoaValidatorDescriptor, PoaValidatorSet,
-    SignedPoaValidatorSet, sign_frame, sign_poa_validator_set, verify_frame,
+    PublicKey, SignedPoaValidatorSet, sign_frame, sign_poa_validator_set, verify_frame,
     verify_poa_certificate,
 };
 use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
@@ -778,7 +779,7 @@ fn fixtures_verify_accepts_repo_fixtures() {
     );
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["valid"], true);
-    assert_eq!(json["fixtures"].as_array().unwrap().len(), 3);
+    assert_eq!(json["fixtures"].as_array().unwrap().len(), 8);
     assert_eq!(json["errors"].as_array().unwrap().len(), 0);
     assert!(
         json["fixtures"]
@@ -800,11 +801,18 @@ fn fixtures_verify_reports_invalid_fixture_contracts() {
 {
   "fixture_schema_version": 2,
   "description": "",
-  "subject": "zap.agent.status",
+  "subject": "zap.agent.intent",
   "content_type": "application/json",
   "body_json": {
     "type": "status",
-    "payload": {}
+    "payload": {
+      "schema_version": 1,
+      "session_id": "11111111-1111-4111-8111-111111111111",
+      "agent_id": "planner.main",
+      "status": "running",
+      "updated_at_micros": 1710000001000000,
+      "metadata": {}
+    }
   }
 }
 "#,
@@ -841,11 +849,6 @@ fn fixtures_verify_reports_invalid_fixture_contracts() {
     assert!(errors.iter().any(|error| error.contains("description")));
     assert!(errors.iter().any(|error| error.contains("subject")));
     assert!(errors.iter().any(|error| error.contains("content_type")));
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.contains("zap-agent message"))
-    );
 }
 
 fn hex_transport_key(key: [u8; 32]) -> String {
@@ -5261,6 +5264,31 @@ fn memory_put_query_and_verify_round_trip() {
     let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
     assert_eq!(report["verified"], true);
     assert_eq!(report["records"], 1);
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EvidenceManifestPayloadForTest {
+    schema_version: u8,
+    generated_at_micros: u64,
+    bundle_path: Option<String>,
+    bundle_hash: String,
+    bundle_valid: bool,
+    memory_path: String,
+    memory_entries: usize,
+    memory_records: usize,
+    memory_tombstones: usize,
+    receipts_path: Option<String>,
+    receipts_count: Option<usize>,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SignedEvidenceManifestForTest {
+    schema_version: u8,
+    payload: EvidenceManifestPayloadForTest,
+    signer_node_id: Uuid,
+    signer_public_key: String,
+    signature: String,
 }
 
 #[test]

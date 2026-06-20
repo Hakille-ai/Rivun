@@ -1,0 +1,26 @@
+{
+  "fixture_schema_version": 1,
+  "description": "Agent capability negotiation request payload for the zap.agent.capability_negotiation.request ZENV subject.",
+  "subject": "zap.agent.capability_negotiation.request",
+  "content_type": "application/zap-agent+json",
+  "body_json": {
+    "type": "capability_negotiation_request",
+    "payload": {
+      "schema_version": 1,
+      "negotiation_id": "44444444-4444-4444-8444-444444444444",
+      "session_id": "11111111-1111-4111-8111-111111111111",
+      "requester_agent": "planner.main",
+      "required_capabilities": [
+        "driver.execute:valve.open"
+      ],
+      "optional_capabilities": [
+        "sensor.read:valve.status"
+      ],
+      "desired_intents": [
+        "act",
+        "observe"
+      ],
+      "metadata": {}
+    }
+  }
+}

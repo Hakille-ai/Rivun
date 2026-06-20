@@ -66,6 +66,7 @@ cargo run -p zap-cli -- receipts pull \
   --config zap.toml \
   --target <peer-node-id> \
   --after-processed-at-micros 1735689600000000 \
+  --until-processed-at-micros 1735776000000000 \
   --limit 100 \
   --out logs/peer-receipts.jsonl \
   --json
@@ -76,6 +77,21 @@ cargo run -p zap-cli -- receipts pull \
 JSONL log that can be passed to `receipts verify`, `prune`, or `merge`.
 Requests can filter by processed timestamp, kind, subject, source node, and
 target node. Responses include a `truncated` flag when more matching receipts
-exist than the requested limit.
+exist than the requested limit and may include `next_after_processed_at_micros`
+so clients can resume a bounded pull without duplicating the last page.
+
+The ledger crate also defines signed segment primitives for large logs:
+
+- `ReceiptSegmentManifest` summarizes one ordered JSONL segment with receipt
+  count, byte length, first/last processing timestamps, segment hash, first/last
+  receipt hashes, and optional previous-segment hash.
+- `SignedReceiptSegmentManifest` signs the manifest with the processing node
+  key using the `ZAP-RECEIPT-SEGMENT-MANIFEST-v1` domain.
+- `ReceiptSegmentIndex` stores manifest-derived ranges and selects candidate
+  segments for a `ReceiptReplicationRequest` before reading receipt lines.
+
+These primitives are format-level building blocks. Automatic daemon log
+rotation and disk-backed segment index maintenance are still separate operator
+workflows.
 
 Receipts make local and future distributed operation auditable without creating financial semantics.

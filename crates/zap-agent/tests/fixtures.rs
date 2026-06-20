@@ -46,6 +46,30 @@ fn agent_intent_fixture_matches_agent_protocol_contract() {
 }
 
 #[test]
+fn all_agent_message_fixtures_match_their_declared_subjects() {
+    for name in [
+        "agent-intent-message-v1.json",
+        "agent-session-message-v1.json",
+        "agent-delegation-request-message-v1.json",
+        "agent-delegation-response-message-v1.json",
+        "agent-capability-negotiation-request-message-v1.json",
+        "agent-capability-negotiation-response-message-v1.json",
+    ] {
+        let root = fixture(name);
+        assert_eq!(root["fixture_schema_version"], 1, "{name}");
+        assert_eq!(root["content_type"], AGENT_CONTENT_TYPE, "{name}");
+        let body = serde_json::to_vec(&root["body_json"]).expect("body_json should serialize");
+        let message =
+            AgentMessage::from_json_slice(&body).expect("body_json should be valid agent protocol");
+        assert_eq!(
+            root["subject"].as_str().expect("subject should be string"),
+            message.subject(),
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn control_subjects_fixture_lists_unique_v1_control_subjects() {
     let root = fixture("control-subjects-v1.json");
 

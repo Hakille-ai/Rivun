@@ -133,10 +133,12 @@ artifact entries. Responses are signed as normal frames and carry a
 checksums. Receivers should treat the manifest as discovery metadata, then
 verify downloaded bundle files with `registry bundle verify` before import.
 
-Receipt replication requests can filter by `after_processed_at_micros`, `kind`,
-`subject`, `source_node`, and `target_node`, and include a bounded `limit`.
-Responses contain signed receipt objects. Receivers must verify the response
-frame signature and each nested receipt signature before archiving or merging.
+Receipt replication requests can filter by `after_processed_at_micros`,
+`until_processed_at_micros`, `kind`, `subject`, `source_node`, and
+`target_node`, and include a bounded `limit`. Responses contain signed receipt
+objects, a `truncated` flag, and optionally `next_after_processed_at_micros`
+for cursor-style bounded pulls. Receivers must verify the response frame
+signature and each nested receipt signature before archiving or merging.
 
 ## Encrypted UDP Datagram
 
