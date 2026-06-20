@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Terminal, Key, Wrench, GitBranch, Play, CheckCircle, ShieldAlert } from 'lucide-react';
+import { Key, Wrench, GitBranch, ShieldAlert } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,7 @@ export default function GettingStartedPage() {
     <div className="space-y-8 font-sans">
       <div>
         <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight mb-2 text-white">Getting Started</h1>
-        <p className="text-zinc-400 text-lg">Learn how to build, configure, and run a secure low-latency ZAP node in minutes.</p>
+        <p className="text-zinc-400 text-lg">Build the CLI, verify fixtures, validate packs, and run the local smoke test in minutes.</p>
       </div>
 
       {/* Hero Visual Card */}
@@ -36,9 +36,9 @@ export default function GettingStartedPage() {
           {/* Content Column */}
           <div className="md:col-span-7 p-6 md:p-8 flex flex-col justify-center space-y-3 bg-zinc-950/20">
             <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 block">Onboarding Pipeline</span>
-            <h3 className="text-xl font-bold text-white tracking-tight">Four-Step Node Deployment</h3>
+            <h3 className="text-xl font-bold text-white tracking-tight">Five-Minute Source Check</h3>
             <p className="text-sm text-zinc-400 leading-relaxed">
-              Go from cloning the repository to sending cryptographically signed action payloads. Build the CLI tools, generate cryptographic node identities, check configurations with ZAP Doctor, and start dispatching envelopes across the mesh.
+              Go from cloning the repository to a verified local toolchain. Build the CLI, check the shared protocol fixtures, validate domain packs, and use the smoke test for live dispatch coverage.
             </p>
           </div>
         </div>
@@ -93,7 +93,7 @@ export default function GettingStartedPage() {
             <pre className="text-xs bg-[#050505] p-3 rounded-lg border border-zinc-900 font-mono text-zinc-300">
               <code>{`git clone https://github.com/Hakille-ai/ZAP.git
 cd ZAP
-cargo build --release -p zap-cli`}</code>
+cargo build --locked -p zap-cli`}</code>
             </pre>
           </CardContent>
         </Card>
@@ -109,16 +109,16 @@ cargo build --release -p zap-cli`}</code>
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 1</Badge>
-                <h3 className="text-white font-semibold">Generate Cryptographic Node Identity</h3>
+                <h3 className="text-white font-semibold">Verify Protocol Fixtures</h3>
               </div>
               <p className="text-sm text-zinc-400">
-                Every node requires an Ed25519 identity key. The public key is hashed using BLAKE3 to derive your node&apos;s UUID.
+                Shared fixtures keep Rust, Python, TypeScript, Go, and operator tooling aligned on stable protocol contracts.
               </p>
             </div>
             <div className="flex-1">
               <pre className="text-xs bg-[#050505] p-3.5 rounded-lg border border-zinc-900 font-mono text-zinc-300">
-                <code>{`# Generate private keypair
-zap keygen --out .zap/node-a.key`}</code>
+                <code>{`cargo run --locked -p zap-cli -- \\
+  fixtures verify --fixtures fixtures`}</code>
               </pre>
             </div>
           </div>
@@ -127,16 +127,16 @@ zap keygen --out .zap/node-a.key`}</code>
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 2</Badge>
-                <h3 className="text-white font-semibold">Validate Node Configurations</h3>
+                <h3 className="text-white font-semibold">Validate Domain Packs</h3>
               </div>
               <p className="text-sm text-zinc-400">
-                Integrity checker (doctor) assesses local configs, compiles host schema, and validates encryption files before launch.
+                Domain packs package capabilities, schemas, policies, and examples without weakening the core safety model.
               </p>
             </div>
             <div className="flex-1">
               <pre className="text-xs bg-[#050505] p-3.5 rounded-lg border border-zinc-900 font-mono text-zinc-300">
-                <code>{`# Validate configuration rules
-zap doctor --config zap.toml --strict`}</code>
+                <code>{`cargo run --locked -p zap-cli -- \\
+  pack list --root examples/domain-packs`}</code>
               </pre>
             </div>
           </div>
@@ -145,19 +145,15 @@ zap doctor --config zap.toml --strict`}</code>
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 3</Badge>
-                <h3 className="text-white font-semibold">Dispatch Action Payloads</h3>
+                <h3 className="text-white font-semibold">Run Live Dispatch Smoke</h3>
               </div>
               <p className="text-sm text-zinc-400">
-                Transmit cryptographically signed commands across the UDP mesh grid to a target receiver node.
+                The smoke test launches a local node, sends an action, and verifies the receipt path without manual peer editing.
               </p>
             </div>
             <div className="flex-1">
               <pre className="text-xs bg-[#050505] p-3.5 rounded-lg border border-zinc-900 font-mono text-zinc-300">
-                <code>{`zap send \\
-  --config node-b.toml \\
-  --target <node-a-uuid> \\
-  --action echo \\
-  --payload "Hello ZAP"`}</code>
+                <code>{`cargo ci-smoke`}</code>
               </pre>
             </div>
           </div>

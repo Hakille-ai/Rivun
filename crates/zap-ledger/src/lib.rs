@@ -104,6 +104,20 @@ pub struct PoaReceipt {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PactReceiptReference {
+    pub pact_id: Uuid,
+    pub intent: String,
+    pub hash: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poa_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ActionReceipt {
     pub schema_version: u8,
     pub node_id: Uuid,
@@ -122,6 +136,8 @@ pub struct ActionReceipt {
     pub consensus_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poa: Option<PoaReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pact: Option<PactReceiptReference>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -612,8 +628,31 @@ impl SignedActionReceipt {
         processed_at_micros: u64,
         required_poa_threshold: Option<u16>,
     ) -> Result<Self> {
+        Self::new_message_with_pact(
+            signer,
+            frame,
+            kind,
+            subject,
+            output,
+            processed_at_micros,
+            required_poa_threshold,
+            None,
+        )
+    }
+
+    pub fn new_message_with_pact(
+        signer: &Keypair,
+        frame: &ZapFrame,
+        kind: impl Into<String>,
+        subject: impl Into<String>,
+        output: Option<&[u8]>,
+        processed_at_micros: u64,
+        required_poa_threshold: Option<u16>,
+        pact: Option<PactReceiptReference>,
+    ) -> Result<Self> {
         let kind = kind.into();
         let subject = subject.into();
+        let output_hash = output.map(hash_bytes);
         let receipt = ActionReceipt {
             schema_version: RECEIPT_SCHEMA_VERSION,
             node_id: signer.node_id(),
@@ -624,12 +663,16 @@ impl SignedActionReceipt {
             action: subject,
             frame_hash: hash_bytes(&frame.encode()),
             payload_hash: hash_bytes(&frame.payload),
-            output_hash: output.map(hash_bytes),
+            output_hash: output_hash.clone(),
             frame_timestamp_micros: frame.header.timestamp_micros,
             processed_at_micros,
             flags: frame.header.flags.bits(),
             consensus_required: frame.header.flags.contains(ZapFlags::REQUIRES_CONSENSUS),
             poa: build_poa_receipt(frame, required_poa_threshold),
+            pact: pact.map(|mut pact| {
+                pact.output_hash = pact.output_hash.or(output_hash);
+                pact
+            }),
         };
         let signer_public_key = STANDARD_NO_PAD.encode(signer.verifying_key().to_bytes());
         let mut signed = Self {

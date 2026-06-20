@@ -1,6 +1,5 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 use std::{net::UdpSocket, process::Command};
 use tempfile::tempdir;
 use tokio::time::{Duration, timeout};
@@ -8,7 +7,7 @@ use uuid::Uuid;
 use zap_core::{ZapFlags, ZapFrame};
 use zap_crypto::{
     Keypair, POA_VALIDATOR_SET_SCHEMA_VERSION, PoaValidatorDescriptor, PoaValidatorSet,
-    PublicKey, SignedPoaValidatorSet, sign_frame, sign_poa_validator_set, verify_frame,
+    SignedPoaValidatorSet, sign_frame, sign_poa_validator_set, verify_frame,
     verify_poa_certificate,
 };
 use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
@@ -327,12 +326,20 @@ fn schema_export_includes_protocol_constants_and_fixture_catalog() {
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["schema_version"], 1);
     assert_eq!(json["agent"]["content_type"], "application/zap-agent+json");
+    assert_eq!(json["pact"]["content_type"], "application/zap-pact+json");
     assert!(
         json["agent"]["subjects"]
             .as_array()
             .unwrap()
             .iter()
             .any(|subject| subject == "zap.agent.intent")
+    );
+    assert!(
+        json["pact"]["subjects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|subject| subject["subject"] == "zap.pact.record" && subject["kind"] == "action")
     );
     assert!(
         json["controls"]["receipts"]
@@ -347,6 +354,13 @@ fn schema_export_includes_protocol_constants_and_fixture_catalog() {
             .unwrap()
             .iter()
             .any(|fixture| fixture["path"] == "fixtures/protocol/receipt-sample-v1.json")
+    );
+    assert!(
+        json["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fixture| fixture["path"] == "fixtures/pact-record-v1.json")
     );
 }
 
@@ -779,7 +793,7 @@ fn fixtures_verify_accepts_repo_fixtures() {
     );
     let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(json["valid"], true);
-    assert_eq!(json["fixtures"].as_array().unwrap().len(), 8);
+    assert_eq!(json["fixtures"].as_array().unwrap().len(), 17);
     assert_eq!(json["errors"].as_array().unwrap().len(), 0);
     assert!(
         json["fixtures"]
@@ -787,6 +801,63 @@ fn fixtures_verify_accepts_repo_fixtures() {
             .unwrap()
             .iter()
             .any(|fixture| fixture["name"] == "agent-intent-message-v1.json")
+    );
+    assert!(
+        json["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fixture| fixture["name"] == "protocol/poa-control-frame-v1.json")
+    );
+    assert!(
+        json["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|fixture| fixture["name"] == "pact-record-v1.json")
+    );
+}
+
+#[test]
+fn fixtures_verify_reports_sdk_conformance_coverage() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..");
+    let fixtures_dir = root.join("fixtures");
+    let sdk_dir = root.join("sdks").join("typescript");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "fixtures",
+            "verify",
+            "--fixtures",
+            fixtures_dir.to_str().unwrap(),
+            "--sdk",
+            sdk_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["sdk"]["kind"], "typescript");
+    assert_eq!(json["sdk"]["valid"], true);
+    assert!(
+        json["sdk"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|check| check
+                .as_str()
+                .unwrap()
+                .contains("protocol/receipt-sample-v1.json"))
     );
 }
 
@@ -1625,6 +1696,291 @@ fn agent_schema_and_validate_accept_agent_messages() {
     let report: serde_json::Value = serde_json::from_slice(&validate.stdout).unwrap();
     assert_eq!(report["valid"], true);
     assert_eq!(report["subject"], "zap.agent.intent");
+}
+
+#[test]
+fn pact_cli_create_sign_verify_and_bundle_verify() {
+    let dir = tempdir().unwrap();
+    let key = Keypair::generate();
+    let key_path = dir.path().join("node.key");
+    let unsigned_path = dir.path().join("pact-unsigned.json");
+    let signed_path = dir.path().join("pact-signed.json");
+    let bundle_path = dir.path().join("pact-bundle.json");
+    std::fs::write(&key_path, key.to_key_file_toml().unwrap()).unwrap();
+
+    let create = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "create",
+            "--pact-id",
+            "33333333-3333-4333-8333-333333333333",
+            "--actor",
+            "agent.alpha",
+            "--target",
+            "driver.valve",
+            "--intent",
+            "valve.open",
+            "--object",
+            r#"{"valve":"v-7"}"#,
+            "--terms",
+            r#"{"max_runtime_ms":5000}"#,
+            "--consent",
+            r#"{"operator":"ops.lead","approved":true}"#,
+            "--proof",
+            r#"{"kind":"policy","decision":"allow"}"#,
+            "--created-at-micros",
+            "1893456000000000",
+            "--expires-at-micros",
+            "1893459600000000",
+            "--out",
+            unsigned_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let sign = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "sign",
+            "--input",
+            unsigned_path.to_str().unwrap(),
+            "--key",
+            key_path.to_str().unwrap(),
+            "--out",
+            signed_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        sign.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sign.stderr)
+    );
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "verify",
+            "--input",
+            signed_path.to_str().unwrap(),
+            "--now-micros",
+            "1893457000000000",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        verify.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verify.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["pact_id"], "33333333-3333-4333-8333-333333333333");
+
+    let bundle_export = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "bundle",
+            "export",
+            "--pact",
+            signed_path.to_str().unwrap(),
+            "--out",
+            bundle_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        bundle_export.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bundle_export.stderr)
+    );
+
+    let bundle_verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "bundle",
+            "verify",
+            "--bundle",
+            bundle_path.to_str().unwrap(),
+            "--now-micros",
+            "1893457000000000",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        bundle_verify.status.success(),
+        "{}",
+        String::from_utf8_lossy(&bundle_verify.stderr)
+    );
+}
+
+#[test]
+fn pact_cli_rejects_mutated_terms() {
+    let dir = tempdir().unwrap();
+    let key = Keypair::generate();
+    let key_path = dir.path().join("node.key");
+    let unsigned_path = dir.path().join("pact-unsigned.json");
+    let signed_path = dir.path().join("pact-signed.json");
+    std::fs::write(&key_path, key.to_key_file_toml().unwrap()).unwrap();
+
+    let create = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "create",
+            "--pact-id",
+            "33333333-3333-4333-8333-333333333333",
+            "--actor",
+            "agent.alpha",
+            "--target",
+            "driver.valve",
+            "--intent",
+            "valve.open",
+            "--terms",
+            r#"{"max_runtime_ms":5000}"#,
+            "--created-at-micros",
+            "1893456000000000",
+            "--out",
+            unsigned_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let sign = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "sign",
+            "--input",
+            unsigned_path.to_str().unwrap(),
+            "--key",
+            key_path.to_str().unwrap(),
+            "--out",
+            signed_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        sign.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sign.stderr)
+    );
+
+    let mut signed: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&signed_path).unwrap()).unwrap();
+    signed["terms"] = serde_json::json!({"max_runtime_ms":1});
+    std::fs::write(&signed_path, serde_json::to_vec_pretty(&signed).unwrap()).unwrap();
+
+    let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args(["pact", "verify", "--input", signed_path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!verify.status.success());
+    assert!(String::from_utf8_lossy(&verify.stderr).contains("PACT hash mismatch"));
+}
+
+#[test]
+fn pact_cli_revoke_marks_signed_record_revoked() {
+    let dir = tempdir().unwrap();
+    let key = Keypair::generate();
+    let key_path = dir.path().join("node.key");
+    let unsigned_path = dir.path().join("pact-unsigned.json");
+    let signed_path = dir.path().join("pact-signed.json");
+    let revoked_path = dir.path().join("pact-revoked.json");
+    std::fs::write(&key_path, key.to_key_file_toml().unwrap()).unwrap();
+
+    let create = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "create",
+            "--pact-id",
+            "33333333-3333-4333-8333-333333333333",
+            "--actor",
+            "agent.alpha",
+            "--target",
+            "driver.valve",
+            "--intent",
+            "valve.open",
+            "--created-at-micros",
+            "1893456000000000",
+            "--out",
+            unsigned_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let sign = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "sign",
+            "--input",
+            unsigned_path.to_str().unwrap(),
+            "--key",
+            key_path.to_str().unwrap(),
+            "--out",
+            signed_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        sign.status.success(),
+        "{}",
+        String::from_utf8_lossy(&sign.stderr)
+    );
+
+    let revoke = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "pact",
+            "revoke",
+            "--input",
+            signed_path.to_str().unwrap(),
+            "--revoked-by",
+            "ops.lead",
+            "--reason",
+            "operator stop",
+            "--key",
+            key_path.to_str().unwrap(),
+            "--revoked-at-micros",
+            "1893457000000000",
+            "--out",
+            revoked_path.to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        revoke.status.success(),
+        "{}",
+        String::from_utf8_lossy(&revoke.stderr)
+    );
+
+    let revoked: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&revoked_path).unwrap()).unwrap();
+    assert_eq!(revoked["status"], "revoked");
+    assert_eq!(revoked["revocation"]["revoked_by"], "ops.lead");
+    assert!(revoked["revocation"]["signature"].as_str().unwrap().len() > 80);
 }
 
 #[test]
@@ -5264,31 +5620,6 @@ fn memory_put_query_and_verify_round_trip() {
     let report: serde_json::Value = serde_json::from_slice(&verify.stdout).unwrap();
     assert_eq!(report["verified"], true);
     assert_eq!(report["records"], 1);
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct EvidenceManifestPayloadForTest {
-    schema_version: u8,
-    generated_at_micros: u64,
-    bundle_path: Option<String>,
-    bundle_hash: String,
-    bundle_valid: bool,
-    memory_path: String,
-    memory_entries: usize,
-    memory_records: usize,
-    memory_tombstones: usize,
-    receipts_path: Option<String>,
-    receipts_count: Option<usize>,
-    limitations: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SignedEvidenceManifestForTest {
-    schema_version: u8,
-    payload: EvidenceManifestPayloadForTest,
-    signer_node_id: Uuid,
-    signer_public_key: String,
-    signature: String,
 }
 
 #[test]

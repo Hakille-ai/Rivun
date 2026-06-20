@@ -1,0 +1,70 @@
+{
+    "fixture_schema_version":  1,
+    "description":  "Readable fixture for a signed zap.pact.record ZENV action frame.",
+    "envelope":  {
+                     "magic":  "ZENV",
+                     "version":  1,
+                     "kind_name":  "action",
+                     "kind_value":  7,
+                     "reserved":  0,
+                     "id":  "44444444-4444-4444-8444-444444444444",
+                     "correlation_id":  "00000000-0000-0000-0000-000000000000",
+                     "causation_id":  "00000000-0000-0000-0000-000000000000",
+                     "subject":  "zap.pact.record",
+                     "content_type":  "application/zap-pact+json",
+                     "metadata_base64":  "",
+                     "body_json":  {
+                                       "schema_version":  1,
+                                       "pact_id":  "33333333-3333-4333-8333-333333333333",
+                                       "actor":  "agent.alpha",
+                                       "target":  "driver.valve",
+                                       "intent":  "valve.open",
+                                       "object":  {
+                                                      "valve":  "v-7",
+                                                      "zone":  "north"
+                                                  },
+                                       "terms":  {
+                                                     "max_runtime_ms":  5000,
+                                                     "requires_receipt":  true
+                                                 },
+                                       "consent":  {
+                                                       "approved":  true,
+                                                       "operator":  "ops.lead"
+                                                   },
+                                       "proof":  {
+                                                     "decision":  "allow",
+                                                     "kind":  "policy",
+                                                     "policy":  "valve-open-v1"
+                                                 },
+                                       "created_at_micros":  1893456000000000,
+                                       "expires_at_micros":  1893459600000000,
+                                       "actor_public_key":  "lhnFKLpILI4rpBh+6JS2C6VHAcGIltiBU7KCQKUt3XE",
+                                       "hash":  "blake3:57c2bf0d524b05c93341215d07537ddcf279f76b7329ebd10bd80948b83ad597",
+                                       "signature":  "uj+6DEXClQH3/pMQsPRC44UMRPNpHi/H1lKcZqakDxGSQLACqAPLoiViOfuv1hU/v1Q9SSoreusJU1fEN/CnAg",
+                                       "status":  "active"
+                                   }
+                 },
+    "wire_header":  {
+                        "magic":  "ZAP_",
+                        "version":  1,
+                        "flags":  [
+                                      "signed"
+                                  ],
+                        "source_node":  "11111111-1111-4111-8111-111111111111",
+                        "target_node":  "22222222-2222-4222-8222-222222222222",
+                        "timestamp_micros":  1893456000000100,
+                        "payload_len":  1024,
+                        "signature_hint_hex":  "6f4d10bc91aa8200"
+                    },
+    "security":  {
+                     "signed":  true,
+                     "encrypted":  false,
+                     "signature_hint_hex":  "6f4d10bc91aa8200",
+                     "auth_trailer":  {
+                                          "algorithm":  "ed25519",
+                                          "public_key_base64":  "lhnFKLpILI4rpBh+6JS2C6VHAcGIltiBU7KCQKUt3XE",
+                                          "signature_base64":  "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                                      },
+                     "poa_trailer":  null
+                 }
+}

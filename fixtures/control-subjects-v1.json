@@ -29,6 +29,21 @@
       "purpose": "Return a signed PoA validator set or an unavailable reason."
     },
     {
+      "subject": "zap.pact.verify",
+      "content_type": "application/zap-pact+json",
+      "purpose": "Exchange offline PACT verification requests or results."
+    },
+    {
+      "subject": "zap.pact.revoke",
+      "content_type": "application/zap-pact+json",
+      "purpose": "Exchange signed PACT revocation evidence."
+    },
+    {
+      "subject": "zap.pact.bundle",
+      "content_type": "application/zap-pact+json",
+      "purpose": "Exchange portable PACT bundles for offline verification."
+    },
+    {
       "subject": "zap.registry.index.request",
       "content_type": "application/zap-registry-index+json",
       "purpose": "Request a peer's ZapStore registry index."

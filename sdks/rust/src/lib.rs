@@ -18,6 +18,11 @@ pub use zap_envelope::{
     DEFAULT_CONTENT_TYPE, HEADER_LEN as ENVELOPE_HEADER_LEN, ZapEnvelope, ZapEnvelopeRef,
     ZapMessageKind,
 };
+pub use zap_pact::{
+    PACT_BUNDLE_SUBJECT, PACT_CONTENT_TYPE, PACT_RECORD_SUBJECT, PACT_REVOKE_SUBJECT,
+    PACT_SCHEMA_VERSION, PACT_VERIFY_SUBJECT, ZapPact, ZapPactBundle, ZapPactProof,
+    ZapPactRevocation, ZapPactStatus, ZapPactVerification,
+};
 pub use zap_store::{
     DRIVER_ABI_VERSION, DRIVER_HASH_PREFIX, DriverAbiRequirement, DriverManifest, DriverRegistry,
     DriverRegistryEntry, DriverRegistryMigration, DriverRegistryStatus,
@@ -280,5 +285,42 @@ mod tests {
             artifact_hash(b"driver"),
             "blake3:bb6f2f5117d7690122f64d2950ca874cd26fbe808e2e28dc9b914ebd22d7800b"
         );
+    }
+
+    #[test]
+    fn protocol_security_fixtures_are_readable_by_rust_sdk_tests() {
+        let signed: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/protocol/signed-control-frame-v1.json"))
+                .unwrap();
+        let poa: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/protocol/poa-control-frame-v1.json"))
+                .unwrap();
+        let capability: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/protocol/capability-response-v1.json"
+        ))
+        .unwrap();
+        let datagram: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/protocol/encrypted-datagram-v1.json"
+        ))
+        .unwrap();
+
+        assert_eq!(signed["security"]["signed"], true);
+        assert_eq!(signed["security"]["auth_trailer"]["algorithm"], "ed25519");
+        assert_eq!(poa["security"]["poa_trailer"]["threshold"], 1);
+        assert_eq!(capability["subject"], "zap.capability.response");
+        assert_eq!(datagram["cipher"], "ChaCha20-Poly1305");
+        assert_eq!(datagram["nonce_hex"].as_str().unwrap().len(), 24);
+    }
+
+    #[test]
+    fn pact_fixture_verifies_with_rust_sdk() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/pact-record-v1.json")).unwrap();
+        assert_eq!(fixture["subject"], PACT_RECORD_SUBJECT);
+        assert_eq!(fixture["content_type"], PACT_CONTENT_TYPE);
+        let pact: ZapPact = serde_json::from_value(fixture["body_json"].clone()).unwrap();
+        let verification = pact.verify(None).unwrap();
+        assert!(verification.valid);
+        assert_eq!(verification.hash, pact.hash.unwrap());
     }
 }

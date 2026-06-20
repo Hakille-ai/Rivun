@@ -2586,6 +2586,7 @@ dependencies = [
  "zap-memory",
  "zap-net",
  "zap-node",
+ "zap-pact",
  "zap-policy",
  "zap-router",
  "zap-runtime",
@@ -2749,6 +2750,7 @@ dependencies = [
  "zap-ledger",
  "zap-memory",
  "zap-net",
+ "zap-pact",
  "zap-policy",
  "zap-router",
  "zap-runtime",
@@ -2768,6 +2770,20 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "zap-pact"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "hex",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+ "zap-crypto",
 ]
 
 [[package]]

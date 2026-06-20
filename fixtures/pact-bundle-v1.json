@@ -1,0 +1,42 @@
+{
+    "fixture_schema_version":  1,
+    "description":  "Signed ZAP PACT v1 bundle containing a portable action record.",
+    "subject":  "zap.pact.bundle",
+    "content_type":  "application/zap-pact+json",
+    "body_json":  {
+                      "schema_version":  1,
+                      "pact":  {
+                                   "schema_version":  1,
+                                   "pact_id":  "33333333-3333-4333-8333-333333333333",
+                                   "actor":  "agent.alpha",
+                                   "target":  "driver.valve",
+                                   "intent":  "valve.open",
+                                   "object":  {
+                                                  "valve":  "v-7",
+                                                  "zone":  "north"
+                                              },
+                                   "terms":  {
+                                                 "max_runtime_ms":  5000,
+                                                 "requires_receipt":  true
+                                             },
+                                   "consent":  {
+                                                   "approved":  true,
+                                                   "operator":  "ops.lead"
+                                               },
+                                   "proof":  {
+                                                 "decision":  "allow",
+                                                 "kind":  "policy",
+                                                 "policy":  "valve-open-v1"
+                                             },
+                                   "created_at_micros":  1893456000000000,
+                                   "expires_at_micros":  1893459600000000,
+                                   "actor_public_key":  "lhnFKLpILI4rpBh+6JS2C6VHAcGIltiBU7KCQKUt3XE",
+                                   "hash":  "blake3:57c2bf0d524b05c93341215d07537ddcf279f76b7329ebd10bd80948b83ad597",
+                                   "signature":  "uj+6DEXClQH3/pMQsPRC44UMRPNpHi/H1lKcZqakDxGSQLACqAPLoiViOfuv1hU/v1Q9SSoreusJU1fEN/CnAg",
+                                   "status":  "active"
+                               },
+                      "metadata":  {
+
+                                   }
+                  }
+}

@@ -44,12 +44,13 @@ use zap_envelope::{
     ZapEnvelope, ZapEnvelopeRef, ZapMessageKind,
 };
 use zap_ledger::{
-    RECEIPT_REPLICATION_CONTENT_TYPE, RECEIPT_REPLICATION_REQUEST_SUBJECT,
+    PactReceiptReference, RECEIPT_REPLICATION_CONTENT_TYPE, RECEIPT_REPLICATION_REQUEST_SUBJECT,
     RECEIPT_REPLICATION_RESPONSE_SUBJECT, ReceiptReplicationRequest, ReceiptReplicationResponse,
     SignedActionReceipt,
 };
 use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
+use zap_pact::{PACT_CONTENT_TYPE, PACT_RECORD_SUBJECT, ZapPact};
 use zap_policy::{PolicyInput, PolicyRule, PolicySet};
 use zap_router::{RouteDecision, RouteMessage, RouteRule, RouteTable};
 use zap_runtime::{ExecutionLimits, HostCallKind, HostCallRecord, WasmDriver, WasmExecutor};
@@ -1927,12 +1928,7 @@ impl ZapNode {
         } else {
             self.route_message(&inbound, &message).await?
         };
-        self.write_receipt(
-            &inbound.frame,
-            message.kind,
-            &message.subject,
-            output.as_deref(),
-        )?;
+        self.write_receipt(&inbound.frame, &message, output.as_deref())?;
 
         Ok(NodeEvent {
             source: inbound.peer.node_id,
@@ -3135,8 +3131,7 @@ impl ZapNode {
     fn write_receipt(
         &self,
         frame: &zap_core::ZapFrame,
-        kind: ZapMessageKind,
-        subject: &str,
+        message: &InboundMessage,
         output: Option<&[u8]>,
     ) -> Result<()> {
         let Some(path) = &self.receipt_log_path else {
@@ -3156,14 +3151,16 @@ impl ZapNode {
             .flags
             .contains(zap_core::ZapFlags::REQUIRES_CONSENSUS)
             .then_some(self.poa_required_threshold);
-        let receipt = SignedActionReceipt::new_message(
+        let pact = pact_receipt_reference(message, frame)?;
+        let receipt = SignedActionReceipt::new_message_with_pact(
             &self.keypair,
             frame,
-            kind.as_str(),
-            subject,
+            message.kind.as_str(),
+            &message.subject,
             output,
             processed_at_micros,
             required_threshold,
+            pact,
         )?;
         let mut options = OpenOptions::new();
         options.create(true).append(true);
@@ -3188,6 +3185,40 @@ impl ZapNode {
         }
         Ok(())
     }
+}
+
+fn pact_receipt_reference(
+    message: &InboundMessage,
+    frame: &zap_core::ZapFrame,
+) -> Result<Option<PactReceiptReference>> {
+    if message.kind != ZapMessageKind::Action
+        || message.subject != PACT_RECORD_SUBJECT
+        || message.content_type.as_deref() != Some(PACT_CONTENT_TYPE)
+    {
+        return Ok(None);
+    }
+
+    let pact: ZapPact = serde_json::from_slice(&message.body)
+        .context("failed to parse zap.pact.record body for receipt reference")?;
+    let verification = pact
+        .verify(None)
+        .context("failed to verify zap.pact.record body for receipt reference")?;
+    let poa_summary = frame.poa.as_ref().map(|poa| {
+        format!(
+            "threshold={} attestations={}",
+            poa.threshold,
+            poa.attestations.len()
+        )
+    });
+    Ok(Some(PactReceiptReference {
+        pact_id: pact.pact_id,
+        intent: pact.intent,
+        hash: verification.hash,
+        status: format!("{:?}", verification.status).to_ascii_lowercase(),
+        policy_decision: None,
+        poa_summary,
+        output_hash: None,
+    }))
 }
 
 fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
@@ -6720,6 +6751,67 @@ required_json_fields = ["message"]
         assert_eq!(receipt.receipt.action, "echo");
         assert!(receipt.receipt.output_hash.is_some());
         assert!(receipt.receipt.poa.is_none());
+    }
+
+    #[tokio::test]
+    async fn node_receipt_references_verified_pact_record() {
+        let mut harness = node_harness(SecurityConfig::default()).await;
+        let receipt_path = harness._temp.path().join("receipts").join("pact.jsonl");
+        harness.node.receipt_log_path = Some(receipt_path.clone());
+
+        let mut pact = ZapPact::new(
+            "agent.alpha",
+            "driver.valve",
+            "valve.open",
+            1_893_456_000_000_000,
+        );
+        pact.pact_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        pact.object = serde_json::json!({"valve": "v-7"});
+        pact.terms = serde_json::json!({"max_runtime_ms": 5000});
+        pact.consent = serde_json::json!({"operator": "ops.lead", "approved": true});
+        pact.proof = serde_json::json!({"kind": "policy", "decision": "allow"});
+        pact.sign(&harness.sender_key).unwrap();
+        let body = serde_json::to_vec(&pact).unwrap();
+        let payload = ZapEnvelope::new(
+            ZapMessageKind::Action,
+            PACT_RECORD_SUBJECT,
+            PACT_CONTENT_TYPE,
+            Bytes::from(body),
+        )
+        .unwrap()
+        .encode()
+        .to_vec();
+        let unsigned = ZapFrame::with_timestamp(
+            harness.sender_key.node_id(),
+            harness.receiver_key.node_id(),
+            ZapFlags::ENCRYPTED,
+            now_micros().unwrap(),
+            Bytes::from(payload),
+        )
+        .unwrap();
+        let signed = sign_frame(&harness.sender_key, &unsigned).unwrap();
+
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.kind, ZapMessageKind::Action);
+        assert_eq!(event.subject, PACT_RECORD_SUBJECT);
+
+        let lines = std::fs::read_to_string(&receipt_path).unwrap();
+        let receipt = SignedActionReceipt::from_json_str(lines.trim()).unwrap();
+        receipt.verify().unwrap();
+        let pact_ref = receipt.receipt.pact.unwrap();
+        assert_eq!(pact_ref.pact_id, pact.pact_id);
+        assert_eq!(pact_ref.intent, "valve.open");
+        assert_eq!(pact_ref.hash, pact.hash.unwrap());
+        assert_eq!(pact_ref.status, "active");
     }
 
     #[tokio::test]

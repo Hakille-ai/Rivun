@@ -2,7 +2,8 @@
 
 This directory contains small, stable JSON fixtures for protocol and SDK
 interoperability work. They are intentionally human-readable descriptions of
-ZENV envelopes and JSON bodies rather than encoded binary frames.
+ZENV envelopes, frame security trailers, datagram shapes, and JSON bodies
+rather than opaque binary blobs.
 
 Use these fixtures when adding SDK tests, docs examples, or conformance checks
 that should agree on subjects, content types, schema versions, UUID handling,
@@ -21,12 +22,26 @@ and body field names.
 - `agent-capability-negotiation-request-message-v1.json` and
   `agent-capability-negotiation-response-message-v1.json` contain v1 capability
   negotiation contracts.
+- `pact-record-v1.json` contains a signed v1 `application/zap-pact+json`
+  action record for the `zap.pact.record` subject.
+- `pact-bundle-v1.json` contains a portable v1 PACT bundle with the same signed
+  record for offline verification tests.
 - `control-subjects-v1.json` lists the current v1 control subjects and media
   types documented in `docs/protocol.md`.
 - `protocol/zenv-unsigned-control-frame-v1.json` describes a deterministic
   unsigned v1 control envelope with no auth or PoA trailer.
+- `protocol/signed-control-frame-v1.json` describes a signed control frame with
+  an Ed25519 auth trailer.
+- `protocol/poa-control-frame-v1.json` describes a signed control frame with a
+  Proof-of-Action trailer summary.
+- `protocol/capability-response-v1.json` contains a deterministic capability
+  response body for SDK and control-message tests.
+- `protocol/encrypted-datagram-v1.json` documents the v1 encrypted UDP datagram
+  header, nonce, AAD, and ciphertext shape.
 - `protocol/receipt-sample-v1.json` contains a deterministic receipts response
   body that SDKs can load without requiring live signing keys.
+- `protocol/signed-pact-record-frame-v1.json` describes a signed `ZENV` action
+  frame carrying `application/zap-pact+json`.
 
 ## Conventions
 
@@ -39,3 +54,6 @@ and body field names.
 - Nested `protocol/` fixtures are golden interop samples. They are intentionally
   shaped for SDK and crate tests, while the top-level fixtures remain the stable
   set consumed by the current CLI fixture verifier.
+- `zap fixtures verify --fixtures fixtures` validates both top-level fixtures
+  and nested protocol fixtures. Add `--sdk <path>` to check that a local SDK has
+  fixture conformance coverage for its language-specific test layout.

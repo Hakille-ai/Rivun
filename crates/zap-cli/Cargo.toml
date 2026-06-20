@@ -31,6 +31,7 @@ zap-ledger = { path = "../zap-ledger" }
 zap-memory.workspace = true
 zap-net = { path = "../zap-net" }
 zap-node = { path = "../zap-node" }
+zap-pact.workspace = true
 zap-policy.workspace = true
 zap-router.workspace = true
 zap-runtime = { path = "../zap-runtime" }
