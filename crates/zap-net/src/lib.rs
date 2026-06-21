@@ -98,7 +98,8 @@ pub mod noise {
 const DATAGRAM_MAGIC: [u8; 4] = *b"ZAPD";
 const DATAGRAM_VERSION: u8 = 1;
 const DATAGRAM_HEADER_LEN: usize = 52;
-const DEFAULT_MAX_DATAGRAM_SIZE: usize = 65_507;
+pub const MAX_DATAGRAM_SIZE: usize = 65_507;
+const DEFAULT_MAX_DATAGRAM_SIZE: usize = MAX_DATAGRAM_SIZE;
 const DEFAULT_INBOUND_NONCE_CACHE_CAPACITY: usize = 4096;
 const NONCE_LEN: usize = 12;
 const NONCE_PREFIX_LEN: usize = 4;
@@ -247,6 +248,12 @@ pub struct ZapEndpoint {
 
 impl ZapEndpoint {
     pub async fn bind(config: ZapEndpointConfig) -> Result<Self> {
+        if config.max_datagram_size > MAX_DATAGRAM_SIZE {
+            return Err(ZapNetError::DatagramTooLarge {
+                max: MAX_DATAGRAM_SIZE,
+                actual: config.max_datagram_size,
+            });
+        }
         let socket = UdpSocket::bind(config.bind).await?;
         let endpoint = Self {
             socket: Arc::new(socket),
@@ -895,6 +902,20 @@ mod tests {
         .unwrap();
 
         assert!(endpoint.next_nonce.load(Ordering::Relaxed) <= NONCE_COUNTER_RANDOM_MASK);
+    }
+
+    #[tokio::test]
+    async fn endpoint_rejects_oversized_datagram_buffer_config() {
+        let mut config = ZapEndpointConfig::new("127.0.0.1:0".parse().unwrap(), id(1));
+        config.max_datagram_size = MAX_DATAGRAM_SIZE + 1;
+
+        assert!(matches!(
+            ZapEndpoint::bind(config).await,
+            Err(ZapNetError::DatagramTooLarge {
+                max: MAX_DATAGRAM_SIZE,
+                actual
+            }) if actual == MAX_DATAGRAM_SIZE + 1
+        ));
     }
 
     #[tokio::test]

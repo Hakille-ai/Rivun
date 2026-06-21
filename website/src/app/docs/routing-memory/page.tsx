@@ -1,7 +1,6 @@
 import Image from 'next/image';
-import { Network, Activity, FileCode, Search, Database } from 'lucide-react';
+import { Network, Search, Database } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
 export default function RoutingMemoryPage() {

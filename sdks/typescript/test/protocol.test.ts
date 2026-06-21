@@ -11,6 +11,8 @@ import {
   RECEIPT_REPLICATION_CONTENT_TYPE,
   RECEIPT_REPLICATION_RESPONSE_SUBJECT,
   RECEIPT_SIGNATURE_DOMAIN,
+  ZapEnvelope,
+  ZapMessageKind,
   ZapStoreClient,
   ZapUdpClient,
   artifactHash,
@@ -182,4 +184,27 @@ test("UDP client sends and receives control envelopes", async () => {
 
   assert.equal(response.subject, REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT);
   assert.equal((response.jsonBody() as { require_drivers: boolean }).require_drivers, true);
+});
+
+test("envelope decode rejects invalid UTF-8 and invalid UUIDs", () => {
+  const envelope = new ZapEnvelope({
+    kind: ZapMessageKind.control,
+    subject: "zap.test",
+    contentType: "application/json",
+    body: "{}",
+  });
+  const encoded = Buffer.from(envelope.encode());
+  encoded[74] = 0xff;
+
+  assert.throws(() => ZapEnvelope.decode(encoded), /invalid UTF-8 in subject/);
+  assert.throws(
+    () =>
+      new ZapEnvelope({
+        kind: ZapMessageKind.control,
+        subject: "zap.test",
+        contentType: "application/json",
+        id: "not-a-uuid",
+      }).encode(),
+    /invalid UUID/,
+  );
 });

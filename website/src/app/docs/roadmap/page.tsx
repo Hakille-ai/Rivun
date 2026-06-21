@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { CheckCircle2, Circle, Milestone, Cpu, Layers, Archive, Shield, Rocket } from 'lucide-react';
+import { CheckCircle2, Circle, Cpu, Layers, Archive, Shield, Rocket } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 

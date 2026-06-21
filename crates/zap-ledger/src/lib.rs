@@ -7,7 +7,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, verif
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -68,6 +68,18 @@ pub enum ZapLedgerError {
         "receipt segment timestamps are not ordered: previous {previous} is after current {current}"
     )]
     ReceiptSegmentOutOfOrder { previous: u64, current: u64 },
+    #[error("receipt segment index expected sequence {expected}, got {actual}")]
+    ReceiptSegmentSequenceGap { expected: u64, actual: u64 },
+    #[error("receipt segment index contains duplicate {field}: {value}")]
+    DuplicateReceiptSegmentIndexEntry { field: &'static str, value: String },
+    #[error(
+        "receipt segment index chain mismatch at sequence {sequence}: expected previous hash {expected}, got {actual:?}"
+    )]
+    ReceiptSegmentChainMismatch {
+        sequence: u64,
+        expected: String,
+        actual: Option<String>,
+    },
     #[error(
         "receipt segment manifest node_id {manifest_node_id} does not match signer node_id {signer_node_id}"
     )]
@@ -87,6 +99,11 @@ pub enum ZapLedgerError {
     ReceiptNodeMismatch {
         receipt_node_id: Uuid,
         signer_node_id: Uuid,
+    },
+    #[error("invalid receipt field {field}: {reason}")]
+    InvalidReceiptField {
+        field: &'static str,
+        reason: &'static str,
     },
     #[error("receipt signature verification failed")]
     InvalidSignature,
@@ -163,6 +180,117 @@ pub struct SignedActionReceipt {
     pub signer_node_id: Uuid,
     pub signer_public_key: String,
     pub signature: String,
+}
+
+impl ActionReceipt {
+    pub fn validate_static(&self) -> Result<()> {
+        if self.schema_version != RECEIPT_SCHEMA_VERSION {
+            return Err(ZapLedgerError::UnsupportedSchemaVersion(
+                self.schema_version,
+            ));
+        }
+        if self.kind.is_empty() {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "kind",
+                reason: "must not be empty",
+            });
+        }
+        if self.subject.is_empty() {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "subject",
+                reason: "must not be empty",
+            });
+        }
+        if self.action.is_empty() {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "action",
+                reason: "must not be empty",
+            });
+        }
+        validate_artifact_hash("frame_hash", &self.frame_hash)?;
+        validate_artifact_hash("payload_hash", &self.payload_hash)?;
+        if let Some(output_hash) = &self.output_hash {
+            validate_artifact_hash("output_hash", output_hash)?;
+        }
+        if self.processed_at_micros < self.frame_timestamp_micros {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "processed_at_micros",
+                reason: "must be greater than or equal to frame_timestamp_micros",
+            });
+        }
+
+        let flags = ZapFlags::from_bits(self.flags).ok_or(ZapLedgerError::InvalidReceiptField {
+            field: "flags",
+            reason: "contains unknown bits",
+        })?;
+        let flags_require_consensus = flags.contains(ZapFlags::REQUIRES_CONSENSUS);
+        if self.consensus_required != flags_require_consensus {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "consensus_required",
+                reason: "must match the REQUIRES_CONSENSUS frame flag",
+            });
+        }
+        match (self.consensus_required, self.poa.as_ref()) {
+            (true, Some(poa)) => poa.validate_static()?,
+            (true, None) => {
+                return Err(ZapLedgerError::InvalidReceiptField {
+                    field: "poa",
+                    reason: "is required when consensus_required is true",
+                });
+            }
+            (false, Some(_)) => {
+                return Err(ZapLedgerError::InvalidReceiptField {
+                    field: "poa",
+                    reason: "must be absent when consensus_required is false",
+                });
+            }
+            (false, None) => {}
+        }
+
+        if let Some(pact) = &self.pact {
+            validate_artifact_hash("pact.hash", &pact.hash)?;
+            if let Some(output_hash) = &pact.output_hash {
+                validate_artifact_hash("pact.output_hash", output_hash)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl PoaReceipt {
+    fn validate_static(&self) -> Result<()> {
+        if self.required_threshold == 0 {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "poa.required_threshold",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.certificate_threshold == 0 {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "poa.certificate_threshold",
+                reason: "must be greater than zero",
+            });
+        }
+        if self.attestation_count as usize != self.validators.len() {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "poa.attestation_count",
+                reason: "must match validators length",
+            });
+        }
+        if self.certificate_threshold > self.attestation_count {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "poa.certificate_threshold",
+                reason: "must be less than or equal to attestation_count",
+            });
+        }
+        if self.required_threshold > self.certificate_threshold {
+            return Err(ZapLedgerError::InvalidReceiptField {
+                field: "poa.required_threshold",
+                reason: "must be less than or equal to certificate_threshold",
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -711,6 +839,9 @@ impl ReceiptSegmentIndex {
         }
         let mut previous_sequence = None;
         let mut previous_last_processed_at = None;
+        let mut previous_entry: Option<&ReceiptSegmentIndexEntry> = None;
+        let mut segment_ids = HashSet::new();
+        let mut segment_hashes = HashSet::new();
         for entry in &self.entries {
             if entry.node_id != self.node_id {
                 return Err(ZapLedgerError::ReceiptSegmentNodeMismatch {
@@ -718,8 +849,29 @@ impl ReceiptSegmentIndex {
                     receipt_node_id: entry.node_id,
                 });
             }
+            if entry.receipts_count == 0 {
+                return Err(ZapLedgerError::EmptyReceiptSegment);
+            }
+            if entry.last_processed_at_micros < entry.first_processed_at_micros {
+                return Err(ZapLedgerError::ReceiptSegmentOutOfOrder {
+                    previous: entry.first_processed_at_micros,
+                    current: entry.last_processed_at_micros,
+                });
+            }
+            if !segment_ids.insert(entry.segment_id) {
+                return Err(ZapLedgerError::DuplicateReceiptSegmentIndexEntry {
+                    field: "segment_id",
+                    value: entry.segment_id.to_string(),
+                });
+            }
             validate_artifact_hash("manifest_hash", &entry.manifest_hash)?;
             validate_artifact_hash("segment_hash", &entry.segment_hash)?;
+            if !segment_hashes.insert(entry.segment_hash.clone()) {
+                return Err(ZapLedgerError::DuplicateReceiptSegmentIndexEntry {
+                    field: "segment_hash",
+                    value: entry.segment_hash.clone(),
+                });
+            }
             if let Some(previous) = &entry.previous_segment_hash {
                 validate_artifact_hash("previous_segment_hash", previous)?;
             }
@@ -729,6 +881,24 @@ impl ReceiptSegmentIndex {
                 return Err(ZapLedgerError::ReceiptSegmentOutOfOrder {
                     previous,
                     current: entry.segment_sequence,
+                });
+            }
+            if let Some(previous) = previous_sequence {
+                let expected = previous + 1;
+                if entry.segment_sequence != expected {
+                    return Err(ZapLedgerError::ReceiptSegmentSequenceGap {
+                        expected,
+                        actual: entry.segment_sequence,
+                    });
+                }
+            }
+            if let Some(previous) = previous_entry
+                && entry.previous_segment_hash.as_deref() != Some(previous.segment_hash.as_str())
+            {
+                return Err(ZapLedgerError::ReceiptSegmentChainMismatch {
+                    sequence: entry.segment_sequence,
+                    expected: previous.segment_hash.clone(),
+                    actual: entry.previous_segment_hash.clone(),
                 });
             }
             if let Some(previous) = previous_last_processed_at
@@ -741,6 +911,7 @@ impl ReceiptSegmentIndex {
             }
             previous_sequence = Some(entry.segment_sequence);
             previous_last_processed_at = Some(entry.last_processed_at_micros);
+            previous_entry = Some(entry);
         }
         Ok(())
     }
@@ -849,11 +1020,7 @@ impl SignedActionReceipt {
     }
 
     pub fn verify(&self) -> Result<()> {
-        if self.receipt.schema_version != RECEIPT_SCHEMA_VERSION {
-            return Err(ZapLedgerError::UnsupportedSchemaVersion(
-                self.receipt.schema_version,
-            ));
-        }
+        self.receipt.validate_static()?;
         if self.receipt.node_id != self.signer_node_id {
             return Err(ZapLedgerError::ReceiptNodeMismatch {
                 receipt_node_id: self.receipt.node_id,
@@ -965,11 +1132,7 @@ fn prepare_receipt_verification<'a>(
     receipt: &'a SignedActionReceipt,
     key_cache: &mut HashMap<&'a str, (VerifyingKey, Uuid)>,
 ) -> Result<(VerifyingKey, Signature, Vec<u8>)> {
-    if receipt.receipt.schema_version != RECEIPT_SCHEMA_VERSION {
-        return Err(ZapLedgerError::UnsupportedSchemaVersion(
-            receipt.receipt.schema_version,
-        ));
-    }
+    receipt.receipt.validate_static()?;
     if receipt.receipt.node_id != receipt.signer_node_id {
         return Err(ZapLedgerError::ReceiptNodeMismatch {
             receipt_node_id: receipt.receipt.node_id,
@@ -1191,6 +1354,24 @@ mod tests {
         assert!(matches!(
             receipt.verify(),
             Err(ZapLedgerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn receipt_verify_rejects_invalid_static_hashes() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let frame = signed_frame(&source, node.node_id());
+        let mut receipt =
+            SignedActionReceipt::new(&node, &frame, "echo", Some(b"ok"), 456, None).unwrap();
+        receipt.receipt.output_hash = Some(format!("sha256:{}", "0".repeat(64)));
+
+        assert!(matches!(
+            receipt.verify(),
+            Err(ZapLedgerError::InvalidArtifactHash {
+                field: "output_hash",
+                ..
+            })
         ));
     }
 
@@ -1550,5 +1731,59 @@ mod tests {
             ..ReceiptReplicationRequest::default()
         };
         assert!(index.candidate_segments(&empty_request).unwrap().is_empty());
+    }
+
+    #[test]
+    fn receipt_segment_index_rejects_chain_mismatch_and_sequence_gap() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let first_receipts = vec![
+            receipt_at(&node, &source, 1_000, "echo"),
+            receipt_at(&node, &source, 1_100, "echo"),
+        ];
+        let first = SignedReceiptSegmentManifest::sign(
+            &node,
+            ReceiptSegmentManifest::from_receipts(
+                Uuid::from_bytes([6_u8; 16]),
+                1,
+                &first_receipts,
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let second_receipts = vec![
+            receipt_at(&node, &source, 2_000, "echo"),
+            receipt_at(&node, &source, 2_100, "echo"),
+        ];
+        let second = SignedReceiptSegmentManifest::sign(
+            &node,
+            ReceiptSegmentManifest::from_receipts(
+                Uuid::from_bytes([7_u8; 16]),
+                2,
+                &second_receipts,
+                Some(first.manifest.segment_hash.clone()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let index = ReceiptSegmentIndex::from_manifests(node.node_id(), &[first, second]).unwrap();
+
+        let mut wrong_chain = index.clone();
+        wrong_chain.entries[1].previous_segment_hash = Some(hash_bytes(b"wrong segment"));
+        assert!(matches!(
+            wrong_chain.validate(),
+            Err(ZapLedgerError::ReceiptSegmentChainMismatch { .. })
+        ));
+
+        let mut gap = index;
+        gap.entries[1].segment_sequence = 3;
+        assert!(matches!(
+            gap.validate(),
+            Err(ZapLedgerError::ReceiptSegmentSequenceGap {
+                expected: 2,
+                actual: 3
+            })
+        ));
     }
 }

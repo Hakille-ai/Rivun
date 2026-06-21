@@ -411,17 +411,43 @@ impl JournalStore {
         if !self.dir.exists() {
             return Ok(());
         }
-        let mut missing = false;
+        let mut rebuild = false;
         for segment in self.segments()? {
-            if !self.index_path(segment.sequence).exists() {
-                missing = true;
+            if self.segment_index_needs_rebuild(&segment)? {
+                rebuild = true;
                 break;
             }
         }
-        if missing {
+        if rebuild {
             self.rebuild_indexes()?;
         }
         Ok(())
+    }
+
+    fn segment_index_needs_rebuild(&self, segment: &SegmentInfo) -> Result<bool> {
+        let index_path = self.index_path(segment.sequence);
+        if !index_path.exists() || !self.manifest_path(segment.sequence).exists() {
+            return Ok(true);
+        }
+
+        let segment_len = fs::metadata(&segment.path)?.len();
+        let index_len = fs::metadata(&index_path)?.len();
+        if index_len > 0 && !file_ends_with_newline(&index_path)? {
+            return Ok(true);
+        }
+
+        let last_entry = match read_last_index_entry(&index_path) {
+            Ok(entry) => entry,
+            Err(ZapJournalError::Json(_)) => return Ok(true),
+            Err(err) => return Err(err),
+        };
+        let Some(last_entry) = last_entry else {
+            return Ok(segment_len > SEGMENT_HEADER_LEN);
+        };
+        let Some(indexed_end) = last_entry.offset.checked_add(last_entry.encoded_len) else {
+            return Ok(true);
+        };
+        Ok(indexed_end != segment_len)
     }
 
     fn last_entry_hash(&self) -> Result<Option<String>> {
@@ -618,7 +644,7 @@ impl JournalStore {
             segment_sequence: segment.sequence,
             entries: previous.as_ref().map_or(1, |manifest| manifest.entries + 1),
             segment_bytes: fs::metadata(&segment.path)?.len(),
-            segment_hash: record.entry_hash.clone(),
+            segment_hash: hash_bytes(&read_segment_bytes(&segment.path)?),
             first_entry_hash: previous
                 .as_ref()
                 .and_then(|manifest| manifest.first_entry_hash.clone())
@@ -683,6 +709,17 @@ fn append_index_entry(path: &Path, entry: &JournalIndexEntry) -> Result<()> {
     file.write_all(serde_json::to_string(entry)?.as_bytes())?;
     file.write_all(b"\n")?;
     Ok(())
+}
+
+fn file_ends_with_newline(path: &Path) -> Result<bool> {
+    let mut file = File::open(path)?;
+    if file.metadata()?.len() == 0 {
+        return Ok(true);
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0_u8; 1];
+    file.read_exact(&mut last)?;
+    Ok(last[0] == b'\n')
 }
 
 fn read_last_index_entry(path: &Path) -> Result<Option<JournalIndexEntry>> {
@@ -1241,6 +1278,47 @@ mod tests {
             temp.path()
                 .join(format!("00000000000000000000.{INDEX_EXTENSION}"))
                 .exists()
+        );
+    }
+
+    #[test]
+    fn journal_rebuilds_stale_indexes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = JournalStore::open(temp.path(), JournalProfile::Memory);
+        store.append(input(1), false).unwrap();
+        store.append(input(2), false).unwrap();
+
+        let index_path = temp
+            .path()
+            .join(format!("00000000000000000000.{INDEX_EXTENSION}"));
+        let index = fs::read_to_string(&index_path).unwrap();
+        let first_line = index.lines().next().unwrap();
+        fs::write(&index_path, format!("{first_line}\n")).unwrap();
+
+        let results = store.query(&JournalQuery::default()).unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(fs::read_to_string(index_path).unwrap().lines().count(), 2);
+    }
+
+    #[test]
+    fn append_manifest_hashes_segment_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = JournalStore::open(temp.path(), JournalProfile::Receipts);
+        store.append(input(1), false).unwrap();
+
+        let segment_path = temp
+            .path()
+            .join(format!("00000000000000000000.{SEGMENT_EXTENSION}"));
+        let manifest_path = temp
+            .path()
+            .join(format!("00000000000000000000.{MANIFEST_EXTENSION}"));
+        let manifest: JournalSegmentManifest =
+            serde_json::from_str(&fs::read_to_string(manifest_path).unwrap()).unwrap();
+
+        assert_eq!(
+            manifest.segment_hash,
+            hash_bytes(&fs::read(segment_path).unwrap())
         );
     }
 
