@@ -47,10 +47,10 @@ use zap_envelope::{
 use zap_ledger::{
     DEFAULT_RECEIPT_REPLICATION_LIMIT, RECEIPT_REPLICATION_CONTENT_TYPE,
     RECEIPT_REPLICATION_REQUEST_SUBJECT, RECEIPT_REPLICATION_RESPONSE_SUBJECT,
-    RECEIPT_SCHEMA_VERSION, ReceiptReplicationRequest, ReceiptReplicationResponse,
-    SignedActionReceipt,
+    RECEIPT_SCHEMA_VERSION, ReceiptJournalStore, ReceiptReplicationRequest,
+    ReceiptReplicationResponse,
 };
-use zap_memory::{JsonlMemoryStore, MEMORY_SCHEMA_VERSION, MemoryPut, MemoryQuery, MemoryStore};
+use zap_memory::{MEMORY_SCHEMA_VERSION, MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{
     DISCOVERY_ANNOUNCE_SUBJECT, DISCOVERY_CONTENT_TYPE, DISCOVERY_QUERY_SUBJECT,
@@ -192,7 +192,7 @@ enum Commands {
         #[command(subcommand)]
         command: DiscoveryCommand,
     },
-    /// Operate on a local auditable memory JSONL store.
+    /// Operate on a local auditable binary memory journal.
     Memory {
         #[command(subcommand)]
         command: MemoryCommand,
@@ -721,8 +721,8 @@ enum DiscoveryCommand {
 enum MemoryCommand {
     /// Append one memory record.
     Put {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         #[arg(long, default_value = "default")]
         namespace: String,
         #[arg(long)]
@@ -742,16 +742,16 @@ enum MemoryCommand {
     },
     /// Read one memory record by id.
     Get {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         id: Uuid,
         #[arg(long)]
         json: bool,
     },
     /// Query memory records.
     Query {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         #[arg(long)]
         namespace: Option<String>,
         #[arg(long)]
@@ -767,25 +767,25 @@ enum MemoryCommand {
     },
     /// Tombstone one memory record.
     Tombstone {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         id: Uuid,
         #[arg(long)]
         reason: Option<String>,
         #[arg(long)]
         json: bool,
     },
-    /// Verify a memory JSONL store.
+    /// Verify a binary memory journal.
     Verify {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         #[arg(long)]
         json: bool,
     },
-    /// Copy a memory store without entries older than a creation timestamp.
+    /// Copy a memory journal without entries older than a creation timestamp.
     Prune {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         #[arg(long)]
         before_created_at_micros: u64,
         #[arg(long)]
@@ -795,10 +795,43 @@ enum MemoryCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Rebuild a memory journal into a compact output directory.
+    Compact {
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Import a legacy memory JSONL file into a binary journal.
+    ImportJsonl {
+        #[arg(long = "in")]
+        input: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export a binary memory journal to legacy JSONL.
+    ExportJsonl {
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Export a payload-free evidence bundle from memory and optional receipts.
     ExportEvidence {
-        #[arg(long, default_value = ".zap/memory.jsonl")]
-        path: PathBuf,
+        #[arg(long, default_value = ".zap/memory")]
+        dir: PathBuf,
         #[arg(long)]
         receipts: Option<PathBuf>,
         /// Write a signed evidence manifest to this file.
@@ -981,10 +1014,10 @@ enum IncidentCommand {
     Snapshot {
         #[arg(long, default_value = "zap.toml")]
         config: PathBuf,
-        /// Override or provide a memory JSONL path. Defaults to [memory].path when configured.
+        /// Override or provide a memory journal directory. Defaults to [memory].dir when configured.
         #[arg(long)]
         memory: Option<PathBuf>,
-        /// Override or provide a receipt JSONL path. Defaults to [receipts].path when configured.
+        /// Override or provide a receipt journal directory. Defaults to [receipts].dir when configured.
         #[arg(long)]
         receipts: Option<PathBuf>,
         /// Include a capability cache verification summary.
@@ -1464,7 +1497,7 @@ enum ReceiptsCommand {
         #[arg(long)]
         target: Uuid,
         #[arg(long)]
-        out: PathBuf,
+        out_dir: PathBuf,
         #[arg(long)]
         after_processed_at_micros: Option<u64>,
         #[arg(long)]
@@ -1486,36 +1519,41 @@ enum ReceiptsCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Verify every signed JSONL receipt in a log file.
+    /// Verify a binary receipt journal.
     Verify {
         #[arg(long)]
-        path: PathBuf,
+        dir: PathBuf,
         #[arg(long)]
         json: bool,
     },
-    /// Write a verified receipt log without records older than a processing timestamp.
-    Prune {
+    /// Import a legacy receipt JSONL file into a binary journal.
+    ImportJsonl {
+        #[arg(long = "in")]
+        input: PathBuf,
         #[arg(long)]
-        path: PathBuf,
-        /// Drop receipts whose processed_at_micros is lower than this value.
-        #[arg(long)]
-        before_processed_at_micros: u64,
-        #[arg(long)]
-        out: PathBuf,
-        /// Overwrite the output file if it already exists.
+        dir: PathBuf,
         #[arg(long)]
         force: bool,
         #[arg(long)]
         json: bool,
     },
-    /// Merge verified receipt logs into one deduplicated archive.
-    Merge {
-        /// Input receipt JSONL logs to merge.
-        #[arg(required = true)]
-        inputs: Vec<PathBuf>,
+    /// Export a binary receipt journal to legacy JSONL.
+    ExportJsonl {
+        #[arg(long)]
+        dir: PathBuf,
         #[arg(long)]
         out: PathBuf,
-        /// Overwrite the output file if it already exists.
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rebuild a receipt journal into a compact output directory.
+    Compact {
+        #[arg(long)]
+        dir: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
         #[arg(long)]
         force: bool,
         #[arg(long)]
@@ -1839,7 +1877,7 @@ fn check_config(config_path: &Path, json: bool, strict: bool) -> Result<()> {
             "registry_signature_required={}",
             report.registry_signature_required
         );
-        println!("receipt_log_enabled={}", report.receipt_log_enabled);
+        println!("receipt_journal_enabled={}", report.receipt_journal_enabled);
         println!(
             "observability_http_bind={}",
             report
@@ -1993,10 +2031,10 @@ fn build_doctor_report(
     });
     checks.push(driver_provenance_check(report));
     checks.push(registry_policy_check(report));
-    checks.push(if report.receipt_log_enabled {
-        DoctorCheck::pass("receipt audit", "signed receipt log enabled")
+    checks.push(if report.receipt_journal_enabled {
+        DoctorCheck::pass("receipt audit", "signed receipt journal enabled")
     } else {
-        DoctorCheck::warn("receipt audit", "receipts.path is not configured")
+        DoctorCheck::warn("receipt audit", "receipts.dir is not configured")
     });
     checks.push(if let Some(addr) = report.observability_http_bind {
         DoctorCheck::pass("observability HTTP", format!("http_bind={addr}"))
@@ -2018,9 +2056,9 @@ fn build_doctor_report(
         DoctorCheck::warn("poa quorum", "no PoA validators configured")
     });
     checks.push(if report.memory_enabled {
-        DoctorCheck::pass("memory audit", "local memory path configured")
+        DoctorCheck::pass("memory audit", "local memory journal configured")
     } else {
-        DoctorCheck::warn("memory audit", "memory.path is not configured")
+        DoctorCheck::warn("memory audit", "memory.dir is not configured")
     });
     checks.push(if report.route_count > 0 {
         DoctorCheck::pass("routing policy", format!("routes={}", report.route_count))
@@ -2957,7 +2995,7 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
         ReceiptsCommand::Pull {
             config,
             target,
-            out,
+            out_dir,
             after_processed_at_micros,
             until_processed_at_micros,
             limit,
@@ -2972,7 +3010,7 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
             pull_receipts(ReceiptPullOptions {
                 config_path: &config,
                 target,
-                out: &out,
+                out_dir: &out_dir,
                 after_processed_at_micros,
                 until_processed_at_micros,
                 limit,
@@ -2986,27 +3024,32 @@ async fn receipts(command: ReceiptsCommand) -> Result<()> {
             })
             .await
         }
-        ReceiptsCommand::Verify { path, json } => verify_receipts(&path, json),
-        ReceiptsCommand::Prune {
-            path,
-            before_processed_at_micros,
+        ReceiptsCommand::Verify { dir, json } => verify_receipts(&dir, json),
+        ReceiptsCommand::ImportJsonl {
+            input,
+            dir,
+            force,
+            json,
+        } => import_receipts_jsonl(&input, &dir, force, json),
+        ReceiptsCommand::ExportJsonl {
+            dir,
             out,
             force,
             json,
-        } => prune_receipts(&path, before_processed_at_micros, &out, force, json),
-        ReceiptsCommand::Merge {
-            inputs,
+        } => export_receipts_jsonl(&dir, &out, force, json),
+        ReceiptsCommand::Compact {
+            dir,
             out,
             force,
             json,
-        } => merge_receipts(&inputs, &out, force, json),
+        } => compact_receipts(&dir, &out, force, json),
     }
 }
 
 struct ReceiptPullOptions<'a> {
     config_path: &'a Path,
     target: Uuid,
-    out: &'a Path,
+    out_dir: &'a Path,
     after_processed_at_micros: Option<u64>,
     until_processed_at_micros: Option<u64>,
     limit: usize,
@@ -3022,7 +3065,7 @@ struct ReceiptPullOptions<'a> {
 #[derive(Debug, Serialize)]
 struct ReceiptPullReport {
     peer: Uuid,
-    out: String,
+    out_dir: String,
     receipts: usize,
     truncated: bool,
     earliest_processed_at_micros: Option<u64>,
@@ -3034,7 +3077,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
     let ReceiptPullOptions {
         config_path,
         target,
-        out,
+        out_dir,
         after_processed_at_micros,
         until_processed_at_micros,
         limit,
@@ -3048,7 +3091,11 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
     } = options;
     let config = ZapNodeConfig::from_path(config_path)?;
     config.validate()?;
-    ensure_receipt_output_is_separate(out, &[config.key_file.as_path()])?;
+    ensure_output_is_separate(
+        out_dir,
+        &[config.key_file.as_path()],
+        "receipt journal output",
+    )?;
     let keypair = load_keypair(&config.key_file)?;
     let target_peer = config
         .peers
@@ -3127,11 +3174,11 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         break response;
     };
 
-    let mut output = String::new();
+    prepare_output_dir(out_dir, force)?;
+    let pulled_store = ReceiptJournalStore::open(out_dir);
     for receipt in &response.receipts {
-        output.push_str(&receipt.to_json_line()?);
+        pulled_store.append(receipt, false)?;
     }
-    write_text_file(out, &output, force)?;
     let earliest = response
         .receipts
         .iter()
@@ -3144,7 +3191,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         .max();
     let report = ReceiptPullReport {
         peer: target,
-        out: out.display().to_string(),
+        out_dir: out_dir.display().to_string(),
         receipts: response.receipts.len(),
         truncated: response.truncated,
         earliest_processed_at_micros: earliest,
@@ -3155,7 +3202,7 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!("peer={}", report.peer);
-        println!("out={}", report.out);
+        println!("out_dir={}", report.out_dir);
         println!("receipts={}", report.receipts);
         println!("truncated={}", report.truncated);
         println!(
@@ -3183,160 +3230,121 @@ async fn pull_receipts(options: ReceiptPullOptions<'_>) -> Result<()> {
     Ok(())
 }
 
-fn verify_receipts(path: &Path, json: bool) -> Result<()> {
-    let verified = load_verified_receipts(path)?.len();
+fn verify_receipts(dir: &Path, json: bool) -> Result<()> {
+    let report = ReceiptJournalStore::open(dir).verify()?;
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "path": path.display().to_string(),
-                "receipts": verified,
+                "dir": dir.display().to_string(),
+                "segments": report.segments,
+                "receipts": report.receipts,
                 "verified": true
             }))?
         );
     } else {
-        println!("receipts={verified}");
+        println!("dir={}", dir.display());
+        println!("segments={}", report.segments);
+        println!("receipts={}", report.receipts);
         println!("verified=true");
-        println!("path={}", path.display());
     }
     Ok(())
 }
 
-fn prune_receipts(
-    path: &Path,
-    before_processed_at_micros: u64,
+fn import_receipts_jsonl(input: &Path, dir: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_output_is_separate(dir, &[input], "receipt journal output")?;
+    let imported = ReceiptJournalStore::open(dir).import_jsonl(input, force)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "input": input.display().to_string(),
+                "dir": dir.display().to_string(),
+                "receipts": imported,
+                "imported": true
+            }))?
+        );
+    } else {
+        println!("input={}", input.display());
+        println!("dir={}", dir.display());
+        println!("receipts={imported}");
+        println!("imported=true");
+    }
+    Ok(())
+}
+
+fn export_receipts_jsonl(dir: &Path, out: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_output_is_separate(out, &[dir], "receipt JSONL output")?;
+    let exported = ReceiptJournalStore::open(dir).export_jsonl(out, force)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "dir": dir.display().to_string(),
+                "out": out.display().to_string(),
+                "receipts": exported,
+                "exported": true
+            }))?
+        );
+    } else {
+        println!("dir={}", dir.display());
+        println!("out={}", out.display());
+        println!("receipts={exported}");
+        println!("exported=true");
+    }
+    Ok(())
+}
+
+fn compact_receipts(dir: &Path, out: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_output_is_separate(out, &[dir], "receipt journal output")?;
+    let compacted = ReceiptJournalStore::open(dir).compact(out, force)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "dir": dir.display().to_string(),
+                "out": out.display().to_string(),
+                "receipts": compacted,
+                "compacted": true
+            }))?
+        );
+    } else {
+        println!("dir={}", dir.display());
+        println!("out={}", out.display());
+        println!("receipts={compacted}");
+        println!("compacted=true");
+    }
+    Ok(())
+}
+
+fn ensure_output_is_separate(
     out: &Path,
-    force: bool,
-    json: bool,
+    inputs: &[impl AsRef<Path>],
+    output_label: &str,
 ) -> Result<()> {
-    ensure_receipt_output_is_separate(out, &[path])?;
-    let receipts = load_verified_receipts(path)?;
-    let before = before_processed_at_micros;
-    let retained = receipts
-        .iter()
-        .filter(|receipt| receipt.receipt.processed_at_micros >= before)
-        .collect::<Vec<_>>();
-    let mut output = String::new();
-    for receipt in &retained {
-        output.push_str(&receipt.to_json_line()?);
-    }
-    write_text_file(out, &output, force)?;
-
-    let input_count = receipts.len();
-    let retained_count = retained.len();
-    let pruned_count = input_count - retained_count;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "path": path.display().to_string(),
-                "out": out.display().to_string(),
-                "before_processed_at_micros": before,
-                "input_receipts": input_count,
-                "retained_receipts": retained_count,
-                "pruned_receipts": pruned_count,
-                "verified": true
-            }))?
-        );
-    } else {
-        println!("path={}", path.display());
-        println!("out={}", out.display());
-        println!("before_processed_at_micros={before}");
-        println!("input_receipts={input_count}");
-        println!("retained_receipts={retained_count}");
-        println!("pruned_receipts={pruned_count}");
-        println!("verified=true");
-    }
-    Ok(())
-}
-
-fn merge_receipts(inputs: &[PathBuf], out: &Path, force: bool, json: bool) -> Result<()> {
-    ensure_receipt_output_is_separate(out, inputs)?;
-    let mut seen = std::collections::HashSet::new();
-    let mut merged = Vec::new();
-    let mut input_count = 0_usize;
-    for input in inputs {
-        let receipts = load_verified_receipts(input)?;
-        input_count += receipts.len();
-        for receipt in receipts {
-            if seen.insert(receipt.signature.clone()) {
-                merged.push(receipt);
-            }
-        }
-    }
-
-    let mut output = String::new();
-    for receipt in &merged {
-        output.push_str(&receipt.to_json_line()?);
-    }
-    write_text_file(out, &output, force)?;
-
-    let written_count = merged.len();
-    let duplicate_count = input_count - written_count;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "inputs": inputs.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
-                "out": out.display().to_string(),
-                "input_logs": inputs.len(),
-                "input_receipts": input_count,
-                "written_receipts": written_count,
-                "duplicate_receipts": duplicate_count,
-                "verified": true
-            }))?
-        );
-    } else {
-        println!("out={}", out.display());
-        println!("input_logs={}", inputs.len());
-        println!("input_receipts={input_count}");
-        println!("written_receipts={written_count}");
-        println!("duplicate_receipts={duplicate_count}");
-        println!("verified=true");
-    }
-    Ok(())
-}
-
-fn load_verified_receipts(path: &Path) -> Result<Vec<SignedActionReceipt>> {
-    let input = fs::read_to_string(path)
-        .with_context(|| format!("failed to read receipt log {}", path.display()))?;
-    let mut receipts = Vec::new();
-    for (index, line) in input.lines().enumerate() {
-        let line_number = index + 1;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let receipt = SignedActionReceipt::from_json_str(line).with_context(|| {
-            format!(
-                "failed to parse receipt at {} line {}",
-                path.display(),
-                line_number
-            )
-        })?;
-        receipt.verify().with_context(|| {
-            format!(
-                "invalid receipt signature at {} line {}",
-                path.display(),
-                line_number
-            )
-        })?;
-        receipts.push(receipt);
-    }
-    if receipts.is_empty() {
-        bail!("receipt log {} contains no receipts", path.display());
-    }
-    Ok(receipts)
-}
-
-fn ensure_receipt_output_is_separate(out: &Path, inputs: &[impl AsRef<Path>]) -> Result<()> {
     let out = normalize_path_for_comparison(out)?;
     for input in inputs {
         let input = normalize_path_for_comparison(input.as_ref())?;
         if out == input {
-            bail!("receipt output must not point at an input receipt log");
+            bail!("{output_label} must not point at an input path");
         }
     }
+    Ok(())
+}
+
+fn prepare_output_dir(out: &Path, force: bool) -> Result<()> {
+    if out.exists() {
+        if !force {
+            bail!(
+                "output directory {} already exists; pass --force to replace it",
+                out.display()
+            );
+        }
+        fs::remove_dir_all(out)
+            .with_context(|| format!("failed to remove output directory {}", out.display()))?;
+    }
+    fs::create_dir_all(out)
+        .with_context(|| format!("failed to create output directory {}", out.display()))?;
     Ok(())
 }
 
@@ -3360,8 +3368,8 @@ fn incident(command: IncidentCommand) -> Result<()> {
             force,
         } => incident_snapshot(IncidentSnapshotOptions {
             config_path: &config,
-            memory_path: memory.as_deref(),
-            receipts_path: receipts.as_deref(),
+            memory_dir: memory.as_deref(),
+            receipts_dir: receipts.as_deref(),
             capability_cache_path: capability_cache.as_deref(),
             out: out.as_deref(),
             force,
@@ -3371,8 +3379,8 @@ fn incident(command: IncidentCommand) -> Result<()> {
 
 struct IncidentSnapshotOptions<'a> {
     config_path: &'a Path,
-    memory_path: Option<&'a Path>,
-    receipts_path: Option<&'a Path>,
+    memory_dir: Option<&'a Path>,
+    receipts_dir: Option<&'a Path>,
     capability_cache_path: Option<&'a Path>,
     out: Option<&'a Path>,
     force: bool,
@@ -3402,7 +3410,7 @@ struct IncidentConfigSummary {
     require_signed: bool,
     registry_enabled: bool,
     registry_signature_required: bool,
-    receipt_log_enabled: bool,
+    receipt_journal_enabled: bool,
     observability_http_bind: Option<String>,
     memory_enabled: bool,
     capability_cache_enabled: bool,
@@ -3457,15 +3465,14 @@ fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
         ),
     };
 
-    let memory_path = options.memory_path.map(Path::to_path_buf).or_else(|| {
+    let memory_path = options
+        .memory_dir
+        .map(Path::to_path_buf)
+        .or_else(|| config.as_ref().and_then(|config| config.memory.dir.clone()));
+    let receipts_path = options.receipts_dir.map(Path::to_path_buf).or_else(|| {
         config
             .as_ref()
-            .and_then(|config| config.memory.path.clone())
-    });
-    let receipts_path = options.receipts_path.map(Path::to_path_buf).or_else(|| {
-        config
-            .as_ref()
-            .and_then(|config| config.receipts.path.clone())
+            .and_then(|config| config.receipts.dir.clone())
     });
     let capability_cache_path = options
         .capability_cache_path
@@ -3485,7 +3492,7 @@ fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
         require_signed: report.require_signed,
         registry_enabled: report.registry_enabled,
         registry_signature_required: report.registry_signature_required,
-        receipt_log_enabled: report.receipt_log_enabled,
+        receipt_journal_enabled: report.receipt_journal_enabled,
         observability_http_bind: report.observability_http_bind.map(|addr| addr.to_string()),
         memory_enabled: report.memory_enabled,
         capability_cache_enabled: report.capability_cache_enabled,
@@ -4722,7 +4729,7 @@ fn print_discovery_query_report(report: &DiscoveryQueryReport, json: bool) -> Re
 fn memory(command: MemoryCommand) -> Result<()> {
     match command {
         MemoryCommand::Put {
-            path,
+            dir,
             namespace,
             subject,
             content_type,
@@ -4732,7 +4739,7 @@ fn memory(command: MemoryCommand) -> Result<()> {
             max_record_bytes,
             json,
         } => memory_put(MemoryPutCommand {
-            path: &path,
+            dir: &dir,
             namespace,
             subject,
             content_type,
@@ -4742,9 +4749,9 @@ fn memory(command: MemoryCommand) -> Result<()> {
             max_record_bytes,
             json,
         }),
-        MemoryCommand::Get { path, id, json } => memory_get(&path, id, json),
+        MemoryCommand::Get { dir, id, json } => memory_get(&dir, id, json),
         MemoryCommand::Query {
-            path,
+            dir,
             namespace,
             subject,
             content_type,
@@ -4752,7 +4759,7 @@ fn memory(command: MemoryCommand) -> Result<()> {
             limit,
             json,
         } => memory_query(
-            &path,
+            &dir,
             MemoryQuery {
                 namespace,
                 subject,
@@ -4763,28 +4770,46 @@ fn memory(command: MemoryCommand) -> Result<()> {
             json,
         ),
         MemoryCommand::Tombstone {
-            path,
+            dir,
             id,
             reason,
             json,
-        } => memory_tombstone(&path, id, reason, json),
-        MemoryCommand::Verify { path, json } => memory_verify(&path, json),
+        } => memory_tombstone(&dir, id, reason, json),
+        MemoryCommand::Verify { dir, json } => memory_verify(&dir, json),
         MemoryCommand::Prune {
-            path,
+            dir,
             before_created_at_micros,
             out,
             force,
             json,
-        } => memory_prune(&path, before_created_at_micros, &out, force, json),
+        } => memory_prune(&dir, before_created_at_micros, &out, force, json),
+        MemoryCommand::Compact {
+            dir,
+            out,
+            force,
+            json,
+        } => memory_compact(&dir, &out, force, json),
+        MemoryCommand::ImportJsonl {
+            input,
+            dir,
+            force,
+            json,
+        } => memory_import_jsonl(&input, &dir, force, json),
+        MemoryCommand::ExportJsonl {
+            dir,
+            out,
+            force,
+            json,
+        } => memory_export_jsonl(&dir, &out, force, json),
         MemoryCommand::ExportEvidence {
-            path,
+            dir,
             receipts,
             manifest_out,
             signing_key,
             out,
             force,
         } => memory_export_evidence(MemoryExportEvidenceOptions {
-            path: &path,
+            dir: &dir,
             receipts: receipts.as_deref(),
             manifest_out: manifest_out.as_deref(),
             signing_key: signing_key.as_deref(),
@@ -4795,7 +4820,7 @@ fn memory(command: MemoryCommand) -> Result<()> {
 }
 
 struct MemoryPutCommand<'a> {
-    path: &'a Path,
+    dir: &'a Path,
     namespace: String,
     subject: String,
     content_type: String,
@@ -4808,7 +4833,7 @@ struct MemoryPutCommand<'a> {
 
 fn memory_put(options: MemoryPutCommand<'_>) -> Result<()> {
     let MemoryPutCommand {
-        path,
+        dir,
         namespace,
         subject,
         content_type,
@@ -4820,7 +4845,7 @@ fn memory_put(options: MemoryPutCommand<'_>) -> Result<()> {
     } = options;
     let body = payload_bytes_from_input(payload, payload_file)?;
     let metadata = parse_metadata(metadata)?;
-    let store = JsonlMemoryStore::open(path).with_max_record_bytes(max_record_bytes);
+    let store = MemoryJournalStore::open(dir).with_max_record_bytes(max_record_bytes);
     let record = store.put(MemoryPut {
         namespace,
         subject,
@@ -4837,13 +4862,13 @@ fn memory_put(options: MemoryPutCommand<'_>) -> Result<()> {
         println!("namespace={}", record.namespace);
         println!("subject={}", record.subject);
         println!("body_hash={}", record.body_hash);
-        println!("path={}", path.display());
+        println!("dir={}", dir.display());
     }
     Ok(())
 }
 
-fn memory_get(path: &Path, id: Uuid, json: bool) -> Result<()> {
-    let store = JsonlMemoryStore::open(path);
+fn memory_get(dir: &Path, id: Uuid, json: bool) -> Result<()> {
+    let store = MemoryJournalStore::open(dir);
     let record = store.get(id)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&record)?);
@@ -4858,8 +4883,8 @@ fn memory_get(path: &Path, id: Uuid, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn memory_query(path: &Path, query: MemoryQuery, json: bool) -> Result<()> {
-    let store = JsonlMemoryStore::open(path);
+fn memory_query(dir: &Path, query: MemoryQuery, json: bool) -> Result<()> {
+    let store = MemoryJournalStore::open(dir);
     let records = store.query(&query)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&records)?);
@@ -4875,8 +4900,8 @@ fn memory_query(path: &Path, query: MemoryQuery, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn memory_tombstone(path: &Path, id: Uuid, reason: Option<String>, json: bool) -> Result<()> {
-    let store = JsonlMemoryStore::open(path);
+fn memory_tombstone(dir: &Path, id: Uuid, reason: Option<String>, json: bool) -> Result<()> {
+    let store = MemoryJournalStore::open(dir);
     let tombstone = store.tombstone(id, reason)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&tombstone)?);
@@ -4888,13 +4913,13 @@ fn memory_tombstone(path: &Path, id: Uuid, reason: Option<String>, json: bool) -
     Ok(())
 }
 
-fn memory_verify(path: &Path, json: bool) -> Result<()> {
-    let store = JsonlMemoryStore::open(path);
+fn memory_verify(dir: &Path, json: bool) -> Result<()> {
+    let store = MemoryJournalStore::open(dir);
     let report = store.verify()?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!("path={}", report.path.display());
+        println!("dir={}", report.path.display());
         println!("entries={}", report.entries);
         println!("records={}", report.records);
         println!("tombstones={}", report.tombstones);
@@ -4904,29 +4929,98 @@ fn memory_verify(path: &Path, json: bool) -> Result<()> {
 }
 
 fn memory_prune(
-    path: &Path,
+    dir: &Path,
     before_created_at_micros: u64,
     out: &Path,
     force: bool,
     json: bool,
 ) -> Result<()> {
-    let store = JsonlMemoryStore::open(path);
+    ensure_output_is_separate(out, &[dir], "memory journal output")?;
+    let store = MemoryJournalStore::open(dir);
     let pruned = store.prune_to(before_created_at_micros, out, force)?;
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
-                "path": path.display().to_string(),
+                "dir": dir.display().to_string(),
                 "out": out.display().to_string(),
                 "before_created_at_micros": before_created_at_micros,
                 "pruned_entries": pruned
             }))?
         );
     } else {
-        println!("path={}", path.display());
+        println!("dir={}", dir.display());
         println!("out={}", out.display());
         println!("before_created_at_micros={before_created_at_micros}");
         println!("pruned_entries={pruned}");
+    }
+    Ok(())
+}
+
+fn memory_compact(dir: &Path, out: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_output_is_separate(out, &[dir], "memory journal output")?;
+    let store = MemoryJournalStore::open(dir);
+    store.prune_to(0, out, force)?;
+    let entries = MemoryJournalStore::open(out).verify()?.entries;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "dir": dir.display().to_string(),
+                "out": out.display().to_string(),
+                "entries": entries,
+                "compacted": true
+            }))?
+        );
+    } else {
+        println!("dir={}", dir.display());
+        println!("out={}", out.display());
+        println!("entries={entries}");
+        println!("compacted=true");
+    }
+    Ok(())
+}
+
+fn memory_import_jsonl(input: &Path, dir: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_output_is_separate(dir, &[input], "memory journal output")?;
+    let imported = MemoryJournalStore::open(dir).import_jsonl(input, force)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "input": input.display().to_string(),
+                "dir": dir.display().to_string(),
+                "entries": imported,
+                "imported": true
+            }))?
+        );
+    } else {
+        println!("input={}", input.display());
+        println!("dir={}", dir.display());
+        println!("entries={imported}");
+        println!("imported=true");
+    }
+    Ok(())
+}
+
+fn memory_export_jsonl(dir: &Path, out: &Path, force: bool, json: bool) -> Result<()> {
+    ensure_output_is_separate(out, &[dir], "memory JSONL output")?;
+    let exported = MemoryJournalStore::open(dir).export_jsonl(out, force)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "dir": dir.display().to_string(),
+                "out": out.display().to_string(),
+                "entries": exported,
+                "exported": true
+            }))?
+        );
+    } else {
+        println!("dir={}", dir.display());
+        println!("out={}", out.display());
+        println!("entries={exported}");
+        println!("exported=true");
     }
     Ok(())
 }
@@ -4943,7 +5037,7 @@ struct EvidenceBundle {
 }
 
 struct MemoryExportEvidenceOptions<'a> {
-    path: &'a Path,
+    dir: &'a Path,
     receipts: Option<&'a Path>,
     manifest_out: Option<&'a Path>,
     signing_key: Option<&'a Path>,
@@ -5030,7 +5124,7 @@ struct EvidenceReceiptSummary {
 
 fn memory_export_evidence(options: MemoryExportEvidenceOptions<'_>) -> Result<()> {
     let MemoryExportEvidenceOptions {
-        path,
+        dir,
         receipts,
         manifest_out,
         signing_key,
@@ -5049,7 +5143,7 @@ fn memory_export_evidence(options: MemoryExportEvidenceOptions<'_>) -> Result<()
         bail!("--out and --manifest-out must be different paths");
     }
 
-    let memory = summarize_memory_evidence(path);
+    let memory = summarize_memory_evidence(dir);
     let receipts = receipts.map(summarize_receipt_evidence);
     let valid = memory.verified
         && memory.errors.is_empty()
@@ -5064,7 +5158,7 @@ fn memory_export_evidence(options: MemoryExportEvidenceOptions<'_>) -> Result<()
         receipts,
         limitations: vec![
             "memory payload bytes, metadata values, key material, and raw receipt signatures are not embedded".to_string(),
-            "re-verify the referenced memory JSONL with `zap memory verify` and receipts with `zap receipts verify`".to_string(),
+            "re-verify the referenced memory and receipt journals with `zap memory verify` and `zap receipts verify`".to_string(),
         ],
     };
     let bundle_output = format!("{}\n", serde_json::to_string_pretty(&bundle)?);
@@ -5117,7 +5211,7 @@ fn sign_evidence_bundle_manifest(
 }
 
 fn summarize_memory_evidence(path: &Path) -> EvidenceMemorySummary {
-    let store = JsonlMemoryStore::open(path);
+    let store = MemoryJournalStore::open(path);
     let verification = store.verify();
     let mut summary = EvidenceMemorySummary {
         path: path.display().to_string(),
@@ -5142,72 +5236,38 @@ fn summarize_memory_evidence(path: &Path) -> EvidenceMemorySummary {
         }
     }
 
-    let input = match fs::read_to_string(path) {
-        Ok(input) => input,
+    let records = match store.query(&MemoryQuery {
+        include_tombstoned: true,
+        ..MemoryQuery::default()
+    }) {
+        Ok(records) => records,
         Err(error) => {
             summary.errors.push(format!(
-                "failed to read memory JSONL {}: {error}",
+                "failed to query memory journal {}: {error}",
                 path.display()
             ));
             return summary;
         }
     };
 
-    for (index, line) in input.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let value: serde_json::Value = match serde_json::from_str(line) {
-            Ok(value) => value,
-            Err(error) => {
-                summary
-                    .errors
-                    .push(format!("line {} is invalid JSON: {error}", index + 1));
-                continue;
-            }
-        };
-        if value.get("record_id").is_some() {
-            summary
-                .tombstones_summary
-                .push(memory_tombstone_summary(&value));
-        } else {
-            summary.records_summary.push(memory_record_summary(&value));
-        }
+    for record in records {
+        summary.records_summary.push(memory_record_summary(&record));
     }
     summary
 }
 
-fn memory_record_summary(value: &serde_json::Value) -> EvidenceMemoryRecordSummary {
+fn memory_record_summary(record: &zap_memory::MemoryRecord) -> EvidenceMemoryRecordSummary {
     EvidenceMemoryRecordSummary {
-        id: json_string_field(value, "id"),
-        namespace: json_string_field(value, "namespace"),
-        subject: json_string_field(value, "subject"),
-        content_type: json_string_field(value, "content_type"),
-        body_hash: json_string_field(value, "body_hash"),
-        previous_entry_hash: json_optional_string_field(value, "previous_entry_hash"),
-        entry_hash: json_optional_string_field(value, "entry_hash"),
-        source_node: json_optional_string_field(value, "source_node"),
-        frame_hash: json_optional_string_field(value, "frame_hash"),
-        created_at_micros: value
-            .get("created_at_micros")
-            .and_then(|value| value.as_u64())
-            .unwrap_or_default(),
-    }
-}
-
-fn memory_tombstone_summary(value: &serde_json::Value) -> EvidenceMemoryTombstoneSummary {
-    EvidenceMemoryTombstoneSummary {
-        id: json_string_field(value, "id"),
-        record_id: json_string_field(value, "record_id"),
-        namespace: json_string_field(value, "namespace"),
-        previous_entry_hash: json_optional_string_field(value, "previous_entry_hash"),
-        entry_hash: json_optional_string_field(value, "entry_hash"),
-        reason_hash: json_optional_string_field(value, "reason").map(|reason| hash_text(&reason)),
-        created_at_micros: value
-            .get("created_at_micros")
-            .and_then(|value| value.as_u64())
-            .unwrap_or_default(),
+        id: record.id.to_string(),
+        namespace: record.namespace.clone(),
+        subject: record.subject.clone(),
+        content_type: record.content_type.clone(),
+        body_hash: record.body_hash.clone(),
+        previous_entry_hash: record.previous_entry_hash.clone(),
+        entry_hash: record.entry_hash.clone(),
+        source_node: record.source_node.map(|value| value.to_string()),
+        frame_hash: record.frame_hash.clone(),
+        created_at_micros: record.created_at_micros,
     }
 }
 
@@ -5223,7 +5283,7 @@ fn summarize_receipt_evidence(path: &Path) -> EvidenceReceiptSummary {
         receipt_hashes: Vec::new(),
         errors: Vec::new(),
     };
-    let receipts = match load_verified_receipts(path) {
+    let receipts = match ReceiptJournalStore::open(path).all() {
         Ok(receipts) => receipts,
         Err(error) => {
             summary.errors.push(format!("{error:#}"));
@@ -5260,25 +5320,6 @@ fn summarize_receipt_evidence(path: &Path) -> EvidenceReceiptSummary {
         }
     }
     summary
-}
-
-fn json_string_field(value: &serde_json::Value, field: &str) -> String {
-    value
-        .get(field)
-        .and_then(|value| value.as_str())
-        .unwrap_or_default()
-        .to_string()
-}
-
-fn json_optional_string_field(value: &serde_json::Value, field: &str) -> Option<String> {
-    value
-        .get(field)
-        .and_then(|value| value.as_str())
-        .map(ToString::to_string)
-}
-
-fn hash_text(input: &str) -> String {
-    hash_bytes_for_report(input.as_bytes())
 }
 
 fn hash_bytes_for_report(input: &[u8]) -> String {

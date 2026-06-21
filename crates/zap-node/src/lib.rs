@@ -45,10 +45,10 @@ use zap_envelope::{
 };
 use zap_ledger::{
     PactReceiptReference, RECEIPT_REPLICATION_CONTENT_TYPE, RECEIPT_REPLICATION_REQUEST_SUBJECT,
-    RECEIPT_REPLICATION_RESPONSE_SUBJECT, ReceiptReplicationRequest, ReceiptReplicationResponse,
-    SignedActionReceipt,
+    RECEIPT_REPLICATION_RESPONSE_SUBJECT, ReceiptJournalStore, ReceiptReplicationRequest,
+    ReceiptReplicationResponse, SignedActionReceipt,
 };
-use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryStore};
+use zap_memory::{MemoryJournalStore, MemoryPut, MemoryStore};
 use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_pact::{PACT_CONTENT_TYPE, PACT_RECORD_SUBJECT, ZapPact};
 use zap_policy::{PolicyInput, PolicyRule, PolicySet};
@@ -139,6 +139,9 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
             driver.manifest = Some(resolve_relative_path(base_dir, &manifest));
         }
     }
+    if let Some(dir) = config.receipts.dir.take() {
+        config.receipts.dir = Some(resolve_relative_path(base_dir, &dir));
+    }
     if let Some(path) = config.receipts.path.take() {
         config.receipts.path = Some(resolve_relative_path(base_dir, &path));
     }
@@ -150,6 +153,9 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
     }
     if let Some(path) = config.poa.validator_set.take() {
         config.poa.validator_set = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(dir) = config.memory.dir.take() {
+        config.memory.dir = Some(resolve_relative_path(base_dir, &dir));
     }
     if let Some(path) = config.memory.path.take() {
         config.memory.path = Some(resolve_relative_path(base_dir, &path));
@@ -357,6 +363,8 @@ pub enum ReceiptFsyncPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReceiptsConfig {
     #[serde(default)]
+    pub dir: Option<PathBuf>,
+    #[serde(default)]
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub fsync: ReceiptFsyncPolicy,
@@ -367,6 +375,7 @@ pub struct ReceiptsConfig {
 impl Default for ReceiptsConfig {
     fn default() -> Self {
         Self {
+            dir: None,
             path: None,
             fsync: ReceiptFsyncPolicy::Off,
             fsync_interval_writes: None,
@@ -393,6 +402,8 @@ pub struct RegistryConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MemoryConfig {
+    #[serde(default)]
+    pub dir: Option<PathBuf>,
     #[serde(default)]
     pub path: Option<PathBuf>,
     #[serde(default)]
@@ -922,7 +933,7 @@ pub struct ConfigValidationReport {
     pub peer_forward_enabled_count: usize,
     pub driver_count: usize,
     pub signed_driver_count: usize,
-    pub receipt_log_enabled: bool,
+    pub receipt_journal_enabled: bool,
     pub registry_enabled: bool,
     pub registry_entry_count: usize,
     pub registry_signature_required: bool,
@@ -1190,7 +1201,7 @@ pub struct ZapNode {
     poa_required_threshold: u16,
     poa_validator_set_path: Option<PathBuf>,
     poa_validator_set_authority: Option<PublicKey>,
-    receipt_log_path: Option<PathBuf>,
+    receipt_journal: Option<ReceiptJournalStore>,
     receipt_fsync: ReceiptFsyncPolicy,
     receipt_fsync_interval_writes: u64,
     receipt_durability: Mutex<ReceiptDurabilityState>,
@@ -1656,7 +1667,8 @@ impl Drop for ZapNodeObservabilityHttpServer {
 
 impl ZapNode {
     pub async fn from_config(config: ZapNodeConfig) -> Result<Self> {
-        config.validate()?;
+        let runtime = WasmExecutor::new()?;
+        validate_config_with_executor(&config, &runtime)?;
         let keypair = load_keypair(&config.key_file)?;
         let node_id = keypair.node_id();
         let bind = config
@@ -1715,7 +1727,6 @@ impl ZapNode {
             .transpose()
             .context("invalid poa.validator_set_authority")?;
 
-        let runtime = WasmExecutor::new()?;
         let registry_path = config.registry.path.clone();
         let registry_bundle_path = config.registry.bundle_path.clone();
         let registry_require_signature = config.registry.require_signature;
@@ -1748,7 +1759,7 @@ impl ZapNode {
             poa_required_threshold: poa_verifier.required_threshold,
             poa_validator_set_path,
             poa_validator_set_authority,
-            receipt_log_path: config.receipts.path,
+            receipt_journal: config.receipts.dir.map(ReceiptJournalStore::open),
             receipt_fsync,
             receipt_fsync_interval_writes,
             receipt_durability: Mutex::new(ReceiptDurabilityState::default()),
@@ -2112,32 +2123,33 @@ impl ZapNode {
             )
             .with_detail(format!("verify_failures={verify_failures}"));
         }
-        let Some(path) = &self.receipt_log_path else {
+        let Some(store) = &self.receipt_journal else {
             return ZapNodeHealthCheck::new(
                 "receipt_log",
                 ZapNodeHealthStatus::Degraded,
                 "receipt log is not configured",
             );
         };
+        let path = store.dir();
         if !path.exists() {
             return ZapNodeHealthCheck::new(
                 "receipt_log",
                 ZapNodeHealthStatus::Healthy,
-                "receipt log is configured and will be created on first receipt",
+                "receipt journal is configured and will be created on first receipt",
             )
             .with_detail(path.display().to_string());
         }
-        match load_verified_receipt_log(path) {
+        match store.verify() {
             Ok(_) => ZapNodeHealthCheck::new(
                 "receipt_log",
                 ZapNodeHealthStatus::Healthy,
-                "receipt log verifies",
+                "receipt journal verifies",
             )
             .with_detail(path.display().to_string()),
             Err(error) => ZapNodeHealthCheck::new(
                 "receipt_log",
                 ZapNodeHealthStatus::Critical,
-                "receipt log verification failed",
+                "receipt journal verification failed",
             )
             .with_detail(format!("{error:#}")),
         }
@@ -2542,17 +2554,16 @@ impl ZapNode {
         };
         request.validate()?;
         let limit = request.effective_limit()?;
-        let mut receipts = match &self.receipt_log_path {
-            Some(path) => match load_verified_receipt_log(path) {
+        let mut receipts = match &self.receipt_journal {
+            Some(store) => match store.query_with_limit(&request, limit.saturating_add(1)) {
                 Ok(receipts) => receipts,
                 Err(error) => {
                     self.record_receipt_log_verify_failure();
-                    return Err(error);
+                    return Err(error.into());
                 }
             },
             None => Vec::new(),
         };
-        receipts.retain(|receipt| request.matches(receipt));
         let truncated = receipts.len() > limit;
         receipts.truncate(limit);
         let next_after_processed_at_micros = truncated
@@ -2876,13 +2887,13 @@ impl ZapNode {
                             action
                         );
                     }
-                    let path = self.memory.path.as_ref().ok_or_else(|| {
+                    let dir = self.memory.dir.as_ref().ok_or_else(|| {
                         anyhow!(
-                            "driver `{}` called zap.memory_write but memory.path is not configured",
+                            "driver `{}` called zap.memory_write but memory.dir is not configured",
                             action
                         )
                     })?;
-                    let mut store = JsonlMemoryStore::open(path);
+                    let mut store = MemoryJournalStore::open(dir);
                     if let Some(max_record_bytes) = self.memory.max_record_bytes {
                         store = store.with_max_record_bytes(max_record_bytes);
                     }
@@ -3134,17 +3145,9 @@ impl ZapNode {
         message: &InboundMessage,
         output: Option<&[u8]>,
     ) -> Result<()> {
-        let Some(path) = &self.receipt_log_path else {
+        let Some(store) = &self.receipt_journal else {
             return Ok(());
         };
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create receipt directory {}", parent.display())
-            })?;
-        }
         let processed_at_micros = now_micros()?;
         let required_threshold = frame
             .header
@@ -3162,27 +3165,14 @@ impl ZapNode {
             required_threshold,
             pact,
         )?;
-        let mut options = OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
-            .open(path)
-            .with_context(|| format!("failed to open receipt log {}", path.display()))?;
-        file.write_all(receipt.to_json_line()?.as_bytes())
-            .with_context(|| format!("failed to write receipt log {}", path.display()))?;
         let should_sync = self
             .receipt_durability
             .lock()
             .unwrap()
             .record_write(self.receipt_fsync, self.receipt_fsync_interval_writes);
-        if should_sync {
-            file.sync_data()
-                .with_context(|| format!("failed to fsync receipt log {}", path.display()))?;
-        }
+        store.append(&receipt, should_sync).with_context(|| {
+            format!("failed to write receipt journal {}", store.dir().display())
+        })?;
         Ok(())
     }
 }
@@ -3222,6 +3212,14 @@ fn pact_receipt_reference(
 }
 
 fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
+    let executor = WasmExecutor::new()?;
+    validate_config_with_executor(config, &executor)
+}
+
+fn validate_config_with_executor(
+    config: &ZapNodeConfig,
+    executor: &WasmExecutor,
+) -> Result<ConfigValidationReport> {
     let bind = config
         .bind
         .parse::<SocketAddr>()
@@ -3272,6 +3270,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
     let registry_bundle_enabled =
         load_registry_bundle_manifest_from_config(&config.registry)?.is_some();
     let signed_driver_count = validate_drivers(
+        executor,
         &config.drivers,
         config.runtime,
         &config.memory,
@@ -3296,7 +3295,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         peer_forward_enabled_count: peer_trust_summary.peer_forward_enabled_count,
         driver_count: config.drivers.len(),
         signed_driver_count,
-        receipt_log_enabled: config.receipts.path.is_some(),
+        receipt_journal_enabled: config.receipts.dir.is_some(),
         registry_enabled: config.registry.path.is_some(),
         registry_entry_count,
         registry_signature_required: config.registry.require_signature,
@@ -3306,7 +3305,7 @@ fn validate_config(config: &ZapNodeConfig) -> Result<ConfigValidationReport> {
         poa_required_threshold: poa_summary.required_threshold,
         poa_validator_set_enabled: poa_summary.validator_set_enabled,
         poa_validator_set_epoch: poa_summary.validator_set_epoch,
-        memory_enabled: config.memory.path.is_some(),
+        memory_enabled: config.memory.dir.is_some(),
         route_count: config.routes.len(),
         capability_count,
         capability_grant_count: advertisement.grants.len(),
@@ -3350,41 +3349,46 @@ fn validate_runtime(runtime: RuntimeConfig) -> Result<()> {
 }
 
 fn validate_receipts(config: &ZapNodeConfig) -> Result<()> {
+    if config.receipts.path.is_some() {
+        bail!(
+            "receipts.path is no longer supported; use receipts.dir for the binary receipt journal"
+        );
+    }
     if config.receipts.fsync == ReceiptFsyncPolicy::Interval
         && config.receipts.fsync_interval_writes() == 0
     {
         bail!("receipts.fsync_interval_writes must be greater than 0 when receipts.fsync=interval");
     }
-    let Some(receipt_path) = &config.receipts.path else {
+    let Some(receipt_dir) = &config.receipts.dir else {
         return Ok(());
     };
-    if receipt_path == &config.key_file {
+    if receipt_dir == &config.key_file {
         bail!(
-            "receipts.path must not point at key_file {}",
+            "receipts.dir must not point at key_file {}",
             config.key_file.display()
         );
     }
     if let Some(registry_path) = &config.registry.path
-        && receipt_path == registry_path
+        && receipt_dir == registry_path
     {
         bail!(
-            "receipts.path must not point at registry.path {}",
+            "receipts.dir must not point at registry.path {}",
             registry_path.display()
         );
     }
     for driver in &config.drivers {
-        if receipt_path == &driver.path {
+        if receipt_dir == &driver.path {
             bail!(
-                "receipts.path must not point at driver `{}` path {}",
+                "receipts.dir must not point at driver `{}` path {}",
                 driver.action,
                 driver.path.display()
             );
         }
         if let Some(manifest_path) = &driver.manifest
-            && receipt_path == manifest_path
+            && receipt_dir == manifest_path
         {
             bail!(
-                "receipts.path must not point at driver `{}` manifest {}",
+                "receipts.dir must not point at driver `{}` manifest {}",
                 driver.action,
                 manifest_path.display()
             );
@@ -3394,50 +3398,53 @@ fn validate_receipts(config: &ZapNodeConfig) -> Result<()> {
 }
 
 fn validate_memory(config: &ZapNodeConfig) -> Result<()> {
+    if config.memory.path.is_some() {
+        bail!("memory.path is no longer supported; use memory.dir for the binary memory journal");
+    }
     if matches!(config.memory.max_record_bytes, Some(0)) {
         bail!("memory.max_record_bytes must be greater than zero");
     }
     if (config.memory.allow_driver_read || config.memory.allow_driver_write)
-        && config.memory.path.is_none()
+        && config.memory.dir.is_none()
     {
-        bail!("memory driver access requires memory.path");
+        bail!("memory driver access requires memory.dir");
     }
-    if let Some(memory_path) = &config.memory.path {
-        if memory_path == &config.key_file {
+    if let Some(memory_dir) = &config.memory.dir {
+        if memory_dir == &config.key_file {
             bail!(
-                "memory.path must not point at key_file {}",
+                "memory.dir must not point at key_file {}",
                 config.key_file.display()
             );
         }
-        if let Some(receipt_path) = &config.receipts.path
-            && memory_path == receipt_path
+        if let Some(receipt_dir) = &config.receipts.dir
+            && memory_dir == receipt_dir
         {
             bail!(
-                "memory.path must not point at receipts.path {}",
-                receipt_path.display()
+                "memory.dir must not point at receipts.dir {}",
+                receipt_dir.display()
             );
         }
         if let Some(registry_path) = &config.registry.path
-            && memory_path == registry_path
+            && memory_dir == registry_path
         {
             bail!(
-                "memory.path must not point at registry.path {}",
+                "memory.dir must not point at registry.path {}",
                 registry_path.display()
             );
         }
         for driver in &config.drivers {
-            if memory_path == &driver.path {
+            if memory_dir == &driver.path {
                 bail!(
-                    "memory.path must not point at driver `{}` path {}",
+                    "memory.dir must not point at driver `{}` path {}",
                     driver.action,
                     driver.path.display()
                 );
             }
             if let Some(manifest_path) = &driver.manifest
-                && memory_path == manifest_path
+                && memory_dir == manifest_path
             {
                 bail!(
-                    "memory.path must not point at driver `{}` manifest {}",
+                    "memory.dir must not point at driver `{}` manifest {}",
                     driver.action,
                     manifest_path.display()
                 );
@@ -3460,12 +3467,12 @@ fn validate_capability_cache_config(config: &ZapNodeConfig) -> Result<()> {
             config.key_file.display()
         );
     }
-    if let Some(receipt_path) = &config.receipts.path
-        && cache_path == receipt_path
+    if let Some(receipt_dir) = &config.receipts.dir
+        && cache_path == receipt_dir
     {
         bail!(
-            "capability_cache.path must not point at receipts.path {}",
-            receipt_path.display()
+            "capability_cache.path must not point at receipts.dir {}",
+            receipt_dir.display()
         );
     }
     if let Some(registry_path) = &config.registry.path
@@ -3476,12 +3483,12 @@ fn validate_capability_cache_config(config: &ZapNodeConfig) -> Result<()> {
             registry_path.display()
         );
     }
-    if let Some(memory_path) = &config.memory.path
-        && cache_path == memory_path
+    if let Some(memory_dir) = &config.memory.dir
+        && cache_path == memory_dir
     {
         bail!(
-            "capability_cache.path must not point at memory.path {}",
-            memory_path.display()
+            "capability_cache.path must not point at memory.dir {}",
+            memory_dir.display()
         );
     }
     for driver in &config.drivers {
@@ -4179,7 +4186,7 @@ pub fn describe_capabilities(config: &ZapNodeConfig) -> Result<CapabilityAdverti
         }
     }
 
-    if config.memory.path.is_some() {
+    if config.memory.dir.is_some() {
         capabilities.insert(CapabilityId::new("memory.local")?);
         if config.memory.allow_driver_read {
             capabilities.insert(CapabilityId::new("memory.read")?);
@@ -4196,6 +4203,7 @@ pub fn describe_capabilities(config: &ZapNodeConfig) -> Result<CapabilityAdverti
 }
 
 fn validate_drivers(
+    executor: &WasmExecutor,
     drivers: &[DriverConfig],
     runtime: RuntimeConfig,
     memory: &MemoryConfig,
@@ -4203,7 +4211,6 @@ fn validate_drivers(
     warnings: &mut Vec<String>,
 ) -> Result<usize> {
     let mut actions = HashSet::new();
-    let executor = WasmExecutor::new()?;
     let mut signed_driver_count = 0;
     for driver in drivers {
         if driver.action.trim().is_empty() {
@@ -4215,7 +4222,7 @@ fn validate_drivers(
         let wasm = fs::read(&driver.path)
             .with_context(|| format!("failed to read driver {}", driver.path.display()))?;
         executor
-            .compile_and_validate(&wasm)
+            .compile_and_validate_cached(&wasm)
             .with_context(|| format!("invalid driver ABI {}", driver.path.display()))?;
 
         let manifest_permissions = if let Some(manifest_path) = &driver.manifest {
@@ -4283,7 +4290,7 @@ fn load_drivers(
             None => DriverPermissions::none(),
         };
         let wasm_driver = executor
-            .compile_and_validate(&wasm)
+            .compile_and_validate_cached(&wasm)
             .with_context(|| format!("invalid driver ABI {}", driver.path.display()))?;
         compiled.insert(
             driver.action.clone(),
@@ -4358,38 +4365,6 @@ fn hash_frame(frame: &ZapFrame) -> String {
     format!("blake3:{}", blake3::hash(&frame.encode()).to_hex())
 }
 
-fn load_verified_receipt_log(path: &Path) -> Result<Vec<SignedActionReceipt>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let input = fs::read_to_string(path)
-        .with_context(|| format!("failed to read receipt log {}", path.display()))?;
-    let mut receipts = Vec::new();
-    for (index, line) in input.lines().enumerate() {
-        let line_number = index + 1;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let receipt = SignedActionReceipt::from_json_str(line).with_context(|| {
-            format!(
-                "failed to parse receipt at {} line {}",
-                path.display(),
-                line_number
-            )
-        })?;
-        receipt.verify().with_context(|| {
-            format!(
-                "invalid receipt signature at {} line {}",
-                path.display(),
-                line_number
-            )
-        })?;
-        receipts.push(receipt);
-    }
-    Ok(receipts)
-}
-
 fn validate_effective_driver_permissions(
     driver: &DriverConfig,
     runtime: RuntimeConfig,
@@ -4427,15 +4402,15 @@ fn validate_effective_driver_permissions(
             driver.action
         );
     }
-    if permissions.memory_read && !(memory.path.is_some() && memory.allow_driver_read) {
+    if permissions.memory_read && !(memory.dir.is_some() && memory.allow_driver_read) {
         bail!(
-            "driver `{}` requests memory_read permission, but memory.path and memory.allow_driver_read=true are required",
+            "driver `{}` requests memory_read permission, but memory.dir and memory.allow_driver_read=true are required",
             driver.action
         );
     }
-    if permissions.memory_write && !(memory.path.is_some() && memory.allow_driver_write) {
+    if permissions.memory_write && !(memory.dir.is_some() && memory.allow_driver_write) {
         bail!(
-            "driver `{}` requests memory_write permission, but memory.path and memory.allow_driver_write=true are required",
+            "driver `{}` requests memory_write permission, but memory.dir and memory.allow_driver_write=true are required",
             driver.action
         );
     }
@@ -4526,7 +4501,6 @@ mod tests {
         sign_frame, sign_poa_validator_set, verify_frame,
     };
     use zap_envelope::{ZapEnvelope, ZapMessageKind};
-    use zap_ledger::SignedActionReceipt;
     use zap_memory::MemoryQuery;
     use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
     use zap_router::{RouteMatch, RouteTarget};
@@ -4924,7 +4898,7 @@ mod tests {
             public_key_string(&peer),
             "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
         );
-        config.memory.path = Some(temp.path().join("memory.jsonl"));
+        config.memory.dir = Some(temp.path().join("memory"));
         config.memory.allow_driver_read = true;
         config.routes.push(RouteRule {
             name: Some("echo-local".to_string()),
@@ -5180,7 +5154,7 @@ required_json_fields = ["message"]
             public_key_string(&peer),
             "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
         );
-        config.memory.path = Some(temp.path().join("memory.jsonl"));
+        config.memory.dir = Some(temp.path().join("memory"));
         config.routes.push(RouteRule {
             name: Some("memory-capability".to_string()),
             description: None,
@@ -5275,7 +5249,7 @@ required_json_fields = ["message"]
             public_key_string(&peer),
             "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
         );
-        config.memory.path = Some(temp.path().join("memory.jsonl"));
+        config.memory.dir = Some(temp.path().join("memory"));
         config.capability_policy.require_grants_for_advertised = true;
         config.capability_policy.grants.push(CapabilityGrant {
             capability: CapabilityId::new("driver.execute:echo").unwrap(),
@@ -5411,7 +5385,7 @@ required_json_fields = ["message"]
         let key_path = key_dir.join("node.key");
         let driver_path = driver_dir.join("echo.wat");
         let manifest_path = driver_dir.join("echo.manifest.toml");
-        let receipt_path = config_dir.join("logs").join("receipts.jsonl");
+        let receipt_path = config_dir.join("logs").join("receipts");
         let config_path = config_dir.join("node.toml");
         let author = Keypair::generate();
         std::fs::write(&key_path, local.to_key_file_toml().unwrap()).unwrap();
@@ -5446,7 +5420,7 @@ path = "drivers/echo.wat"
 manifest = "drivers/echo.manifest.toml"
 
 [receipts]
-path = "logs/receipts.jsonl"
+dir = "logs/receipts"
 fsync = "always"
 "#,
                 peer.node_id(),
@@ -5462,10 +5436,7 @@ fsync = "always"
             config.drivers[0].manifest.as_deref(),
             Some(manifest_path.as_path())
         );
-        assert_eq!(
-            config.receipts.path.as_deref(),
-            Some(receipt_path.as_path())
-        );
+        assert_eq!(config.receipts.dir.as_deref(), Some(receipt_path.as_path()));
         assert_eq!(config.receipts.fsync, ReceiptFsyncPolicy::Always);
         let report = config.validate().unwrap();
         assert_eq!(report.node_id, local.node_id());
@@ -5898,10 +5869,10 @@ fsync = "always"
             public_key_string(&peer),
             "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
         );
-        config.receipts.path = Some(config.key_file.clone());
+        config.receipts.dir = Some(config.key_file.clone());
 
         let error = config.validate().unwrap_err();
-        assert!(format!("{error:#}").contains("receipts.path must not point at key_file"));
+        assert!(format!("{error:#}").contains("receipts.dir must not point at key_file"));
     }
 
     #[test]
@@ -6052,7 +6023,9 @@ fsync = "always"
             },
         )
         .await;
-        harness.node.receipt_log_path = Some(harness._temp.path().join("receipts.jsonl"));
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(
+            harness._temp.path().join("receipts"),
+        ));
 
         let snapshot = harness.node.health_snapshot();
         assert_eq!(snapshot.status, ZapNodeHealthStatus::Healthy);
@@ -6090,7 +6063,9 @@ fsync = "always"
             },
         )
         .await;
-        harness.node.receipt_log_path = Some(harness._temp.path().join("receipts.jsonl"));
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(
+            harness._temp.path().join("receipts"),
+        ));
         let node = Arc::new(harness.node);
         let server = node
             .clone()
@@ -6124,7 +6099,9 @@ fsync = "always"
             },
         )
         .await;
-        harness.node.receipt_log_path = Some(harness._temp.path().join("receipts.jsonl"));
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(
+            harness._temp.path().join("receipts"),
+        ));
         harness.node.record_rejected_frame("anti_replay");
 
         let snapshot = harness.node.health_snapshot();
@@ -6146,11 +6123,16 @@ fsync = "always"
         )
         .await;
         let registry_path = harness._temp.path().join("registry.index.toml");
-        let receipt_path = harness._temp.path().join("receipts.jsonl");
+        let receipt_path = harness._temp.path().join("receipts");
         std::fs::write(&registry_path, "not = [valid").unwrap();
-        std::fs::write(&receipt_path, "not-json\n").unwrap();
+        std::fs::create_dir_all(&receipt_path).unwrap();
+        std::fs::write(
+            receipt_path.join("00000000000000000000.zjseg"),
+            "not-a-zap-journal",
+        )
+        .unwrap();
         harness.node.registry_path = Some(registry_path);
-        harness.node.receipt_log_path = Some(receipt_path);
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(receipt_path));
 
         let snapshot = harness.node.health_snapshot();
         assert_eq!(snapshot.status, ZapNodeHealthStatus::Critical);
@@ -6238,7 +6220,8 @@ fsync = "always"
             receipts: ReceiptsConfig::default(),
             registry: RegistryConfig::default(),
             memory: MemoryConfig {
-                path: Some(memory_path.clone()),
+                dir: Some(memory_path.clone()),
+                path: None,
                 max_record_bytes: None,
                 allow_driver_read: false,
                 allow_driver_write: true,
@@ -6283,7 +6266,7 @@ fsync = "always"
             .unwrap();
         assert_eq!(event.output.as_deref(), Some(b"driver-output".as_slice()));
 
-        let store = JsonlMemoryStore::open(&memory_path);
+        let store = MemoryJournalStore::open(&memory_path);
         let records = store
             .query(&MemoryQuery {
                 namespace: Some("driver".to_string()),
@@ -6641,8 +6624,8 @@ fsync = "always"
     #[tokio::test]
     async fn node_accepts_zenv_event_without_wasm_dispatch() {
         let mut harness = node_harness(SecurityConfig::default()).await;
-        let receipt_path = harness._temp.path().join("receipts").join("events.jsonl");
-        harness.node.receipt_log_path = Some(receipt_path.clone());
+        let receipt_path = harness._temp.path().join("receipts").join("events");
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(&receipt_path));
         let signed = signed_zenv_frame(
             &harness,
             ZapMessageKind::Event,
@@ -6666,8 +6649,8 @@ fsync = "always"
         assert_eq!(event.action, "echo");
         assert_eq!(event.output, None);
 
-        let lines = std::fs::read_to_string(&receipt_path).unwrap();
-        let receipt = SignedActionReceipt::from_json_str(lines.trim()).unwrap();
+        let receipts = ReceiptJournalStore::open(&receipt_path).all().unwrap();
+        let receipt = receipts.first().unwrap();
         receipt.verify().unwrap();
         assert_eq!(receipt.receipt.kind, "event");
         assert_eq!(receipt.receipt.subject, "echo");
@@ -6726,8 +6709,8 @@ required_json_fields = ["message"]
     #[tokio::test]
     async fn node_writes_signed_action_receipt_when_enabled() {
         let mut harness = node_harness(SecurityConfig::default()).await;
-        let receipt_path = harness._temp.path().join("receipts").join("actions.jsonl");
-        harness.node.receipt_log_path = Some(receipt_path.clone());
+        let receipt_path = harness._temp.path().join("receipts").join("actions");
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(&receipt_path));
         let signed = signed_echo_frame(&harness, now_micros().unwrap());
         harness
             .sender_endpoint
@@ -6741,8 +6724,8 @@ required_json_fields = ["message"]
             .unwrap();
         assert_eq!(event.action, "echo");
 
-        let lines = std::fs::read_to_string(&receipt_path).unwrap();
-        let receipt = SignedActionReceipt::from_json_str(lines.trim()).unwrap();
+        let receipts = ReceiptJournalStore::open(&receipt_path).all().unwrap();
+        let receipt = receipts.first().unwrap();
         receipt.verify().unwrap();
         assert_eq!(receipt.receipt.node_id, harness.receiver_key.node_id());
         assert_eq!(receipt.receipt.source_node, harness.sender_key.node_id());
@@ -6756,8 +6739,8 @@ required_json_fields = ["message"]
     #[tokio::test]
     async fn node_receipt_references_verified_pact_record() {
         let mut harness = node_harness(SecurityConfig::default()).await;
-        let receipt_path = harness._temp.path().join("receipts").join("pact.jsonl");
-        harness.node.receipt_log_path = Some(receipt_path.clone());
+        let receipt_path = harness._temp.path().join("receipts").join("pact");
+        harness.node.receipt_journal = Some(ReceiptJournalStore::open(&receipt_path));
 
         let mut pact = ZapPact::new(
             "agent.alpha",
@@ -6804,10 +6787,10 @@ required_json_fields = ["message"]
         assert_eq!(event.kind, ZapMessageKind::Action);
         assert_eq!(event.subject, PACT_RECORD_SUBJECT);
 
-        let lines = std::fs::read_to_string(&receipt_path).unwrap();
-        let receipt = SignedActionReceipt::from_json_str(lines.trim()).unwrap();
+        let receipts = ReceiptJournalStore::open(&receipt_path).all().unwrap();
+        let receipt = receipts.first().unwrap();
         receipt.verify().unwrap();
-        let pact_ref = receipt.receipt.pact.unwrap();
+        let pact_ref = receipt.receipt.pact.as_ref().unwrap();
         assert_eq!(pact_ref.pact_id, pact.pact_id);
         assert_eq!(pact_ref.intent, "valve.open");
         assert_eq!(pact_ref.hash, pact.hash.unwrap());

@@ -80,7 +80,7 @@ Use `crates/zap-ops/config/observability/production.toml` as the canonical
 shape. The minimum production set is:
 
 - UDP bind or listener reachability;
-- receipt log path mounted and writable by the daemon user;
+- receipt journal directory mounted and writable by the daemon user;
 - registry bundle manifest present when `[registry.bundle_path]` is configured;
 - `zap doctor --strict --json` for config readiness.
 
@@ -89,13 +89,13 @@ slower control loop.
 
 `ZapNode::health_snapshot()` returns `healthy`, `degraded`, or `critical` plus
 named checks for endpoint bind status, registry signature validity, registry
-bundle loadability, receipt log verification, capability cache freshness,
+bundle loadability, receipt journal verification, capability cache freshness,
 message policy posture, peer trust, and runtime error counters. `critical`
 means the node has lost a trust or audit invariant, such as invalid registry
-signature, invalid receipt log, unreadable required capability cache, revoked
+signature, invalid receipt journal, unreadable required capability cache, revoked
 peer, or PoA attestation failures. `degraded` means traffic can continue while
 operators investigate weaker posture, such as default-allow message policy,
-missing receipt log configuration, quarantined peers, stale capability cache, or
+missing receipt journal configuration, quarantined peers, stale capability cache, or
 nonzero runtime rejection/driver error counters.
 
 ## Alerts
@@ -109,17 +109,18 @@ scraping is restored.
 
 ### ZapReceiptAuditFailing
 
-Receipt verification failed. Stop pruning receipt logs and archive the current
-files before restarting the node:
+Receipt verification failed. Stop compacting receipt journals and archive the
+current directories before restarting the node:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --path /var/lib/zap/receipts.jsonl
+cargo run -p zap-cli -- receipts verify --dir /var/lib/zap/receipts
 ```
 
-If verification fails after a host or disk incident, preserve the broken log for
-forensics and cut over to a new receipt file only after security review.
+If verification fails after a host or disk incident, preserve the broken journal
+for forensics and cut over to a new receipt directory only after security
+review.
 
-Rollback only to a deployment whose receipt log verifies for the full audit
+Rollback only to a deployment whose receipt journal verifies for the full audit
 window. Preserve local and pulled peer receipts as described in
 [Operations](operations.md#receipt-verification-failure).
 

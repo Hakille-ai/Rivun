@@ -58,6 +58,15 @@ export default function FAQPage() {
             No. ZAP does not use blocks, proof-of-work, or proof-of-stake. PoA is a lightweight threshold validator scheme. It simply ensures that high-risk actions carry cryptographic approval signatures (attestations) from a validator quorum before a node executes them.
           </AccordionContent>
         </AccordionItem>
+
+        <AccordionItem value="item-6" className="border border-zinc-800 bg-zinc-950/30 rounded-xl px-4">
+          <AccordionTrigger className="text-white hover:no-underline text-base font-semibold py-4">
+            Is PACT a blockchain, payment system, or separate API?
+          </AccordionTrigger>
+          <AccordionContent className="text-zinc-400 text-sm pb-4 leading-relaxed">
+            No. PACT is a native ZAP profile for portable signed action records. It captures identity, intent, consent, proof, terms, status, and revocation evidence as <code>application/zap-pact+json</code> inside normal <code>ZENV</code> envelopes, then verifies offline with the existing BLAKE3 and Ed25519 trust stack.
+          </AccordionContent>
+        </AccordionItem>
       </Accordion>
     </div>
   );

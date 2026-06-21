@@ -37,7 +37,7 @@ export default function RoadmapPage() {
             <span className="text-xs font-semibold uppercase tracking-wider text-blue-400 block">Milestones</span>
             <h3 className="text-xl font-bold text-white tracking-tight">Evolution of the ZAP Stack</h3>
             <p className="text-sm text-zinc-400 leading-relaxed">
-              The ZAP protocol&apos;s core execution sandbox, message validation layers, driver registry manifests, and Proof-of-Action consensus are fully implemented. Next milestones focus on dynamic network routing tables and peer orchestration VPNs.
+              The ZAP protocol&apos;s core execution sandbox, message validation layers, driver registry manifests, Proof-of-Action consensus, signed receipts, and PACT action records are implemented. Next milestones focus on production metrics, evidence bundles, fleet inspection, and broader SDK conformance.
             </p>
           </div>
         </div>
@@ -117,6 +117,10 @@ export default function RoadmapPage() {
                 <span className="text-purple-400 font-semibold">•</span>
                 <span><strong>Consensus Request:</strong> Supplying validation signatures for consensus-protected action frames.</span>
               </li>
+              <li className="flex items-start gap-2">
+                <span className="text-purple-400 font-semibold">•</span>
+                <span><strong>PACT Profile:</strong> Signed action records with canonical hashes, revocation, bundles, and SDK fixture verification.</span>
+              </li>
             </ul>
           </CardContent>
         </Card>
@@ -187,7 +191,11 @@ export default function RoadmapPage() {
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-amber-400 font-semibold">•</span>
-                <span><strong>Receipt Ledgers:</strong> Tamper-evident signed JSONL audit logs.</span>
+                <span><strong>Receipt Ledgers:</strong> Tamper-evident signed binary receipt journals.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-amber-400 font-semibold">•</span>
+                <span><strong>PACT References:</strong> Verified PACT records attach intent, status, hash, and policy context to receipts.</span>
               </li>
             </ul>
           </CardContent>

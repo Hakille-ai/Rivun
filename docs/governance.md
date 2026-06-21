@@ -62,9 +62,9 @@ Production automation should write entries for:
 - release package built;
 - checksums and signatures published;
 - break-glass action executed;
-- receipt log archival or pruning.
+- receipt journal archival or compaction.
 
-Keep audit JSONL files separate from signed receipt logs. Receipts prove node
+Keep audit JSONL files separate from signed receipt journals. Receipts prove node
 processing; governance audit proves human and CI authority.
 
 ## Break Glass

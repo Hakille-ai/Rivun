@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::{HashMap, VecDeque},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -39,6 +40,7 @@ const HOST_NOT_CONFIGURED: i32 = -2;
 const HOST_BAD_POINTER: i32 = -3;
 const HOST_TOO_LARGE: i32 = -4;
 const HOST_MEMORY_ERROR: i32 = -5;
+const DEFAULT_WASM_MODULE_CACHE_ENTRIES: usize = 64;
 
 #[derive(Debug, Error)]
 pub enum ZapRuntimeError {
@@ -118,20 +120,41 @@ pub enum HostCallKind {
     DeviceCall,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WasmModuleCacheConfig {
+    pub enabled: bool,
+    pub max_entries: usize,
+}
+
+impl Default for WasmModuleCacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_entries: DEFAULT_WASM_MODULE_CACHE_ENTRIES,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WasmExecutor {
     engine: Engine,
+    module_cache: Arc<Mutex<WasmModuleCache>>,
     _epoch_ticker: Arc<EngineEpochTicker>,
 }
 
 impl WasmExecutor {
     pub fn new() -> Result<Self> {
+        Self::with_module_cache(WasmModuleCacheConfig::default())
+    }
+
+    pub fn with_module_cache(cache_config: WasmModuleCacheConfig) -> Result<Self> {
         let mut config = Config::new();
         config.consume_fuel(true);
         config.epoch_interruption(true);
         config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
         let engine = Engine::new(&config)?;
         Ok(Self {
+            module_cache: Arc::new(Mutex::new(WasmModuleCache::new(cache_config))),
             _epoch_ticker: Arc::new(EngineEpochTicker::start(engine.clone())),
             engine,
         })
@@ -146,6 +169,26 @@ impl WasmExecutor {
     pub fn compile_and_validate(&self, wasm: impl AsRef<[u8]>) -> Result<WasmDriver> {
         let driver = self.compile(wasm)?;
         driver.validate_abi()?;
+        Ok(driver)
+    }
+
+    pub fn compile_and_validate_cached(&self, wasm: impl AsRef<[u8]>) -> Result<WasmDriver> {
+        let wasm = wasm.as_ref();
+        let key = wasm_module_cache_key(wasm);
+        if let Some(driver) = self
+            .module_cache
+            .lock()
+            .expect("WASM module cache mutex must not be poisoned")
+            .get(&key)
+        {
+            return Ok(driver);
+        }
+
+        let driver = self.compile_and_validate(wasm)?;
+        self.module_cache
+            .lock()
+            .expect("WASM module cache mutex must not be poisoned")
+            .insert(key, driver.clone());
         Ok(driver)
     }
 
@@ -234,7 +277,7 @@ impl WasmExecutor {
         payload: &[u8],
         limits: ExecutionLimits,
     ) -> Result<WasmExecutionResult> {
-        let driver = self.compile_and_validate(wasm)?;
+        let driver = self.compile_and_validate_cached(wasm)?;
         self.execute(&driver, action, payload, limits)
     }
 }
@@ -275,6 +318,49 @@ impl WasmDriver {
             "(i32, i32, i32, i32) -> i64",
         )
     }
+}
+
+type WasmModuleCacheKey = [u8; 32];
+
+struct WasmModuleCache {
+    config: WasmModuleCacheConfig,
+    entries: HashMap<WasmModuleCacheKey, WasmDriver>,
+    order: VecDeque<WasmModuleCacheKey>,
+}
+
+impl WasmModuleCache {
+    fn new(config: WasmModuleCacheConfig) -> Self {
+        Self {
+            config,
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&self, key: &WasmModuleCacheKey) -> Option<WasmDriver> {
+        if !self.config.enabled {
+            return None;
+        }
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(&mut self, key: WasmModuleCacheKey, driver: WasmDriver) {
+        if !self.config.enabled || self.config.max_entries == 0 || self.entries.contains_key(&key) {
+            return;
+        }
+        while self.entries.len() >= self.config.max_entries {
+            let Some(evicted) = self.order.pop_front() else {
+                break;
+            };
+            self.entries.remove(&evicted);
+        }
+        self.order.push_back(key);
+        self.entries.insert(key, driver);
+    }
+}
+
+fn wasm_module_cache_key(wasm: &[u8]) -> WasmModuleCacheKey {
+    *blake3::hash(wasm).as_bytes()
 }
 
 struct StoreState {
@@ -702,6 +788,44 @@ mod tests {
         .unwrap()
     }
 
+    fn echo_driver_with_heap_start(heap_start: i32) -> Vec<u8> {
+        wat::parse_str(format!(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (global $heap (mut i32) (i32.const {heap_start}))
+              (func (export "zap_alloc") (param $len i32) (result i32)
+                global.get $heap
+                global.get $heap
+                local.get $len
+                i32.add
+                global.set $heap)
+              (func (export "zap_dealloc") (param i32 i32))
+              (func (export "zap_execute")
+                (param $action_ptr i32) (param $action_len i32)
+                (param $payload_ptr i32) (param $payload_len i32)
+                (result i64)
+                local.get $payload_ptr
+                i64.extend_i32_u
+                i64.const 32
+                i64.shl
+                local.get $payload_len
+                i64.extend_i32_u
+                i64.or))
+            "#
+        ))
+        .unwrap()
+    }
+
+    fn module_cache_len(executor: &WasmExecutor) -> usize {
+        executor
+            .module_cache
+            .lock()
+            .expect("WASM module cache mutex must not be poisoned")
+            .entries
+            .len()
+    }
+
     #[test]
     fn executes_echo_driver() {
         let executor = WasmExecutor::new().unwrap();
@@ -727,6 +851,62 @@ mod tests {
         let driver = executor.compile_and_validate(echo_driver()).unwrap();
 
         executor.validate_driver_abi(&driver).unwrap();
+    }
+
+    #[test]
+    fn cached_compile_reuses_same_module_for_same_wasm() {
+        let wasm = echo_driver();
+        let executor = WasmExecutor::new().unwrap();
+
+        let first = executor.compile_and_validate_cached(&wasm).unwrap();
+        let second = executor.compile_and_validate_cached(&wasm).unwrap();
+
+        assert!(wasmtime::Module::same(&first.module, &second.module));
+        assert_eq!(module_cache_len(&executor), 1);
+    }
+
+    #[test]
+    fn invalid_abi_is_not_cached() {
+        let wasm = wat::parse_str(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (func (export "zap_alloc") (param i32) (result i32) i32.const 0)
+              (func (export "zap_dealloc") (param i32 i32)))
+            "#,
+        )
+        .unwrap();
+        let executor = WasmExecutor::new().unwrap();
+
+        assert!(matches!(
+            executor.compile_and_validate_cached(&wasm),
+            Err(ZapRuntimeError::MissingExport("zap_execute"))
+        ));
+        assert_eq!(module_cache_len(&executor), 0);
+    }
+
+    #[test]
+    fn module_cache_evicts_fifo_entries() {
+        let first_wasm = echo_driver();
+        let second_wasm = echo_driver_with_heap_start(2048);
+        let executor = WasmExecutor::with_module_cache(WasmModuleCacheConfig {
+            enabled: true,
+            max_entries: 1,
+        })
+        .unwrap();
+
+        let first = executor.compile_and_validate_cached(&first_wasm).unwrap();
+        let first_cached = executor.compile_and_validate_cached(&first_wasm).unwrap();
+        assert!(wasmtime::Module::same(&first.module, &first_cached.module));
+
+        executor.compile_and_validate_cached(&second_wasm).unwrap();
+        let first_after_eviction = executor.compile_and_validate_cached(&first_wasm).unwrap();
+
+        assert!(!wasmtime::Module::same(
+            &first.module,
+            &first_after_eviction.module
+        ));
+        assert_eq!(module_cache_len(&executor), 1);
     }
 
     #[test]

@@ -173,7 +173,7 @@ export default function ObservabilityPage() {
         <CardContent>
           <pre className="text-xs bg-[#050505] p-4 rounded-lg border border-zinc-900 font-mono text-zinc-300 overflow-x-auto">
             <code>{`cargo run -p zap-cli -- doctor --config /etc/zap/zap.toml --strict --json
-cargo run -p zap-cli -- receipts verify --path /var/lib/zap/receipts.jsonl
+cargo run -p zap-cli -- receipts verify --dir /var/lib/zap/receipts
 cargo run -p zap-cli -- registry verify-signature --registry /var/lib/zap/registry.index.toml
 cargo run -p zap-cli -- capability cache refresh --config /etc/zap/zap.toml --strict --json
 cargo run -p zap-cli -- capability cache verify --path /var/lib/zap/capabilities.jsonl`}</code>

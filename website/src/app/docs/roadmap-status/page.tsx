@@ -22,8 +22,8 @@ const phaseRows = [
     phase: "Phase 2",
     title: "Protocol Spec and SDK Conformance",
     status: "partial",
-    done: "Shared fixtures, CLI fixture verification, and SDK conformance documentation.",
-    remaining: "More golden vectors and a machine-readable schema export workflow.",
+    done: "Shared fixtures, CLI fixture verification, schema export, and PACT record/bundle conformance across Rust, TypeScript, Python, and Go.",
+    remaining: "More binary golden vectors and broader SDK coverage for frames, receipts, capabilities, and agents.",
   },
   {
     phase: "Phase 3",
@@ -77,7 +77,7 @@ export default function RoadmapStatusPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-zinc-400">
-            CLI conformance gates, domain-pack validation, SDK fixture tests, release readiness, and ops config tests now provide repeatable evidence.
+            CLI conformance gates, domain-pack validation, PACT fixture tests, SDK conformance, release readiness, and ops config tests now provide repeatable evidence.
           </CardContent>
         </Card>
         <Card className="border-zinc-850 bg-zinc-950/40">
@@ -99,7 +99,7 @@ export default function RoadmapStatusPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-zinc-400">
-            Highest leverage remains metrics/health serving, evidence bundles, signed pack install, fleet inspection, and schema export.
+            Highest leverage remains metrics/health serving, evidence bundles, signed pack install, fleet inspection, and broader schema parity.
           </CardContent>
         </Card>
       </div>

@@ -39,7 +39,7 @@ These imports are deny-by-default. They return negative status codes when a
 permission is absent, a pointer is invalid, or the payload exceeds
 `max_host_call_bytes`. `device_call` is captured as an auditable request and
 returns a not-configured status until a real device bridge is configured.
-`memory_write` is committed by `zap-node` only when `[memory] path` is set and
+`memory_write` is committed by `zap-node` only when `[memory] dir` is set and
 `allow_driver_write = true`.
 
 `zap-capability` is the source of truth for permission declarations and

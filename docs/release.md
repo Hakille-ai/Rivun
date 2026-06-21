@@ -121,6 +121,8 @@ Migration notes are required when a release changes:
 - CLI command names, flags, output JSON, or exit behavior;
 - policy defaults such as `message_policy.default_decision`;
 - protocol fixtures, envelope fields, or parser rejection behavior;
+- PACT profile fields, canonical signing payload, signature domain, fixture
+  hashes, or `zap pact` CLI JSON behavior;
 - domain pack schema, required metadata, or risk levels;
 - SDK public methods, package layout, or fixture expectations;
 - website or docs routes used by operators.
@@ -154,6 +156,8 @@ reuse unsigned local registry mirrors as rollback input.
 Protocol changes require extra care:
 
 - update [protocol.md](protocol.md);
+- update [pact.md](pact.md) when PACT subjects, media type, canonical payload,
+  signatures, bundles, revocation, or receipt references change;
 - add or update golden vectors;
 - add parser rejection tests for malformed old/new data;
 - update [versioning.md](versioning.md) when compatibility rules change.

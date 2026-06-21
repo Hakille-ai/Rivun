@@ -53,6 +53,13 @@ Proof-of-Action (PoA) is a consensus gate for critical operations. When an actio
 ### Is this a blockchain?
 No. ZAP does not use a global distributed ledger, mining, or proof-of-stake. PoA is a lightweight, local, threshold-signature validator scheme designed to secure critical commands on a node-by-node basis.
 
+### Is PACT a blockchain, payment system, or separate API?
+No. PACT is a ZAP profile for portable signed action records. A PACT record
+captures identity, intent, consent, proof, terms, status, and revocation
+evidence as `application/zap-pact+json` inside normal `ZENV` envelopes. It uses
+the existing BLAKE3 and Ed25519 trust stack and verifies offline through shared
+fixtures and SDK helpers.
+
 ---
 
 ## 5. Extensibility & Runtime

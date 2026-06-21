@@ -27,7 +27,7 @@ Status values:
 | Health endpoint | done | `ZapNode::health_snapshot()`, `ZapNode::health_json()`, `ZapNode::healthz_text()`, optional `/healthz` and `/healthz.json`, `doctor` observability check | Add fleet-level health aggregation |
 | Prometheus/Grafana assets | done | `crates/zap-ops/config`, `docs/observability.md`, `crates/zap-ops/tests/configs.rs` | Add new rules only with emitted-metric validation |
 | Fail-closed message policy | done | `message_policy.default_decision`, policy tests, docs | Add more production profile examples |
-| Receipt fsync/segments/index | partial | `ReceiptFsyncPolicy`, `[receipts] fsync`, `ReceiptSegmentManifest`, `SignedReceiptSegmentManifest`, `ReceiptSegmentIndex`, bounded `until_processed_at_micros`, pull cursor tests | Add daemon segment rotation and disk-backed index maintenance |
+| Receipt fsync/segments/index | partial | `zap-journal`, `ReceiptJournalStore`, `ReceiptFsyncPolicy`, `[receipts] dir`, binary segments, sidecar indexes, bounded `until_processed_at_micros`, pull cursor tests | Add segment sealing/compression policy and durable peer replay windows |
 | Durable replay window | partial | In-memory replay guard and datagram nonce cache | Add optional restart-persistent replay windows |
 | Runtime host-call limits | partial | Host call byte limit and runtime bounds exist | Add per-action budget profiles and richer error taxonomy |
 
@@ -35,10 +35,10 @@ Status values:
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
-| Shared fixtures | partial | `fixtures/`, agent session/delegation/negotiation fixtures, `fixtures/protocol/`, Rust/Python/TypeScript/Go tests | Add signature, PoA, capability, and datagram golden vectors |
-| `zap fixtures verify` | done | CLI command and tests | Add SDK-path conformance mode |
-| SDK matrix | partial | `docs/sdks.md`, SDK README updates | Expand SDKs to signing, receipt verification, and capability helpers |
-| `zap schema export` | partial | CLI export of compiled protocol constants, agent schema, control subjects, expanded agent fixture catalog | Add external domain-pack schema registry and SDK-generated schema parity |
+| Shared fixtures | partial | `fixtures/`, agent session/delegation/negotiation fixtures, PACT record/bundle fixtures, `fixtures/protocol/`, Rust/Python/TypeScript/Go tests | Add more binary golden vectors and generated fixture manifests |
+| `zap fixtures verify` | done | CLI command, SDK-path conformance mode, fixture tests | Keep SDK coverage requirements current as profiles are added |
+| SDK matrix | partial | `docs/sdks.md`, SDK README updates, PACT fixture verification across Rust/TypeScript/Python/Go | Expand SDKs to broader frame signing, receipt verification, and capability helpers |
+| `zap schema export` | partial | CLI export of compiled protocol constants, agent schema, PACT schema/constants, control subjects, expanded fixture catalog | Add external domain-pack schema registry and SDK-generated schema parity |
 
 ## Phase 3: Agent Gateway
 
@@ -49,6 +49,15 @@ Status values:
 | Agent receipt linkage | partial | Receipts record message kind/subject and PoA | Link intent/session/capabilities/output artifacts explicitly |
 | Evidence export | partial | `zap memory export-evidence` emits payload-free memory and receipt summaries | Add signed bundle manifest and optional encrypted raw evidence archive |
 | Agent framework adapters | planned | Architecture docs only | Add adapters outside the wire protocol core |
+
+## PACT Profile
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| PACT record contract | done | `crates/zap-pact`, `zap pact create/sign/verify`, `fixtures/pact-record-v1.json`, Rust tests | Keep canonical payload frozen through fixtures |
+| PACT bundles and revocation | done | `ZapPactBundle`, `ZapPactRevocation`, `zap pact revoke`, `zap pact bundle verify`, fixture verifier | Add richer multi-revocation examples if deployments need them |
+| PACT receipt references | done | `PactReceiptReference`, node integration test, `docs/receipts.md` | Add policy decision population when policy reporting is plumbed into receipt creation |
+| PACT SDK conformance | done | Rust/TypeScript/Python/Go helpers and shared fixture tests | Add browser-lite SDK coverage when browser mode exists |
 
 ## Phase 4: Domain Packs and Marketplace
 
@@ -87,9 +96,8 @@ Status values:
 ## Next Highest-Value Implementation Blocks
 
 1. Wire receipt segment manifests into daemon log rotation and disk-backed indexes.
-2. Expand fixtures to frame/signature/PoA/receipt/capability/datagram golden vectors.
-3. Add SDK-path conformance mode for `zap fixtures verify`.
-4. Add durable restart-persistent replay windows.
-5. Add fleet topology inspection and fleet-wide incident snapshots.
-6. Add signed evidence bundle manifests and optional encrypted raw evidence archive.
-7. Extend ZapStore with signed domain-pack build/sign/verify/install workflows.
+2. Expand fixtures to generated binary golden vectors and fixture manifests.
+3. Add durable restart-persistent replay windows.
+4. Add fleet topology inspection and fleet-wide incident snapshots.
+5. Add signed evidence bundle manifests and optional encrypted raw evidence archive.
+6. Extend ZapStore with signed domain-pack build/sign/verify/install workflows.

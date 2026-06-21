@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Key, Shield, Terminal, Cpu, Activity, Network, Database, Lock, HelpCircle, Milestone, Compass, Server, Archive, Info, Download, Package, Bot, FileCheck2, GitBranch } from 'lucide-react';
+import { BookOpen, Key, Shield, Terminal, Cpu, Activity, Network, Database, Lock, HelpCircle, Milestone, Compass, Server, Archive, Info, Download, Package, Bot, FileCheck2, GitBranch, FileSignature } from 'lucide-react';
 const groups = [
   {
     title: "Getting Started",
@@ -19,6 +19,7 @@ const groups = [
     title: "Core Protocol",
     items: [
       { title: "Protocol Specs", href: "/docs/protocol", icon: Shield },
+      { title: "PACT Profile", href: "/docs/pact", icon: FileSignature },
       { title: "Agent Protocol", href: "/docs/agent-protocol", icon: Bot },
       { title: "Message Policy", href: "/docs/message-policy", icon: Shield },
       { title: "Security Model", href: "/docs/security", icon: Lock },

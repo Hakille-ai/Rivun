@@ -32,6 +32,7 @@ export default function DocsPage() {
         <li><strong>Universal Envelope (ZENV):</strong> A typed 74-byte header supporting data, events, commands, queries, responses, streams, actions, and control messages.</li>
         <li><strong>Wire Frame:</strong> A 64-byte big-endian header that prefixes every message.</li>
         <li><strong>Cryptographic Provenance:</strong> Every frame is signed with an Ed25519 keypair. The identity is derived from the public key using a domain-separated BLAKE3 hash.</li>
+        <li><strong>PACT Profile:</strong> Portable signed action records for intent, consent, proof, terms, revocation, bundles, and offline verification.</li>
         <li><strong>Proof-of-Action (PoA):</strong> A consensus mechanism requiring multiple validators to cryptographically attest to an action before a node executes it.</li>
         <li><strong>WASM Runtime:</strong> Actions are executed by sandboxed WebAssembly drivers. Host imports are deny-by-default, preventing unwanted network or filesystem access.</li>
         <li><strong>Decentralized Transport:</strong> ChaCha20-Poly1305 encrypted UDP datagrams with 96-bit nonces to prevent replay attacks.</li>

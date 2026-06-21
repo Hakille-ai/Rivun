@@ -39,13 +39,24 @@ fn runtime(c: &mut Criterion) {
         ..ExecutionLimits::default()
     };
 
-    c.bench_function("wasm_compile_and_validate_echo", |b| {
+    c.bench_function("wasm_compile_and_validate_echo_cold", |b| {
         b.iter(|| executor.compile_and_validate(&wasm).unwrap())
+    });
+    executor.compile_and_validate_cached(&wasm).unwrap();
+    c.bench_function("wasm_compile_and_validate_echo_cached_hot", |b| {
+        b.iter(|| executor.compile_and_validate_cached(&wasm).unwrap())
     });
     c.bench_function("wasm_execute_echo", |b| {
         b.iter(|| {
             executor
                 .execute(&driver, "echo", b"benchmark-payload", limits)
+                .unwrap()
+        })
+    });
+    c.bench_function("wasm_execute_bytes_echo_cached_hot", |b| {
+        b.iter(|| {
+            executor
+                .execute_bytes(&wasm, "echo", b"benchmark-payload", limits)
                 .unwrap()
         })
     });

@@ -60,7 +60,7 @@ consecutive_failures = 2
 
 [health.checks.target]
 kind = "file_exists"
-path = "/var/lib/zap/receipts.jsonl"
+path = "/var/lib/zap/receipts"
 
 [[health.checks]]
 name = "registry-bundle-present"

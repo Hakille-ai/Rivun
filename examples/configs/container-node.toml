@@ -25,4 +25,4 @@ max_clock_skew_micros = 300000000
 replay_cache_capacity = 4096
 
 [receipts]
-path = "/var/lib/zap/receipts.jsonl"
+dir = "/var/lib/zap/receipts"

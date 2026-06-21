@@ -1,7 +1,7 @@
 # Production-Style Multi-Node Example
 
 This example shows the operator sequence for a small two-node ZAP deployment
-with signed driver provenance, receipt logs, capability cache review, and
+with signed driver provenance, receipt journals, capability cache review, and
 observability assets.
 
 The TOML files are templates. Generate real node keys before running them.

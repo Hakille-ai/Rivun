@@ -11,7 +11,7 @@ use zap_crypto::{
     verify_poa_certificate,
 };
 use zap_envelope::{ZapEnvelope, ZapEnvelopeRef, ZapMessageKind};
-use zap_ledger::SignedActionReceipt;
+use zap_ledger::{ReceiptJournalStore, SignedActionReceipt};
 use zap_net::{Peer, ZapEndpoint, ZapEndpointConfig};
 use zap_node::{PeerTrustStatus, ZapNode, ZapNodeConfig};
 use zap_store::{
@@ -3227,7 +3227,7 @@ fn registry_bundle_export_verify_and_import_round_trip() {
 }
 
 #[test]
-fn receipts_verify_checks_signed_jsonl_logs() {
+fn receipts_import_verify_export_and_compact_journal() {
     let dir = tempdir().unwrap();
     let node = Keypair::generate();
     let source = Keypair::generate();
@@ -3241,19 +3241,44 @@ fn receipts_verify_checks_signed_jsonl_logs() {
     .unwrap();
     let signed = sign_frame(&source, &frame).unwrap();
     let receipt = SignedActionReceipt::new(&node, &signed, "echo", Some(b"ok"), 456, None).unwrap();
-    let receipt_path = dir.path().join("receipts.jsonl");
+    let receipt_path = dir.path().join("legacy-receipts.jsonl");
+    let receipt_dir = dir.path().join("receipts");
+    let exported_path = dir.path().join("exported.jsonl");
+    let compacted_dir = dir.path().join("receipts.compacted");
     std::fs::write(
         &receipt_path,
         format!("\n{}", receipt.to_json_line().unwrap()),
     )
     .unwrap();
 
+    let import = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "import-jsonl",
+            "--in",
+            receipt_path.to_str().unwrap(),
+            "--dir",
+            receipt_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        import.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&import.stdout),
+        String::from_utf8_lossy(&import.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&import.stdout).unwrap();
+    assert_eq!(json["receipts"], 1);
+    assert_eq!(json["imported"], true);
+
     let verify = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
             "receipts",
             "verify",
-            "--path",
-            receipt_path.to_str().unwrap(),
+            "--dir",
+            receipt_dir.to_str().unwrap(),
             "--json",
         ])
         .output()
@@ -3268,220 +3293,81 @@ fn receipts_verify_checks_signed_jsonl_logs() {
     assert_eq!(json["receipts"], 1);
     assert_eq!(json["verified"], true);
 
-    let mut tampered = receipt.clone();
-    tampered.receipt.subject = "tampered".to_string();
-    std::fs::write(&receipt_path, tampered.to_json_line().unwrap()).unwrap();
+    let export = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "export-jsonl",
+            "--dir",
+            receipt_dir.to_str().unwrap(),
+            "--out",
+            exported_path.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(export.status.success());
+    let exported = std::fs::read_to_string(&exported_path).unwrap();
+    let exported_receipt = SignedActionReceipt::from_json_str(exported.trim()).unwrap();
+    exported_receipt.verify().unwrap();
+    assert_eq!(exported_receipt.receipt.subject, "echo");
+
+    let compact = Command::new(env!("CARGO_BIN_EXE_zap"))
+        .args([
+            "receipts",
+            "compact",
+            "--dir",
+            receipt_dir.to_str().unwrap(),
+            "--out",
+            compacted_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(compact.status.success());
+    assert_eq!(
+        ReceiptJournalStore::open(&compacted_dir)
+            .all()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn receipts_import_rejects_tampered_jsonl() {
+    let dir = tempdir().unwrap();
+    let node = Keypair::generate();
+    let source = Keypair::generate();
+    let frame = ZapFrame::with_timestamp(
+        source.node_id(),
+        node.node_id(),
+        ZapFlags::SIGNED,
+        123,
+        Bytes::from_static(b"payload"),
+    )
+    .unwrap();
+    let signed = sign_frame(&source, &frame).unwrap();
+    let mut receipt =
+        SignedActionReceipt::new(&node, &signed, "echo", Some(b"ok"), 456, None).unwrap();
+    receipt.receipt.subject = "tampered".to_string();
+    let receipt_path = dir.path().join("tampered.jsonl");
+    let receipt_dir = dir.path().join("receipts");
+    std::fs::write(&receipt_path, receipt.to_json_line().unwrap()).unwrap();
+
     let failed = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
             "receipts",
-            "verify",
-            "--path",
+            "import-jsonl",
+            "--in",
             receipt_path.to_str().unwrap(),
+            "--dir",
+            receipt_dir.to_str().unwrap(),
         ])
         .output()
         .unwrap();
     assert!(!failed.status.success());
-    let stderr = String::from_utf8_lossy(&failed.stderr);
-    assert!(stderr.contains("invalid receipt signature"));
-    assert!(stderr.contains("line 1"));
-}
-
-#[test]
-fn receipts_prune_writes_verified_retention_output() {
-    let dir = tempdir().unwrap();
-    let node = Keypair::generate();
-    let source = Keypair::generate();
-    let frame = ZapFrame::with_timestamp(
-        source.node_id(),
-        node.node_id(),
-        ZapFlags::SIGNED,
-        123,
-        Bytes::from_static(b"payload"),
-    )
-    .unwrap();
-    let signed = sign_frame(&source, &frame).unwrap();
-    let old_receipt =
-        SignedActionReceipt::new(&node, &signed, "echo.old", Some(b"old"), 100, None).unwrap();
-    let new_receipt =
-        SignedActionReceipt::new(&node, &signed, "echo.new", Some(b"new"), 200, None).unwrap();
-    let receipt_path = dir.path().join("receipts.jsonl");
-    let pruned_path = dir.path().join("retained.jsonl");
-    std::fs::write(
-        &receipt_path,
-        format!(
-            "{}{}",
-            old_receipt.to_json_line().unwrap(),
-            new_receipt.to_json_line().unwrap()
-        ),
-    )
-    .unwrap();
-
-    let prune = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "receipts",
-            "prune",
-            "--path",
-            receipt_path.to_str().unwrap(),
-            "--before-processed-at-micros",
-            "150",
-            "--out",
-            pruned_path.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
     assert!(
-        prune.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&prune.stdout),
-        String::from_utf8_lossy(&prune.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&prune.stdout).unwrap();
-    assert_eq!(json["input_receipts"], 2);
-    assert_eq!(json["retained_receipts"], 1);
-    assert_eq!(json["pruned_receipts"], 1);
-    assert_eq!(json["verified"], true);
-
-    let retained = std::fs::read_to_string(&pruned_path).unwrap();
-    let retained_lines = retained.lines().collect::<Vec<_>>();
-    assert_eq!(retained_lines.len(), 1);
-    let retained_receipt = SignedActionReceipt::from_json_str(retained_lines[0]).unwrap();
-    retained_receipt.verify().unwrap();
-    assert_eq!(retained_receipt.receipt.subject, "echo.new");
-    assert_eq!(retained_receipt.receipt.processed_at_micros, 200);
-
-    let overwrite = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "receipts",
-            "prune",
-            "--path",
-            receipt_path.to_str().unwrap(),
-            "--before-processed-at-micros",
-            "150",
-            "--out",
-            pruned_path.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(!overwrite.status.success());
-    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
-
-    let destructive = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "receipts",
-            "prune",
-            "--path",
-            receipt_path.to_str().unwrap(),
-            "--before-processed-at-micros",
-            "150",
-            "--out",
-            receipt_path.to_str().unwrap(),
-            "--force",
-        ])
-        .output()
-        .unwrap();
-    assert!(!destructive.status.success());
-    assert!(
-        String::from_utf8_lossy(&destructive.stderr)
-            .contains("must not point at an input receipt log")
-    );
-}
-
-#[test]
-fn receipts_merge_deduplicates_verified_logs() {
-    let dir = tempdir().unwrap();
-    let node = Keypair::generate();
-    let source = Keypair::generate();
-    let frame = ZapFrame::with_timestamp(
-        source.node_id(),
-        node.node_id(),
-        ZapFlags::SIGNED,
-        123,
-        Bytes::from_static(b"payload"),
-    )
-    .unwrap();
-    let signed = sign_frame(&source, &frame).unwrap();
-    let first =
-        SignedActionReceipt::new(&node, &signed, "echo.first", Some(b"first"), 100, None).unwrap();
-    let duplicate =
-        SignedActionReceipt::new(&node, &signed, "echo.shared", Some(b"shared"), 200, None)
-            .unwrap();
-    let last =
-        SignedActionReceipt::new(&node, &signed, "echo.last", Some(b"last"), 300, None).unwrap();
-    let left_path = dir.path().join("left.jsonl");
-    let right_path = dir.path().join("right.jsonl");
-    let merged_path = dir.path().join("merged.jsonl");
-    std::fs::write(
-        &left_path,
-        format!(
-            "{}{}",
-            first.to_json_line().unwrap(),
-            duplicate.to_json_line().unwrap()
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        &right_path,
-        format!(
-            "{}{}",
-            duplicate.to_json_line().unwrap(),
-            last.to_json_line().unwrap()
-        ),
-    )
-    .unwrap();
-
-    let merge = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "receipts",
-            "merge",
-            left_path.to_str().unwrap(),
-            right_path.to_str().unwrap(),
-            "--out",
-            merged_path.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        merge.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&merge.stdout),
-        String::from_utf8_lossy(&merge.stderr)
-    );
-    let json: serde_json::Value = serde_json::from_slice(&merge.stdout).unwrap();
-    assert_eq!(json["input_logs"], 2);
-    assert_eq!(json["input_receipts"], 4);
-    assert_eq!(json["written_receipts"], 3);
-    assert_eq!(json["duplicate_receipts"], 1);
-    assert_eq!(json["verified"], true);
-
-    let merged = std::fs::read_to_string(&merged_path).unwrap();
-    let subjects = merged
-        .lines()
-        .map(|line| {
-            let receipt = SignedActionReceipt::from_json_str(line).unwrap();
-            receipt.verify().unwrap();
-            receipt.receipt.subject
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(subjects, vec!["echo.first", "echo.shared", "echo.last"]);
-
-    let destructive = Command::new(env!("CARGO_BIN_EXE_zap"))
-        .args([
-            "receipts",
-            "merge",
-            left_path.to_str().unwrap(),
-            right_path.to_str().unwrap(),
-            "--out",
-            left_path.to_str().unwrap(),
-            "--force",
-        ])
-        .output()
-        .unwrap();
-    assert!(!destructive.status.success());
-    assert!(
-        String::from_utf8_lossy(&destructive.stderr)
-            .contains("must not point at an input receipt log")
+        String::from_utf8_lossy(&failed.stderr).contains("receipt signature verification failed")
     );
 }
 
@@ -3493,7 +3379,7 @@ async fn receipts_pull_fetches_remote_signed_log() {
     let transport_key = [0x72_u8; 32];
     let sender_addr = free_udp_addr();
     let receiver_key_path = dir.path().join("receiver.key");
-    let receipt_path = dir.path().join("receiver-receipts.jsonl");
+    let receipt_path = dir.path().join("receiver-receipts");
     let receiver_config_path = dir.path().join("receiver.toml");
     std::fs::write(&receiver_key_path, receiver.to_key_file_toml().unwrap()).unwrap();
 
@@ -3508,7 +3394,9 @@ async fn receipts_pull_fetches_remote_signed_log() {
     let signed = sign_frame(&sender, &frame).unwrap();
     let receipt =
         SignedActionReceipt::new(&receiver, &signed, "echo", Some(b"ok"), 456, None).unwrap();
-    std::fs::write(&receipt_path, receipt.to_json_line().unwrap()).unwrap();
+    ReceiptJournalStore::open(&receipt_path)
+        .append(&receipt, false)
+        .unwrap();
 
     std::fs::write(
         &receiver_config_path,
@@ -3519,7 +3407,7 @@ key_file = '{}'
 require_signed = true
 
 [receipts]
-path = '{}'
+dir = '{}'
 
 [[peers]]
 node_id = '{}'
@@ -3546,7 +3434,7 @@ transport_key = '{}'
         &sender_addr,
         transport_key,
     );
-    let pulled_path = dir.path().join("pulled-receipts.jsonl");
+    let pulled_path = dir.path().join("pulled-receipts");
     let target = receiver.node_id().to_string();
     let config_arg = sender_config.clone();
     let out_arg = pulled_path.clone();
@@ -3560,7 +3448,7 @@ transport_key = '{}'
                 config_arg.to_str().unwrap(),
                 "--target",
                 &target,
-                "--out",
+                "--out-dir",
                 out_arg.to_str().unwrap(),
                 "--after-processed-at-micros",
                 "100",
@@ -3590,10 +3478,9 @@ transport_key = '{}'
     assert_eq!(report["truncated"], false);
     assert_eq!(report["earliest_processed_at_micros"], 456);
 
-    let pulled = std::fs::read_to_string(&pulled_path).unwrap();
-    let lines = pulled.lines().collect::<Vec<_>>();
-    assert_eq!(lines.len(), 1);
-    let pulled_receipt = SignedActionReceipt::from_json_str(lines[0]).unwrap();
+    let pulled = ReceiptJournalStore::open(&pulled_path).all().unwrap();
+    assert_eq!(pulled.len(), 1);
+    let pulled_receipt = &pulled[0];
     pulled_receipt.verify().unwrap();
     assert_eq!(pulled_receipt.receipt.subject, "echo");
     assert_eq!(pulled_receipt.receipt.processed_at_micros, 456);
@@ -5566,12 +5453,12 @@ fn capability_inspect_manifest_prints_capabilities() {
 #[test]
 fn memory_put_query_and_verify_round_trip() {
     let dir = tempdir().unwrap();
-    let memory_path = dir.path().join("memory.jsonl");
+    let memory_path = dir.path().join("memory");
     let put = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
             "memory",
             "put",
-            "--path",
+            "--dir",
             memory_path.to_str().unwrap(),
             "--subject",
             "note",
@@ -5594,7 +5481,7 @@ fn memory_put_query_and_verify_round_trip() {
         .args([
             "memory",
             "query",
-            "--path",
+            "--dir",
             memory_path.to_str().unwrap(),
             "--subject",
             "note",
@@ -5610,7 +5497,7 @@ fn memory_put_query_and_verify_round_trip() {
         .args([
             "memory",
             "verify",
-            "--path",
+            "--dir",
             memory_path.to_str().unwrap(),
             "--json",
         ])
@@ -5627,14 +5514,14 @@ fn memory_export_evidence_and_incident_snapshot_are_payload_free() {
     let dir = tempdir().unwrap();
     let local = Keypair::generate();
     let peer = Keypair::generate();
-    let memory_path = dir.path().join("memory.jsonl");
-    let receipt_path = dir.path().join("receipts.jsonl");
+    let memory_path = dir.path().join("memory");
+    let receipt_path = dir.path().join("receipts");
 
     let put = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
             "memory",
             "put",
-            "--path",
+            "--dir",
             memory_path.to_str().unwrap(),
             "--namespace",
             "incident",
@@ -5666,13 +5553,15 @@ fn memory_export_evidence_and_incident_snapshot_are_payload_free() {
     let signed = sign_frame(&peer, &frame).unwrap();
     let receipt =
         SignedActionReceipt::new(&local, &signed, "case.note", Some(b"ok"), 456, None).unwrap();
-    std::fs::write(&receipt_path, receipt.to_json_line().unwrap()).unwrap();
+    ReceiptJournalStore::open(&receipt_path)
+        .append(&receipt, false)
+        .unwrap();
 
     let evidence = Command::new(env!("CARGO_BIN_EXE_zap"))
         .args([
             "memory",
             "export-evidence",
-            "--path",
+            "--dir",
             memory_path.to_str().unwrap(),
             "--receipts",
             receipt_path.to_str().unwrap(),
@@ -5706,10 +5595,10 @@ fn memory_export_evidence_and_incident_snapshot_are_payload_free() {
     config.push_str(&format!(
         r#"
 [receipts]
-path = '{}'
+dir = '{}'
 
 [memory]
-path = '{}'
+dir = '{}'
 "#,
         receipt_path.display(),
         memory_path.display()
@@ -5740,7 +5629,10 @@ path = '{}'
     assert_eq!(snapshot_json["doctor"]["status"], "needs_attention");
     assert_eq!(snapshot_json["memory"]["verified"], true);
     assert_eq!(snapshot_json["receipts"]["verified"], true);
-    assert_eq!(snapshot_json["config_summary"]["receipt_log_enabled"], true);
+    assert_eq!(
+        snapshot_json["config_summary"]["receipt_journal_enabled"],
+        true
+    );
     assert_eq!(snapshot_json["config_summary"]["memory_enabled"], true);
 }
 

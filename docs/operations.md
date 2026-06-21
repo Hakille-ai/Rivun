@@ -65,9 +65,9 @@ Node configs are TOML files with:
 - optional registered WASM drivers;
 - runtime limits.
 - anti-replay policy.
-- optional signed receipt log path.
+- optional signed receipt journal directory.
 - optional local ZapStore registry index path.
-- optional local memory JSONL path.
+- optional local memory journal directory.
 - optional deterministic route table.
 
 For container deployment, see [Deployment](deployment.md). The production image
@@ -197,7 +197,7 @@ For `memory_write`, the receiving node must also configure:
 
 ```toml
 [memory]
-path = ".zap/memory.jsonl"
+dir = ".zap/memory"
 allow_driver_write = true
 ```
 
@@ -209,6 +209,51 @@ It also includes `registry_enabled`, `registry_entry_count`, and
 `registry_signature_required` when a local ZapStore registry is configured.
 Capability, route, and memory automation can inspect `capability_count`,
 `route_count`, and `memory_enabled`.
+
+## PACT Operations
+
+PACT records are portable signed action records that use the same key files and
+offline verification model as the rest of ZAP. They are useful when an operator
+needs to carry intent, consent, proof, terms, revocation, and execution status
+as protocol evidence.
+
+Create and sign a PACT:
+
+```bash
+cargo run -p zap-cli -- pact create \
+  --actor agent.alpha \
+  --target driver.valve \
+  --intent valve.open \
+  --object '{"valve":"v-7"}' \
+  --terms '{"max_runtime_ms":5000}' \
+  --created-at-micros 1893456000000000 \
+  --out pact-unsigned.json
+
+cargo run -p zap-cli -- pact sign \
+  --input pact-unsigned.json \
+  --key .zap/node.key \
+  --out pact-signed.json
+```
+
+Verify, revoke, and bundle:
+
+```bash
+cargo run -p zap-cli -- pact verify --input pact-signed.json --json
+cargo run -p zap-cli -- pact revoke \
+  --input pact-signed.json \
+  --revoked-by ops.lead \
+  --reason "operator stop" \
+  --key .zap/node.key \
+  --out pact-revoked.json
+cargo run -p zap-cli -- pact bundle export \
+  --pact pact-signed.json \
+  --out pact-bundle.json
+cargo run -p zap-cli -- pact bundle verify --bundle pact-bundle.json --json
+```
+
+Use `zap pact schema --out pact.schema.json` when another system needs the JSON
+shape. Use `zap fixtures verify --fixtures fixtures --sdk <sdk-path>` to prove
+SDK conformance against the shared PACT fixtures.
 
 Create a local registry index and add a signed manifest:
 
@@ -369,12 +414,12 @@ Explain a route before deployment:
 cargo run -p zap-cli -- route explain --config zap.toml --kind action --subject echo --json
 ```
 
-Local memory is append-only JSONL with body hashes, entry hash chaining, and
-tombstones:
+Local memory is an append-only binary journal with body hashes, entry hash
+chaining, disk indexes, and tombstones:
 
 ```toml
 [memory]
-path = ".zap/memory.jsonl"
+dir = ".zap/memory"
 max_record_bytes = 1048576
 allow_driver_read = false
 allow_driver_write = false
@@ -383,15 +428,14 @@ allow_driver_write = false
 Operate on the store:
 
 ```bash
-cargo run -p zap-cli -- memory put --path .zap/memory.jsonl --subject note --payload hello
-cargo run -p zap-cli -- memory query --path .zap/memory.jsonl --subject note --json
-cargo run -p zap-cli -- memory verify --path .zap/memory.jsonl
+cargo run -p zap-cli -- memory put --dir .zap/memory --subject note --payload hello
+cargo run -p zap-cli -- memory query --dir .zap/memory --subject note --json
+cargo run -p zap-cli -- memory verify --dir .zap/memory
 ```
 
 Verification recalculates every body hash, validates the entry hash chain,
 rejects duplicate entry ids, and rejects tombstones whose source record is
-missing. Pruning writes a fresh verifiable chain for retained entries and drops
-tombstones whose source record was pruned.
+missing. Compaction writes a fresh verifiable journal.
 
 `zap send` is a one-shot peer process. It validates the config, binds to the
 config `bind` address, sends one signed frame, and exits. This is deliberate:
@@ -569,29 +613,29 @@ validator_set = "poa-validators.v4.json"
 validator_set_authority = "operator-public-key"
 ```
 
-Signed receipts are optional and append-only JSONL:
+Signed receipts are optional and stored in an append-only binary journal:
 
 ```toml
 [receipts]
-path = "logs/actions.jsonl"
+dir = "logs/receipts"
 ```
 
 Receipts are audit records signed by the processing node. They are not financial records.
 
-Verify a receipt log after a test run, pull peer receipts for an audit window,
-or archive multiple logs:
+Verify a receipt journal after a test run, pull peer receipts for an audit
+window, or export a JSONL archive:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
-cargo run -p zap-cli -- receipts pull --config zap.toml --target <peer-node-id> --out logs/peer-actions.jsonl --json
-cargo run -p zap-cli -- receipts prune --path logs/actions.jsonl --before-processed-at-micros 1735689600000000 --out logs/actions.retained.jsonl
-cargo run -p zap-cli -- receipts merge logs/node-a.jsonl logs/node-b.jsonl --out logs/receipts.archive.jsonl
+cargo run -p zap-cli -- receipts verify --dir logs/receipts
+cargo run -p zap-cli -- receipts pull --config zap.toml --target <peer-node-id> --out-dir logs/peer-receipts --json
+cargo run -p zap-cli -- receipts export-jsonl --dir logs/receipts --out logs/receipts.archive.jsonl
+cargo run -p zap-cli -- receipts compact --dir logs/receipts --out logs/receipts.compacted
 ```
 
 ## Incident Runbooks
 
 Use these runbooks when a production node enters degraded or critical state.
-Before changing traffic, preserve the current config, receipt log, registry
+Before changing traffic, preserve the current config, receipt journal, registry
 index, capability cache, validator-set file, driver manifest, and the last
 operator command output. Do not prune or rewrite evidence while an incident is
 open.
@@ -645,7 +689,7 @@ Containment:
 Rollback criteria:
 
 - rollback to the last config whose policy section is fail-closed and whose
-  receipt log shows expected denials for unknown subjects;
+  receipt journal shows expected denials for unknown subjects;
 - keep the permissive config as incident evidence, not as a fallback.
 
 Preserve:
@@ -737,34 +781,35 @@ Preserve:
 Trigger:
 
 - `zap_receipt_log_verify_failures_total` increases;
-- `receipts verify` fails on the local or pulled receipt log;
+- `receipts verify` fails on the local or pulled receipt journal;
 - audit records are missing, duplicated, or hash-chain verification fails.
 
 Immediate checks:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --path /var/lib/zap/receipts.jsonl
-cargo run -p zap-cli -- receipts pull --config /etc/zap/zap.toml --target <peer-node-id> --out /var/lib/zap/incidents/peer-receipts.jsonl --json
-cargo run -p zap-cli -- receipts merge /var/lib/zap/receipts.jsonl /var/lib/zap/incidents/peer-receipts.jsonl --out /var/lib/zap/incidents/receipts-merged.jsonl
+cargo run -p zap-cli -- receipts verify --dir /var/lib/zap/receipts
+cargo run -p zap-cli -- receipts pull --config /etc/zap/zap.toml --target <peer-node-id> --out-dir /var/lib/zap/incidents/peer-receipts --json
+cargo run -p zap-cli -- receipts export-jsonl --dir /var/lib/zap/receipts --out /var/lib/zap/incidents/receipts-local.jsonl
+cargo run -p zap-cli -- receipts export-jsonl --dir /var/lib/zap/incidents/peer-receipts --out /var/lib/zap/incidents/receipts-peer.jsonl
 ```
 
 Containment:
 
-- stop receipt pruning and archival compaction;
-- copy the failing log to incident storage before daemon restart;
-- if the node must continue processing, cut over to a new receipt file only
-  after preserving the broken file.
+- stop receipt archival compaction;
+- copy the failing journal directory to incident storage before daemon restart;
+- if the node must continue processing, cut over to a new receipt directory only
+  after preserving the broken directory.
 
 Rollback criteria:
 
-- rollback to the last deployment whose receipt log verifies from the first
+- rollback to the last deployment whose receipt journal verifies from the first
   retained record through the current audit window;
 - pause automated actions if receipts cannot prove policy, PoA, and driver
   outcomes for high-risk messages.
 
 Preserve:
 
-- failing receipt log byte-for-byte;
+- failing receipt journal directory byte-for-byte;
 - pulled peer receipts for the same time window;
 - storage and host incident logs;
 - command output from every `receipts verify`, `pull`, and `merge` command.

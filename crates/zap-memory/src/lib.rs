@@ -12,12 +12,15 @@ use std::{
 };
 use thiserror::Error;
 use uuid::Uuid;
+use zap_journal::{JournalProfile, JournalQuery, JournalRecord, JournalRecordInput, JournalStore};
 
 pub const MEMORY_SCHEMA_VERSION: u8 = 1;
 pub const DEFAULT_MEMORY_CONTENT_TYPE: &str = "application/octet-stream";
 pub const DEFAULT_MEMORY_MAX_RECORD_BYTES: usize = 1024 * 1024;
 
 const HASH_PREFIX: &str = "blake3:";
+const MEMORY_RECORD_KIND: &str = "memory.record";
+const MEMORY_TOMBSTONE_KIND: &str = "memory.tombstone";
 
 #[derive(Debug, Error)]
 pub enum ZapMemoryError {
@@ -53,6 +56,8 @@ pub enum ZapMemoryError {
     Json(#[from] serde_json::Error),
     #[error("base64 error: {0}")]
     Base64(#[from] base64::DecodeError),
+    #[error("memory journal error: {0}")]
+    Journal(#[from] zap_journal::ZapJournalError),
     #[error("system clock is before Unix epoch")]
     ClockBeforeUnixEpoch,
 }
@@ -159,6 +164,304 @@ pub struct MemoryPut {
 pub struct JsonlMemoryStore {
     path: PathBuf,
     max_record_bytes: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemoryJournalStore {
+    journal: JournalStore,
+    max_record_bytes: usize,
+}
+
+impl MemoryJournalStore {
+    pub fn open(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            journal: JournalStore::open(dir, JournalProfile::Memory),
+            max_record_bytes: DEFAULT_MEMORY_MAX_RECORD_BYTES,
+        }
+    }
+
+    pub fn with_max_record_bytes(mut self, max_record_bytes: usize) -> Self {
+        self.max_record_bytes = max_record_bytes.max(1);
+        self
+    }
+
+    pub fn dir(&self) -> &Path {
+        self.journal.dir()
+    }
+
+    pub fn import_jsonl(&self, input: &Path, force: bool) -> Result<usize> {
+        JournalStore::remove_dir_if_allowed(self.dir(), force)?;
+        fs::create_dir_all(self.dir())?;
+        let entries = parse_entries(input)?;
+        verify_entries(input, &entries, false)?;
+        for entry in &entries {
+            self.append_imported_entry(entry)?;
+        }
+        Ok(entries.len())
+    }
+
+    pub fn export_jsonl(&self, out: &Path, force: bool) -> Result<usize> {
+        let entries = self.all_entries()?;
+        write_rechained_entries(out, &entries, force)?;
+        Ok(entries.len())
+    }
+
+    pub fn prune_to(
+        &self,
+        before_created_at_micros: u64,
+        out: &Path,
+        force: bool,
+    ) -> Result<usize> {
+        JournalStore::remove_dir_if_allowed(out, force)?;
+        let entries = self.all_entries()?;
+        let mut retained = Vec::new();
+        let mut pruned = 0_usize;
+        for entry in entries {
+            if entry.created_at_micros() < before_created_at_micros {
+                pruned += 1;
+            } else {
+                retained.push(entry);
+            }
+        }
+        let retained_record_ids = retained
+            .iter()
+            .filter_map(|entry| match entry {
+                MemoryEntry::Record(record) => Some(record.id),
+                MemoryEntry::Tombstone(_) => None,
+            })
+            .collect::<HashSet<_>>();
+        retained.retain(|entry| match entry {
+            MemoryEntry::Record(_) => true,
+            MemoryEntry::Tombstone(tombstone) => {
+                let keep = retained_record_ids.contains(&tombstone.record_id);
+                if !keep {
+                    pruned += 1;
+                }
+                keep
+            }
+        });
+        let compacted = MemoryJournalStore::open(out).with_max_record_bytes(self.max_record_bytes);
+        for entry in &retained {
+            compacted.append_imported_entry(entry)?;
+        }
+        Ok(pruned)
+    }
+
+    pub fn rebuild_indexes(&self) -> Result<MemoryVerificationReport> {
+        self.journal.rebuild_indexes()?;
+        self.verify()
+    }
+
+    pub fn recover_partial_tail(&self) -> Result<bool> {
+        Ok(self.journal.recover_partial_tail()?.is_some())
+    }
+
+    fn append_imported_entry(&self, entry: &MemoryEntry) -> Result<()> {
+        match entry {
+            MemoryEntry::Record(record) => {
+                let body = record.body_bytes()?;
+                self.append_record(record.clone(), body, false)?;
+            }
+            MemoryEntry::Tombstone(tombstone) => {
+                self.append_tombstone(tombstone.clone(), false)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn append_record(
+        &self,
+        mut record: MemoryRecord,
+        body: Vec<u8>,
+        sync_data: bool,
+    ) -> Result<MemoryRecord> {
+        let metadata_bytes = serde_json::to_vec(&record.metadata)?;
+        let actual = body.len().saturating_add(metadata_bytes.len());
+        if actual > self.max_record_bytes {
+            return Err(ZapMemoryError::RecordTooLarge {
+                max: self.max_record_bytes,
+                actual,
+            });
+        }
+        record.body_hash = hash_bytes(&body);
+        record.body_base64 = Some(STANDARD_NO_PAD.encode(&body));
+        record.previous_entry_hash = None;
+        record.entry_hash = None;
+        let journal_record = self.journal.append(
+            JournalRecordInput {
+                kind: MEMORY_RECORD_KIND.to_string(),
+                schema_version: MEMORY_SCHEMA_VERSION as u16,
+                timestamp_micros: record.created_at_micros,
+                id: Some(record.id),
+                namespace: Some(record.namespace.clone()),
+                subject: Some(record.subject.clone()),
+                content_type: Some(record.content_type.clone()),
+                source_node: record.source_node,
+                target_node: None,
+                tombstone_for: None,
+                metadata: serde_json::json!({
+                    "metadata": record.metadata,
+                    "frame_hash": record.frame_hash,
+                }),
+                payload: body,
+            },
+            sync_data,
+        )?;
+        memory_record_from_journal(&journal_record)
+    }
+
+    fn append_tombstone(
+        &self,
+        mut tombstone: MemoryTombstone,
+        sync_data: bool,
+    ) -> Result<MemoryTombstone> {
+        tombstone.previous_entry_hash = None;
+        tombstone.entry_hash = None;
+        let journal_record = self.journal.append(
+            JournalRecordInput {
+                kind: MEMORY_TOMBSTONE_KIND.to_string(),
+                schema_version: MEMORY_SCHEMA_VERSION as u16,
+                timestamp_micros: tombstone.created_at_micros,
+                id: Some(tombstone.id),
+                namespace: Some(tombstone.namespace.clone()),
+                subject: None,
+                content_type: None,
+                source_node: None,
+                target_node: None,
+                tombstone_for: Some(tombstone.record_id),
+                metadata: serde_json::json!({
+                    "reason": tombstone.reason,
+                }),
+                payload: Vec::new(),
+            },
+            sync_data,
+        )?;
+        memory_tombstone_from_journal(&journal_record)
+    }
+
+    fn all_entries(&self) -> Result<Vec<MemoryEntry>> {
+        let mut entries = Vec::new();
+        for record in self.journal.records()? {
+            match record.kind.as_str() {
+                MEMORY_RECORD_KIND => {
+                    entries.push(MemoryEntry::Record(memory_record_from_journal(&record)?))
+                }
+                MEMORY_TOMBSTONE_KIND => {
+                    entries.push(MemoryEntry::Tombstone(memory_tombstone_from_journal(
+                        &record,
+                    )?));
+                }
+                _ => {}
+            }
+        }
+        Ok(entries)
+    }
+}
+
+impl MemoryStore for MemoryJournalStore {
+    fn put(&self, input: MemoryPut) -> Result<MemoryRecord> {
+        validate_namespace(&input.namespace)?;
+        validate_subject(&input.subject)?;
+        let record = MemoryRecord {
+            schema_version: MEMORY_SCHEMA_VERSION,
+            id: Uuid::new_v4(),
+            namespace: input.namespace,
+            subject: input.subject,
+            content_type: if input.content_type.trim().is_empty() {
+                DEFAULT_MEMORY_CONTENT_TYPE.to_string()
+            } else {
+                input.content_type
+            },
+            previous_entry_hash: None,
+            body_hash: hash_bytes(&input.body),
+            body_base64: None,
+            metadata: input.metadata,
+            source_node: input.source_node,
+            frame_hash: input.frame_hash,
+            created_at_micros: now_micros()?,
+            entry_hash: None,
+        };
+        self.append_record(record, input.body, false)
+    }
+
+    fn get(&self, id: Uuid) -> Result<MemoryRecord> {
+        let tombstones = self.journal.query(&JournalQuery {
+            kind: Some(MEMORY_TOMBSTONE_KIND.to_string()),
+            tombstone_for: Some(id),
+            limit: Some(1),
+            ..JournalQuery::default()
+        })?;
+        if !tombstones.is_empty() {
+            return Err(ZapMemoryError::NotFound(id));
+        }
+        let records = self.journal.query(&JournalQuery {
+            kind: Some(MEMORY_RECORD_KIND.to_string()),
+            id: Some(id),
+            limit: Some(1),
+            ..JournalQuery::default()
+        })?;
+        let record = records.first().ok_or(ZapMemoryError::NotFound(id))?;
+        memory_record_from_journal(record)
+    }
+
+    fn query(&self, query: &MemoryQuery) -> Result<Vec<MemoryRecord>> {
+        let tombstoned = if query.include_tombstoned {
+            HashSet::new()
+        } else {
+            self.journal
+                .query(&JournalQuery {
+                    kind: Some(MEMORY_TOMBSTONE_KIND.to_string()),
+                    ..JournalQuery::default()
+                })?
+                .into_iter()
+                .filter_map(|record| record.tombstone_for)
+                .collect::<HashSet<_>>()
+        };
+        let records = self.journal.query(&JournalQuery {
+            kind: Some(MEMORY_RECORD_KIND.to_string()),
+            namespace: query.namespace.clone(),
+            subject: query.subject.clone(),
+            content_type: query.content_type.clone(),
+            limit: query.include_tombstoned.then_some(query.limit).flatten(),
+            ..JournalQuery::default()
+        })?;
+        let mut out = Vec::new();
+        for record in records {
+            let memory = memory_record_from_journal(&record)?;
+            if !tombstoned.contains(&memory.id) {
+                out.push(memory);
+                if let Some(limit) = query.limit
+                    && out.len() >= limit
+                {
+                    break;
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    fn tombstone(&self, record_id: Uuid, reason: Option<String>) -> Result<MemoryTombstone> {
+        let record = self.get(record_id)?;
+        self.append_tombstone(
+            MemoryTombstone {
+                schema_version: MEMORY_SCHEMA_VERSION,
+                id: Uuid::new_v4(),
+                record_id,
+                namespace: record.namespace,
+                previous_entry_hash: None,
+                reason,
+                created_at_micros: now_micros()?,
+                entry_hash: None,
+            },
+            false,
+        )
+    }
+
+    fn verify(&self) -> Result<MemoryVerificationReport> {
+        self.journal.verify()?;
+        let entries = self.all_entries()?;
+        verify_journal_memory_entries(self.dir(), &entries, true)
+    }
 }
 
 impl JsonlMemoryStore {
@@ -447,6 +750,65 @@ fn compute_entry_hash(entry: &MemoryEntry) -> Result<String> {
     Ok(hash_bytes(&serde_json::to_vec(&transcript)?))
 }
 
+fn memory_record_from_journal(record: &JournalRecord) -> Result<MemoryRecord> {
+    let id = record.id.ok_or(ZapMemoryError::NotFound(Uuid::nil()))?;
+    let metadata = record
+        .metadata
+        .get("metadata")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let frame_hash = record
+        .metadata
+        .get("frame_hash")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    Ok(MemoryRecord {
+        schema_version: record.schema_version as u8,
+        id,
+        namespace: record.namespace.clone().unwrap_or_default(),
+        subject: record.subject.clone().unwrap_or_default(),
+        content_type: record
+            .content_type
+            .clone()
+            .unwrap_or_else(|| DEFAULT_MEMORY_CONTENT_TYPE.to_string()),
+        previous_entry_hash: non_zero_hash(&record.previous_entry_hash),
+        body_hash: hash_bytes(&record.payload),
+        body_base64: Some(STANDARD_NO_PAD.encode(&record.payload)),
+        metadata,
+        source_node: record.source_node,
+        frame_hash,
+        created_at_micros: record.timestamp_micros,
+        entry_hash: Some(record.entry_hash.clone()),
+    })
+}
+
+fn memory_tombstone_from_journal(record: &JournalRecord) -> Result<MemoryTombstone> {
+    let id = record.id.ok_or(ZapMemoryError::NotFound(Uuid::nil()))?;
+    let record_id = record
+        .tombstone_for
+        .ok_or(ZapMemoryError::NotFound(Uuid::nil()))?;
+    let reason = record
+        .metadata
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
+    Ok(MemoryTombstone {
+        schema_version: record.schema_version as u8,
+        id,
+        record_id,
+        namespace: record.namespace.clone().unwrap_or_default(),
+        previous_entry_hash: non_zero_hash(&record.previous_entry_hash),
+        reason,
+        created_at_micros: record.timestamp_micros,
+        entry_hash: Some(record.entry_hash.clone()),
+    })
+}
+
+fn non_zero_hash(hash: &str) -> Option<String> {
+    let zero = format!("{HASH_PREFIX}{}", "0".repeat(64));
+    (hash != zero).then(|| hash.to_string())
+}
+
 fn verify_entries(
     path: &Path,
     entries: &[MemoryEntry],
@@ -518,6 +880,72 @@ fn verify_entries(
         }
 
         expected_previous_hash = Some(computed_entry_hash);
+    }
+
+    Ok(MemoryVerificationReport {
+        path: path.to_path_buf(),
+        entries: entries.len(),
+        records,
+        tombstones,
+        verified: true,
+    })
+}
+
+fn verify_journal_memory_entries(
+    path: &Path,
+    entries: &[MemoryEntry],
+    require_non_empty: bool,
+) -> Result<MemoryVerificationReport> {
+    if require_non_empty && entries.is_empty() {
+        return Err(ZapMemoryError::EmptyStore);
+    }
+
+    let mut records = 0_usize;
+    let mut tombstones = 0_usize;
+    let mut seen_entry_ids = HashSet::new();
+    let mut live_record_ids = HashSet::new();
+
+    for (index, entry) in entries.iter().enumerate() {
+        let line = index + 1;
+        let entry_id = entry.id();
+        if !seen_entry_ids.insert(entry_id) {
+            return Err(ZapMemoryError::DuplicateEntryId { line, id: entry_id });
+        }
+        match entry {
+            MemoryEntry::Record(record) => {
+                records += 1;
+                if record.schema_version != MEMORY_SCHEMA_VERSION {
+                    return Err(ZapMemoryError::UnsupportedSchemaVersion {
+                        line,
+                        version: record.schema_version,
+                    });
+                }
+                let body = record.body_bytes()?;
+                if record.body_hash != hash_bytes(&body) {
+                    return Err(ZapMemoryError::BodyHashMismatch {
+                        line,
+                        id: record.id,
+                    });
+                }
+                live_record_ids.insert(record.id);
+            }
+            MemoryEntry::Tombstone(tombstone) => {
+                tombstones += 1;
+                if tombstone.schema_version != MEMORY_SCHEMA_VERSION {
+                    return Err(ZapMemoryError::UnsupportedSchemaVersion {
+                        line,
+                        version: tombstone.schema_version,
+                    });
+                }
+                if !live_record_ids.contains(&tombstone.record_id) {
+                    return Err(ZapMemoryError::TombstoneTargetMissing {
+                        line,
+                        id: tombstone.id,
+                        record_id: tombstone.record_id,
+                    });
+                }
+            }
+        }
     }
 
     Ok(MemoryVerificationReport {
@@ -622,6 +1050,55 @@ mod tests {
         let report = store.verify().unwrap();
         assert_eq!(report.records, 1);
         assert!(report.verified);
+    }
+
+    #[test]
+    fn journal_store_round_trips_jsonl_and_prunes() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = MemoryJournalStore::open(dir.path().join("memory"));
+        let first = store.put(input("note", b"first")).unwrap();
+        std::thread::sleep(Duration::from_millis(1));
+        let second = store.put(input("note", b"second")).unwrap();
+        store
+            .tombstone(first.id, Some("expired".to_string()))
+            .unwrap();
+
+        assert!(matches!(
+            store.get(first.id),
+            Err(ZapMemoryError::NotFound(_))
+        ));
+        assert_eq!(
+            store.get(second.id).unwrap().body_bytes().unwrap(),
+            b"second"
+        );
+        assert_eq!(
+            store
+                .query(&MemoryQuery {
+                    include_tombstoned: true,
+                    ..MemoryQuery::default()
+                })
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(store.verify().unwrap().records, 2);
+
+        let jsonl = dir.path().join("memory.jsonl");
+        assert_eq!(store.export_jsonl(&jsonl, false).unwrap(), 3);
+        let imported = MemoryJournalStore::open(dir.path().join("imported"));
+        assert_eq!(imported.import_jsonl(&jsonl, false).unwrap(), 3);
+        assert_eq!(imported.verify().unwrap().entries, 3);
+
+        let pruned = dir.path().join("pruned");
+        let pruned_count = imported
+            .prune_to(second.created_at_micros, &pruned, false)
+            .unwrap();
+        assert_eq!(pruned_count, 2);
+        let pruned_store = MemoryJournalStore::open(pruned);
+        assert_eq!(
+            pruned_store.query(&MemoryQuery::default()).unwrap().len(),
+            1
+        );
     }
 
     #[test]

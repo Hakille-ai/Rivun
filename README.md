@@ -46,7 +46,7 @@ unified wire format.
 2. **AI-Ready Typed Actions**: External agents or models can produce strict `ZENV` messages while ZAP stays deterministic, auditable, and independent from any model runtime.
 3. **Consensus-Gated Operations**: High-risk actions (e.g. hardware control or factory safety systems) can require multi-node Proof-of-Action consensus (ZPOA) before dispatch.
 4. **Sandboxed Edge Execution**: Execute untrusted custom device drivers inside a Wasmtime sandbox with strict instruction (fuel), memory, time, and permission boundaries.
-5. **Durable Auditable Ledgers**: Nodes maintain append-only, BLAKE3 hash-chained memory stores and signed receipt logs, providing verifiable, tamper-evident audit trails.
+5. **Durable Auditable Ledgers**: Nodes maintain append-only, BLAKE3 hash-chained memory journals and signed receipt journals, providing verifiable, tamper-evident audit trails.
 
 ## ✨ Key Features
 
@@ -63,11 +63,12 @@ unified wire format.
 | **Signed Manifests** | Drivers are verified against SHA-256 hashes and Ed25519 author signatures |
 | **Capability System** | Explicit capability advertisements, queries, grants, and policy enforcement |
 | **Deterministic Routing** | Explainable route planning before local dispatch or peer forwarding |
-| **Auditable Memory** | Append-only JSONL memory with body hashes, hash chains, and tombstones |
+| **Auditable Memory** | Append-only binary journal memory with body hashes, hash chains, indexes, and tombstones |
 | **Proof-of-Action** | Multi-validator consensus for critical operations with configurable thresholds |
 | **Message Policy** | Deterministic allow/deny/require-PoA rules for typed message subjects |
-| **Receipt Ledger** | Signed, verifiable, prunable receipt logs for full operational audit trails |
+| **Receipt Ledger** | Signed, verifiable, compactable receipt journals for full operational audit trails |
 | **Driver Registry** | Local ZapStore index with versioning, revocation, and operator signatures |
+| **PACT Profile** | Portable signed action records with offline verification, revocation, bundles, and receipt references |
 
 ## 🏗 Architecture
 
@@ -77,7 +78,7 @@ unified wire format.
 │                                                                     │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────────────┐  │
 │  │ Message   │  │ Capabil- │  │  Router   │  │     Memory        │  │
-│  │  Policy   │  │   ity    │  │           │  │  (JSONL + Hash)   │  │
+│  │  Policy   │  │   ity    │  │           │  │  (ZJSEG + Hash)   │  │
 │  └─────┬─────┘  └────┬─────┘  └─────┬─────┘  └───────────────────┘  │
 │        │              │              │                                │
 │  ┌─────▼──────────────▼──────────────▼──────┐                        │
@@ -119,6 +120,7 @@ ZAP is organized as a Rust workspace of focused crates:
 | `zap-envelope` | Universal `ZENV` payload envelopes — kind, subject, content type, metadata, and body |
 | `zap-crypto` | Node identity (Ed25519), key generation, full-frame signing, verification, and PoA certificates |
 | `zap-net` | Encrypted UDP endpoint, static peer table, ChaCha20-Poly1305 encryption, Noise helpers, nonce replay checks |
+| `zap-pact` | PACT profile contracts: signed action records, canonical BLAKE3 hashes, revocations, bundles, and offline verification |
 
 ### Execution & Dispatch
 
@@ -127,7 +129,7 @@ ZAP is organized as a Rust workspace of focused crates:
 | `zap-node` | Daemon core: TOML config, peer verification, replay protection, receipts, capability-aware dispatch, routing |
 | `zap-runtime` | Wasmtime sandboxed execution: ABI verification, fuel metering, memory limits, time bounds, output caps |
 | `zap-driver-sdk` | Minimal ABI helpers for WASM driver authors |
-| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `trust`, `peer`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa` |
+| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `trust`, `peer`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa`, `pact` |
 
 ### Intelligence & Policy
 
@@ -143,7 +145,7 @@ ZAP is organized as a Rust workspace of focused crates:
 | Crate | Description |
 |---|---|
 | `zap-ledger` | Signed receipt records for action audit trails |
-| `zap-memory` | Append-only JSONL memory: body hashes, entry hash chains, tombstones, pruning, verification |
+| `zap-memory` | Append-only binary journal memory: body hashes, entry hash chains, tombstones, compaction, JSONL import/export, verification |
 | `zap-store` | ZapStore driver manifests: SHA-256 hashes, Ed25519 signatures, local registry with versioning and revocation |
 
 ## 🚀 Quickstart
@@ -205,6 +207,27 @@ cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
 
 ## 💡 Programmatic Examples
 
+### PACT Record Demo
+
+PACT records are portable signed action records carried as
+`application/zap-pact+json` in normal `ZENV` envelopes.
+
+```bash
+cargo run -p zap-cli -- pact create \
+  --actor agent.alpha \
+  --target driver.valve \
+  --intent valve.open \
+  --object '{"valve":"v-7"}' \
+  --terms '{"max_runtime_ms":5000}' \
+  --created-at-micros 1893456000000000 \
+  --out pact-unsigned.json
+cargo run -p zap-cli -- pact sign \
+  --input pact-unsigned.json \
+  --key .zap/node.key \
+  --out pact-signed.json
+cargo run -p zap-cli -- pact verify --input pact-signed.json --json
+```
+
 ZAP provides compile-ready Rust code examples under the `examples/` directory. You can build and run them via cargo:
 
 ```bash
@@ -214,7 +237,7 @@ cargo run -p zap-examples --bin frame_basics
 # Run ZENV Universal Payload Envelope construction and causal linking
 cargo run -p zap-examples --bin envelope_types
 
-# Run append-only JSONL memory store and BLAKE3 hash chain audits
+# Run append-only binary journal memory store and BLAKE3 hash chain audits
 cargo run -p zap-examples --bin memory_store
 
 # Run driver manifest creation, signing, and local registry revocation
@@ -357,9 +380,18 @@ zap schema validate --contract echo.contract.toml --envelope echo.zenv --json
 zap policy evaluate --policy policy.toml --kind action \
   --subject safety.emergency_stop --requires-consensus --strict --json
 
+# PACT profile
+zap pact create --actor agent.alpha --target driver.valve --intent valve.open \
+  --out pact-unsigned.json
+zap pact sign --input pact-unsigned.json --key .zap/node.key \
+  --out pact-signed.json
+zap pact verify --input pact-signed.json --json
+zap pact bundle export --pact pact-signed.json --out pact-bundle.json
+zap pact bundle verify --bundle pact-bundle.json --json
+
 # Local memory store
-zap memory put --path .zap/memory.jsonl --subject note --payload hello
-zap memory verify --path .zap/memory.jsonl
+zap memory put --dir .zap/memory --subject note --payload hello
+zap memory verify --dir .zap/memory
 ```
 
 ### Proof-of-Action & Receipts
@@ -388,14 +420,13 @@ zap poa validator-set apply --config zap.toml \
   --out zap.with-poa-set.toml --json
 
 # Receipt audit
-zap receipts verify --path logs/actions.jsonl
+zap receipts verify --dir logs/receipts
 zap receipts pull --config zap.toml --target <peer-node-id> \
   --after-processed-at-micros 1735689600000000 \
-  --limit 100 --out logs/peer-actions.jsonl --json
-zap receipts prune --path logs/actions.jsonl \
-  --before-processed-at-micros 1735689600000000 --out logs/retained.jsonl
-zap receipts merge logs/node-a.jsonl logs/node-b.jsonl \
-  --out logs/receipts.archive.jsonl
+  --limit 100 --out-dir logs/peer-receipts --json
+zap receipts export-jsonl --dir logs/receipts --out logs/receipts.archive.jsonl
+zap receipts import-jsonl --in logs/legacy-actions.jsonl --dir logs/receipts
+zap receipts compact --dir logs/receipts --out logs/receipts.compacted
 
 # Frame inspection
 zap inspect frame.bin --verify-with-public-key <base64-public-key>
@@ -415,7 +446,7 @@ ZAP is designed with **defense-in-depth** from the ground up:
   require explicit grants
 - **Capability model** — discovered capabilities are descriptive only and do not
   grant authority
-- **Hash-chain memory** — local memory records are verifiable JSONL audit data,
+- **Hash-chain memory** — local memory records are verifiable binary journal audit data,
   not hidden model state
 - **Consensus gating** — frames marked `REQUIRES_CONSENSUS` require PoA
   certificates before dispatch
@@ -499,6 +530,8 @@ application stack. The current preview surface includes:
 - domain packs for agentic development, smart buildings, cloud operations,
   industrial automation, and personal AI workflows;
 - SDK conformance fixtures shared by Rust, TypeScript, Python, and Go;
+- PACT signed action records with offline bundle verification and receipt
+  references;
 - operator checks for message policy, fixtures, domain packs, receipts,
   observability, and release readiness;
 - RFC/ZEP governance for protocol, crypto, ABI, config, SDK, and pack changes.
@@ -509,6 +542,7 @@ application stack. The current preview surface includes:
 |---|---|
 | [Install](docs/install.md) | Source install, CLI build, local setup, and Docker quickstart |
 | [Protocol](docs/protocol.md) | ZAP-Wire v1 frame format and ZENV envelope specification |
+| [PACT Profile](docs/pact.md) | Portable signed action records, canonical hashes, CLI workflow, bundles, and SDK conformance |
 | [Security Model](docs/security.md) | Threat model, crypto choices, and defense-in-depth design |
 | [Use Cases](docs/use-cases.md) | Real-world application scenarios for the ZAP protocol |
 | [Getting Started](docs/getting-started.md) | Step-by-step developer onboarding and cluster setup |

@@ -148,6 +148,28 @@ validator_set_authority = "operator-pubkey"`}</code>
           </CardContent>
         </Card>
       </div>
+
+      <Card className="bg-zinc-950/40 border-zinc-850">
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <CardTitle className="text-white text-base">5. PACT Signed Action Records</CardTitle>
+              <CardDescription className="text-xs">Intent, consent, proof, terms, revocation, and offline verification</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-zinc-400">
+          <p>
+            PACT records are <code>application/zap-pact+json</code> payloads carried in <code>ZENV</code>. They reuse ZAP BLAKE3 hashing and Ed25519 domain signatures instead of introducing a parallel trust stack.
+          </p>
+          <p className="text-xs text-zinc-500">
+            Mutable fields such as status, signatures, verification results, revocation evidence, and timeline entries are excluded from the canonical signing payload.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }

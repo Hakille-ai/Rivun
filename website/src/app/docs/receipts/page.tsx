@@ -53,18 +53,18 @@ export default function ReceiptsPage() {
                 <Database className="w-4 h-4 text-emerald-400" />
               </div>
               <div>
-                <CardTitle className="text-white text-base">Audit Log Configuration</CardTitle>
-                <CardDescription className="text-xs">Configure local action receipt logging</CardDescription>
+                <CardTitle className="text-white text-base">Audit Journal Configuration</CardTitle>
+                <CardDescription className="text-xs">Configure local action receipt journaling</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-zinc-400">
-              Configure ZAP to append a signed receipt for each processed action envelope in the node configuration:
+              Configure ZAP to append a signed receipt for each processed action envelope to the binary receipt journal:
             </p>
             <pre className="text-xs bg-[#050505] p-3.5 rounded-lg border border-zinc-900 font-mono text-zinc-350">
               <code>{`[receipts]
-path = "logs/actions.jsonl"`}</code>
+dir = "logs/receipts"`}</code>
             </pre>
           </CardContent>
         </Card>
@@ -78,17 +78,18 @@ path = "logs/actions.jsonl"`}</code>
               </div>
               <div>
                 <CardTitle className="text-white text-base">Receipt Payload Schema</CardTitle>
-                <CardDescription className="text-xs">Immutable JSONL schema fields</CardDescription>
+                <CardDescription className="text-xs">Immutable signed receipt fields</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-3 text-xs text-zinc-400">
-            <p>Each action execution appends a single JSONL line containing:</p>
+            <p>Each action execution appends a single binary journal record containing:</p>
             <ul className="space-y-1.5 list-disc pl-5 text-zinc-300">
               <li><strong>Identity Context:</strong> Source, target, and processing node IDs.</li>
               <li><strong>Action Details:</strong> Subject namespace, parent, and correlation IDs.</li>
               <li><strong>Payload Hash:</strong> Cryptographic BLAKE3 digest of headers and payload.</li>
               <li><strong>PoA Consensus Summary:</strong> Signatures validating quorum authority.</li>
+              <li><strong>PACT Reference:</strong> Optional PACT id, intent, status, and canonical hash for verified <code>zap.pact.record</code> messages.</li>
               <li><strong>Signature:</strong> Ed25519 signature over <code>ZAP-ACTION-RECEIPT-v1</code>.</li>
             </ul>
           </CardContent>
@@ -103,38 +104,37 @@ path = "logs/actions.jsonl"`}</code>
               <History className="w-4 h-4 text-purple-400" />
             </div>
             <div>
-              <CardTitle className="text-white text-base">CLI Management & Ledger Auditing</CardTitle>
-              <CardDescription className="text-xs">Commands to verify, prune, and consolidate peer logs</CardDescription>
+              <CardTitle className="text-white text-base">CLI Management & Journal Auditing</CardTitle>
+              <CardDescription className="text-xs">Commands to verify, compact, and pull peer journals</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
             <div className="flex justify-between items-center">
-              <span className="text-xs font-semibold text-zinc-300">Verify Ledger Integrity</span>
+              <span className="text-xs font-semibold text-zinc-300">Verify Journal Integrity</span>
               <Badge variant="outline" className="text-[9px] bg-zinc-900 text-zinc-400 border-zinc-850">receipts verify</Badge>
             </div>
             <pre className="text-xs bg-[#050505] p-3 rounded-lg border border-zinc-900 font-mono text-zinc-350 overflow-x-auto">
-              <code>zap receipts verify --path logs/actions.jsonl</code>
+              <code>zap receipts verify --dir logs/receipts</code>
             </pre>
           </div>
 
           <div className="space-y-2 pt-4 border-t border-zinc-900">
             <div className="flex justify-between items-center">
-              <span className="text-xs font-semibold text-zinc-300">Prune Ledger Safely</span>
-              <Badge variant="outline" className="text-[9px] bg-zinc-900 text-zinc-400 border-zinc-850">receipts prune</Badge>
+              <span className="text-xs font-semibold text-zinc-300">Compact Journal Safely</span>
+              <Badge variant="outline" className="text-[9px] bg-zinc-900 text-zinc-400 border-zinc-850">receipts compact</Badge>
             </div>
             <pre className="text-xs bg-[#050505] p-3 rounded-lg border border-zinc-900 font-mono text-zinc-350 overflow-x-auto">
-              <code>{`zap receipts prune \\
-  --path logs/actions.jsonl \\
-  --before-processed-at-micros 1735689600000000 \\
-  --out logs/actions.retained.jsonl`}</code>
+              <code>{`zap receipts compact \\
+  --dir logs/receipts \\
+  --out logs/receipts.compacted`}</code>
             </pre>
           </div>
 
           <div className="space-y-2 pt-4 border-t border-zinc-900">
             <div className="flex justify-between items-center">
-              <span className="text-xs font-semibold text-zinc-300">Consolidate Peer Logs</span>
+              <span className="text-xs font-semibold text-zinc-300">Pull Peer Journal</span>
               <Badge variant="outline" className="text-[9px] bg-zinc-900 text-zinc-400 border-zinc-850">receipts pull</Badge>
             </div>
             <pre className="text-xs bg-[#050505] p-3 rounded-lg border border-zinc-900 font-mono text-zinc-350 overflow-x-auto">
@@ -142,7 +142,7 @@ path = "logs/actions.jsonl"`}</code>
   --config zap.toml \\
   --target <peer-id> \\
   --limit 100 \\
-  --out logs/peer-receipts.jsonl`}</code>
+  --out-dir logs/peer-receipts`}</code>
             </pre>
           </div>
         </CardContent>
