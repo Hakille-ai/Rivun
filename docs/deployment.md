@@ -89,7 +89,7 @@ keys when peer membership changes.
   to inspect a peer-published bundle contract before fetching artifacts.
 - Use `zap registry bundle verify --require-drivers` before importing offline
   ZapStore bundles into production or factory images.
-- Enable `[receipts].path` when audit trails are required.
+- Enable `[receipts].dir` when audit trails are required.
 - Run `zap capability cache refresh --config <path> --strict` before strict
   validation when routes require peer grants.
 - Use `zap poa validator-set verify` before deploying signed validator-set

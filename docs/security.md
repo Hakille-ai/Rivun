@@ -128,13 +128,31 @@ threshold; the default is 2000 ms.
 
 ## Signed Receipts
 
-When `[receipts].path` is configured, `zap-node` appends one Ed25519-signed JSONL receipt after each processed action. Receipts contain hashes, action metadata, and optional PoA summaries. They are audit records only, not financial records.
+When `[receipts].dir` is configured, `zap-node` appends one Ed25519-signed receipt after each processed action to the binary receipt journal. Receipts contain hashes, action metadata, and optional PoA summaries. They are audit records only, not financial records.
 
 Operators can pull receipts from configured peers with signed `ZENV` control
 messages. `zap receipts pull` accepts bounded filters, verifies the peer's
 signed response frame, verifies every nested receipt signature, and writes a
-JSONL log that remains compatible with offline `verify`, `prune`, and `merge`
-workflows.
+binary journal that remains compatible with offline `verify`, `export-jsonl`,
+and `compact` workflows.
+
+## PACT Signed Action Records
+
+PACT records are signed protocol evidence carried as
+`application/zap-pact+json` in `ZENV` envelopes. They do not introduce a new
+identity system or signature stack: PACT hashing uses BLAKE3 and PACT
+signatures use the same Ed25519 domain-message transcript as other ZAP
+evidence. The PACT signature domain is `ZAP-PACT-v1`.
+
+The canonical PACT signing payload excludes mutable fields such as status,
+hash, signature, verification results, revocation evidence, and timeline
+entries. Nested JSON keys are sorted before hashing so official SDKs reproduce
+the same digest offline.
+
+When a node receives `zap.pact.record`, it verifies the PACT body before
+attaching a PACT reference to the signed receipt. Revocation is represented as
+signed protocol evidence in records and bundles, not as a central global
+registry.
 
 ## Capability Discovery, Routing, and Memory
 
@@ -169,11 +187,11 @@ new signed frames from the routing node. Consensus-protected frames are not
 forwarded in v1 because the original PoA certificate is bound to the original
 signed frame.
 
-`zap-memory` stores local memory as append-only JSONL records with BLAKE3 body
-hashes, entry-to-entry hash chaining, and tombstones. `zap memory verify`
-recalculates stored hashes, validates the append-only chain, and rejects
-orphaned tombstones. The v1 memory store is local audit data, not a remote
-database and not a hidden model state channel.
+`zap-memory` stores local memory as append-only binary journal records with
+BLAKE3 body hashes, entry-to-entry hash chaining, disk indexes, and tombstones.
+`zap memory verify` recalculates stored hashes, validates the append-only chain,
+and rejects orphaned tombstones. The v1 memory store is local audit data, not a
+remote database and not a hidden model state channel.
 
 ## Runtime Isolation
 

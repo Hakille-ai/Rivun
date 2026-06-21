@@ -13,12 +13,12 @@ This file tracks the technical specification PDF against the current repository.
 | Reflex action routing | Implemented locally | `zap-node` validates, dispatches action envelopes, and runs registered WASM drivers |
 | Deterministic routing | Foundation implemented | `zap-router`, `[[routes]]`, `zap route explain`, local dispatch fallback, and peer forwarding tests |
 | Capability discovery | Foundation implemented | `zap-capability`, signed `zap.capability.query`/`response`, cache refresh, local CLI inspection, and node response tests |
-| Local memory | Foundation implemented | `zap-memory` JSONL records, BLAKE3 hashes, tombstones, pruning, verification, and CLI commands |
+| Local memory | Foundation implemented | `zap-memory` binary journal records, BLAKE3 hashes, indexes, tombstones, compaction, JSONL import/export, verification, and CLI commands |
 | WASM sandbox execution | Implemented | `zap-runtime` ABI validation, fuel, memory, output, timeout, permissions |
 | Broadcast target zero | Implemented | broadcast frames use UUID nil internally while UDP envelopes target concrete peers |
 | Cognitive interpreter | Externalized by product decision | Models and gateways emit typed `ZENV` messages; ZAP enforces `[message_policy]`, signatures, routing, PoA, and sandboxing |
 | Proof-of-Action | Foundation implemented | `ZPOA` trailer, validator signatures, threshold verification, daemon enforcement, static configured validator networking, signed versioned validator-set files, and peer pull propagation exist; dynamic discovery remains future work |
-| Financial layer | Out of scope by product decision | Signed action receipts, offline verification, remote pull, retention filtering, and archive merge provide technical auditability only |
+| Financial layer | Out of scope by product decision | Signed action receipts, offline verification, remote pull, journal compaction, and JSONL export provide technical auditability only |
 | ZapStore driver registry | Foundation implemented | `zap-store` signed manifests, signed local registry approval, semantic version requirement resolution, ABI requirement ranges, migration metadata, deprecation and revocation states, signed install plans, CLI create/verify/sign/revoke/deprecate/migration/resolve/pull/mirror/publication/plan/bundle, daemon config enforcement, signed peer index fetch, remote bundle manifest discovery, strict merge conflict detection, revocation-priority mirroring, signed publication metadata, and offline bundle export/verify/import exist; remote artifact transfer services remain future work |
 | SDKs for major languages | Foundation implemented | Rust crates plus external Python, TypeScript, Go, and Rust SDK directories with protocol/ZapStore helpers and examples now exist; publishable package pipelines remain future work |
 

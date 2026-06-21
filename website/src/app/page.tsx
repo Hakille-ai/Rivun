@@ -117,7 +117,7 @@ export default function Home() {
             </CardHeader>
             <CardContent className="pt-0">
               <div className="bg-[#050505] p-3 rounded-lg border border-zinc-900 font-mono text-[11px] text-zinc-500 space-y-1">
-                <div><span className="text-amber-400">ledger:</span> append_only.jsonl</div>
+                <div><span className="text-amber-400">journal:</span> append_only.zjseg</div>
                 <div><span className="text-amber-400">chaining:</span> Hash linked</div>
                 <div className="text-emerald-500 flex items-center gap-1 mt-1 font-semibold">✓ Committed</div>
               </div>
@@ -288,7 +288,7 @@ impl ZapDriver for EchoDriver {
               { icon: Activity, title: "Proof-of-Action", desc: "Multi-validator consensus for critical operations. Actions requiring consensus are gated by signed PoA certificates." },
               { icon: Lock, title: "Encrypted UDP", desc: "ChaCha20-Poly1305 authenticated encryption with Noise helpers. 96-bit nonces prevent replay attacks at the network layer." },
               { icon: Network, title: "Capability Routing", desc: "Explicit capability advertisements, queries, and grants. Routes can require peer grants before forwarding." },
-              { icon: Database, title: "Auditable Ledgers", desc: "Append-only JSONL memory and signed action receipts. Tamper-evident hash chaining for full operational audit trails." }
+              { icon: Database, title: "Auditable Ledgers", desc: "Append-only binary memory journals and signed action receipts. Tamper-evident hash chaining for full operational audit trails." }
             ].map((f, i) => (
               <Card key={i} className="bg-zinc-950/40 border-zinc-800 hover:border-blue-500/30 transition-all duration-300 group">
                 <CardHeader>

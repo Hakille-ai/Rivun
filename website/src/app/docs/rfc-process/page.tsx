@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, FileCheck2, GitPullRequest, Lock, Package, Shield, Terminal } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, FileCheck2, FileSignature, GitPullRequest, Lock, Package, Shield, Terminal, type LucideIcon } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,7 @@ const states = [
 const requiredFor = [
   "ZAP-Wire or ZENV binary layout, versioning, or negotiation",
   "Cryptography, signatures, trust roots, replay protection, or key handling",
+  "PACT canonical payload fields, signature domains, fixture hashes, or revocation semantics",
   "Driver ABI, host imports, Wasm permissions, or sandbox boundaries",
   "Node config defaults, policy defaults, governance controls, or release authority",
   "Agent intent, status, action, result, or fixture semantics",
@@ -32,9 +33,10 @@ const checklist = [
   "Record breaking changes in release notes and migration guidance.",
 ];
 
-const links = [
+const links: Array<[string, string, LucideIcon]> = [
   ["Security model", "/docs/security", Shield],
   ["Message policy", "/docs/message-policy", Lock],
+  ["PACT profile", "/docs/pact", FileSignature],
   ["Agent protocol", "/docs/agent-protocol", GitPullRequest],
   ["Domain packs", "/docs/domain-packs", Package],
 ];
@@ -191,9 +193,9 @@ export default function RfcProcessPage() {
           <CardTitle className="text-white text-base">Related Docs</CardTitle>
           <CardDescription className="text-xs">Primary surfaces that usually change alongside a ZEP</CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {links.map(([title, href, Icon]) => (
-            <a key={href} href={href as string} className="flex items-center gap-3 rounded-lg border border-zinc-900 bg-black/20 p-3 text-xs text-zinc-400 transition-colors hover:border-blue-500/30 hover:text-white">
+            <a key={href} href={href} className="flex items-center gap-3 rounded-lg border border-zinc-900 bg-black/20 p-3 text-xs text-zinc-400 transition-colors hover:border-blue-500/30 hover:text-white">
               <Icon className="h-4 w-4 flex-shrink-0 text-blue-400" />
               <span>{title}</span>
             </a>

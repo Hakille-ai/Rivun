@@ -2,14 +2,16 @@
 
 ZAP can write signed action receipts for auditability. Receipts are not a billing, settlement, or payment system.
 
-Enable JSONL receipts in node config:
+Enable the binary receipt journal in node config:
 
 ```toml
 [receipts]
-path = "logs/actions.jsonl"
+dir = "logs/receipts"
 ```
 
-Each processed action appends one signed JSON object containing:
+Each processed action appends one signed receipt record to append-only binary
+segments (`*.zjseg`) with rebuildable sidecar indexes (`*.zjidx`) and manifests
+(`*.zjmanifest.json`). The signed receipt payload contains:
 
 - receiver node id;
 - source and target node ids;
@@ -19,44 +21,56 @@ Each processed action appends one signed JSON object containing:
 - optional BLAKE3 hash of driver output;
 - frame and processing timestamps;
 - frame flags;
-- optional Proof-of-Action summary.
+- optional Proof-of-Action summary;
+- optional PACT reference for verified `zap.pact.record` messages.
 
 The receipt signature is Ed25519 over a deterministic JSON payload with the domain prefix `ZAP-ACTION-RECEIPT-v1`. The signer is the node that processed the action.
 
-Verify an append-only receipt log offline:
+Verify an append-only receipt journal offline:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl
-cargo run -p zap-cli -- receipts verify --path logs/actions.jsonl --json
+cargo run -p zap-cli -- receipts verify --dir logs/receipts
+cargo run -p zap-cli -- receipts verify --dir logs/receipts --json
 ```
 
-Verification parses each non-empty JSONL line, validates the signer identity,
-and checks the Ed25519 signature. A tampered line fails with its line number.
+Verification walks the binary segments, checks the BLAKE3 journal hash chain,
+rebuildable index consistency, signer identity, and Ed25519 signature. JSONL is
+kept only for import/export/debug paths.
 
-Apply an offline retention cutoff after verification:
+## PACT References
+
+When the processed message is a signed `zap.pact.record` envelope with
+`content_type = application/zap-pact+json`, `zap-node` verifies the PACT body
+before writing the receipt. The receipt then includes an optional `pact` object
+with the PACT id, intent, canonical hash, status, optional policy decision,
+optional PoA summary, and optional output hash.
+
+This is an extension of the existing receipt schema, not a replacement for it.
+The receipt signature still covers the full receipt payload, including the PACT
+reference when it is present. PACT evidence remains audit metadata; receipts
+remain execution records and are not financial records.
+
+Import or export legacy JSONL archives explicitly:
 
 ```bash
-cargo run -p zap-cli -- receipts prune \
-  --path logs/actions.jsonl \
-  --before-processed-at-micros 1735689600000000 \
-  --out logs/actions.retained.jsonl
+cargo run -p zap-cli -- receipts import-jsonl \
+  --in logs/actions.legacy.jsonl \
+  --dir logs/receipts
+cargo run -p zap-cli -- receipts export-jsonl \
+  --dir logs/receipts \
+  --out logs/actions.archive.jsonl
 ```
 
-`prune` keeps receipts whose `processed_at_micros` is greater than or equal to
-the cutoff. It refuses to overwrite the output path unless `--force` is passed.
-
-Merge verified receipt logs from multiple nodes or archive shards:
+Compact a journal into a fresh binary directory after verification:
 
 ```bash
-cargo run -p zap-cli -- receipts merge \
-  logs/node-a.jsonl \
-  logs/node-b.jsonl \
-  --out logs/receipts.archive.jsonl
+cargo run -p zap-cli -- receipts compact \
+  --dir logs/receipts \
+  --out logs/receipts.compacted
 ```
 
-`merge` verifies every input log, keeps the first copy of each signed receipt,
-and writes a deduplicated JSONL archive. The output path must be separate from
-all input logs.
+`import-jsonl`, `export-jsonl`, and `compact` refuse to overwrite their output
+unless `--force` is passed.
 
 Pull signed receipts from a configured peer over signed `ZENV` control
 messages:
@@ -68,30 +82,31 @@ cargo run -p zap-cli -- receipts pull \
   --after-processed-at-micros 1735689600000000 \
   --until-processed-at-micros 1735776000000000 \
   --limit 100 \
-  --out logs/peer-receipts.jsonl \
+  --out-dir logs/peer-receipts \
   --json
 ```
 
 `pull` sends `zap.receipts.request`, verifies the signed
 `zap.receipts.response`, verifies every nested receipt signature, and writes a
-JSONL log that can be passed to `receipts verify`, `prune`, or `merge`.
+binary journal that can be passed to `receipts verify`, `export-jsonl`, or
+`compact`.
 Requests can filter by processed timestamp, kind, subject, source node, and
 target node. Responses include a `truncated` flag when more matching receipts
 exist than the requested limit and may include `next_after_processed_at_micros`
 so clients can resume a bounded pull without duplicating the last page.
 
-The ledger crate also defines signed segment primitives for large logs:
+The journal keeps index files as accelerators, never as the cryptographic
+source of truth:
 
-- `ReceiptSegmentManifest` summarizes one ordered JSONL segment with receipt
+- `*.zjseg` stores append-only binary records with payload bytes and BLAKE3
+  entry hash chaining.
+- `*.zjidx` stores rebuildable selection data by time, kind, subject, source,
+  target, id, namespace, and segment offset.
+- `*.zjmanifest.json` summarizes one ordered segment with receipt
   count, byte length, first/last processing timestamps, segment hash, first/last
   receipt hashes, and optional previous-segment hash.
-- `SignedReceiptSegmentManifest` signs the manifest with the processing node
-  key using the `ZAP-RECEIPT-SEGMENT-MANIFEST-v1` domain.
-- `ReceiptSegmentIndex` stores manifest-derived ranges and selects candidate
-  segments for a `ReceiptReplicationRequest` before reading receipt lines.
 
-These primitives are format-level building blocks. Automatic daemon log
-rotation and disk-backed segment index maintenance are still separate operator
-workflows.
+Corrupt indexes can be rebuilt from segments; corrupt segments fail
+verification.
 
 Receipts make local and future distributed operation auditable without creating financial semantics.

@@ -32,7 +32,7 @@ max_clock_skew_micros = 300000000
 replay_cache_capacity = 4096
 
 [receipts]
-path = "../../.zap/examples/node-b-receipts.jsonl"
+dir = "../../.zap/examples/node-b-receipts"
 
 [registry]
 path = "registry.index.toml"
@@ -40,7 +40,7 @@ require_signature = true
 bundle_path = "zapstore-bundle"
 
 [memory]
-path = "../../.zap/examples/node-b-memory.jsonl"
+dir = "../../.zap/examples/node-b-memory"
 max_record_bytes = 1048576
 allow_driver_read = false
 allow_driver_write = false

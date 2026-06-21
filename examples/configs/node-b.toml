@@ -55,11 +55,13 @@ node_id = "407550da-0728-831c-a40a-d3d733b0c517"
 public_key = "Ut+edi9Dv6S3tIcBEZTxSXlFN96A1c+1IkBVP+UR14k"
 
 [receipts]
+dir = "../../.zap/node-b-receipts"
 
 [registry]
 require_signature = false
 
 [memory]
+dir = "../../.zap/node-b-memory"
 allow_driver_read = false
 allow_driver_write = false
 

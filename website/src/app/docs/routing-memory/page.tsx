@@ -88,10 +88,10 @@ export default function RoutingMemoryPage() {
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-zinc-400">
             <p>
-              The <code>zap-memory</code> storage engine maintains append-only JSONL ledgers. Each record maps its own body hash and a reference digest linking to the previous entry, establishing a strict sequence validation structure:
+              The <code>zap-memory</code> storage engine maintains append-only binary journals. Each record maps its own body hash and a reference digest linking to the previous entry, establishing a strict sequence validation structure:
             </p>
             <pre className="text-[10px] bg-[#050505] p-2.5 rounded-lg border border-zinc-900 font-mono text-zinc-350">
-              <code>zap memory verify --path .zap/memory.jsonl</code>
+              <code>zap memory verify --dir .zap/memory</code>
             </pre>
           </CardContent>
         </Card>

@@ -16,7 +16,7 @@ Traditional RPC protocols (gRPC, HTTP) do not sign or attribute requests to thei
 ### How ZAP Solves It
 - **Cryptographic Provenance**: Every message is wrapped in a `ZAP_` frame and signed by the sender's Ed25519 identity key.
 - **Envelope Metadata**: The `ZENV` (Universal Envelope) matches action parameters, correlation IDs, and causation IDs, linking agent decision chains together.
-- **Signed Receipts**: When a node executes an action, it logs a signed receipt to its JSONL ledger, providing an immutable audit trail of agent behaviors.
+- **Signed Receipts**: When a node executes an action, it logs a signed receipt to its binary journal, providing an immutable audit trail of agent behaviors.
 
 ```
 ┌───────────────┐                  ┌───────────────┐                  ┌────────────────┐
@@ -64,6 +64,6 @@ In enterprise architectures, services need to communicate securely while maintai
 Traditional logging databases can be tampered with (either by database administrators or intruders), making post-incident forensic investigations unreliable.
 
 ### How ZAP Solves It
-- **Hash-Chained Memory Store**: ZAP's local memory crate (`zap-memory`) records key-value updates in an append-only JSONL file where each line references the cryptographic hash of the previous line.
+- **Hash-Chained Memory Store**: ZAP's local memory crate (`zap-memory`) records key-value updates in an append-only binary journal where each entry references the cryptographic hash of the previous entry.
 - **Tamper-Evident Logs**: Any modification, insertion, or deletion of past events breaks the hash chain and is immediately flagged by the node's verification routine.
-- **Offline Merging**: Ledgers from different nodes can be safely merged, deduplicated, and verified offline, facilitating easy distributed auditing.
+- **Offline Export**: Journals can be verified offline and exported to JSONL archives for human review or long-term interchange.

@@ -3,9 +3,9 @@ import { Archive, CheckCircle2, FileCheck2, GitBranch, ShieldCheck } from "lucid
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const readinessChecks = [
-  "Protocol fixtures verify with zap fixtures verify.",
+  "Protocol and PACT fixtures verify with zap fixtures verify.",
   "Domain pack catalog validates with zap pack list.",
-  "Python, TypeScript, Rust, and Go SDK conformance run in release CI.",
+  "Python, TypeScript, Rust, and Go SDK conformance run in release CI, including PACT hash and bundle checks.",
   "Website documentation lint passes before packaging.",
   "Checksums, Sigstore bundles, and release manifest are attached to artifacts.",
 ];
@@ -72,7 +72,7 @@ export default function ReleasePage() {
           <CardContent className="space-y-3 text-sm text-zinc-400">
             <p>Each release should preserve the workflow URL, commit SHA, command output, checksums, signatures, SBOM status, and migration notes.</p>
             <p>
-              Protocol, CLI, SDK, policy, domain-pack, and website route changes all require explicit migration notes before tagging.
+              Protocol, PACT, CLI, SDK, policy, domain-pack, and website route changes all require explicit migration notes before tagging.
             </p>
           </CardContent>
         </Card>

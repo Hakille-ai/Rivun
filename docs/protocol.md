@@ -115,7 +115,7 @@ include:
 | `zap.registry.index.response` | `application/zap-registry-index+json` | Return a registry index or an unavailable reason |
 | `zap.registry.bundle.manifest.request` | `application/zap-registry-bundle-manifest+json` | Request a peer's ZapStore bundle manifest |
 | `zap.registry.bundle.manifest.response` | `application/zap-registry-bundle-manifest+json` | Return a bundle manifest or an unavailable reason |
-| `zap.receipts.request` | `application/zap-receipts+json` | Request signed receipts from a peer receipt log |
+| `zap.receipts.request` | `application/zap-receipts+json` | Request signed receipts from a peer receipt journal |
 | `zap.receipts.response` | `application/zap-receipts+json` | Return verified signed receipts, with a truncation flag |
 
 PoA validator-set requests can include a minimum epoch. Responses are signed as

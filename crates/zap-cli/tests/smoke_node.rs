@@ -83,7 +83,7 @@ fn zap_binary_launches_node_sends_action_and_writes_receipt() {
     let driver_path = temp.path().join("echo.wat");
     let receiver_config_path = temp.path().join("receiver.toml");
     let sender_config_path = temp.path().join("sender.toml");
-    let receipt_path = temp.path().join("receipts").join("actions.jsonl");
+    let receipt_path = temp.path().join("receipts").join("actions");
 
     std::fs::write(&receiver_key_path, receiver_key.to_key_file_toml().unwrap()).unwrap();
     std::fs::write(&sender_key_path, sender_key.to_key_file_toml().unwrap()).unwrap();
@@ -108,7 +108,7 @@ action = 'echo'
 path = '{}'
 
 [receipts]
-path = '{}'
+dir = '{}'
 "#,
             receiver_addr,
             toml_path(&receiver_key_path),
@@ -197,7 +197,7 @@ transport_key = '{}'
                 .args([
                     "receipts",
                     "verify",
-                    "--path",
+                    "--dir",
                     receipt_path.to_str().unwrap(),
                     "--json",
                 ])

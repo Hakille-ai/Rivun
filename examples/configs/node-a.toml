@@ -56,12 +56,13 @@ validator_set = "../../.zap/poa-validators.json"
 validator_set_authority = "ub04BmALK4loxSDH2CYepq8cy/qWaJuJQdKeGSkKRzY"
 
 [receipts]
-path = "../../.zap/receipts.jsonl"
+dir = "../../.zap/receipts"
 
 [registry]
 require_signature = false
 
 [memory]
+dir = "../../.zap/memory"
 allow_driver_read = false
 allow_driver_write = false
 

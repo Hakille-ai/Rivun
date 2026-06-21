@@ -3,12 +3,19 @@
 //! Receipts are local, durable audit records. They are not financial records.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey, verify_batch};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+};
 use thiserror::Error;
 use uuid::Uuid;
 use zap_core::{ZapFlags, ZapFrame};
 use zap_crypto::{Keypair, node_id_from_public_key};
+use zap_journal::{JournalProfile, JournalQuery, JournalRecordInput, JournalStore};
 
 pub const RECEIPT_SCHEMA_VERSION: u8 = 1;
 pub const RECEIPT_REPLICATION_SCHEMA_VERSION: u8 = 1;
@@ -21,12 +28,16 @@ pub const RECEIPT_SEGMENT_MANIFEST_SCHEMA_VERSION: u8 = 1;
 pub const RECEIPT_SEGMENT_INDEX_SCHEMA_VERSION: u8 = 1;
 pub const RECEIPT_SEGMENT_MANIFEST_CONTENT_TYPE: &str =
     "application/zap-receipt-segment-manifest+json";
+pub const RECEIPT_JOURNAL_CONTENT_TYPE: &str = "application/zap-receipt+json";
 
 const RECEIPT_SIGNATURE_DOMAIN: &[u8] = b"ZAP-ACTION-RECEIPT-v1";
 const RECEIPT_SEGMENT_MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-RECEIPT-SEGMENT-MANIFEST-v1";
 const HASH_PREFIX: &str = "blake3:";
 const PUBLIC_KEY_LEN: usize = 32;
 const SIGNATURE_LEN: usize = 64;
+const BATCH_VERIFY_MIN_RECEIPTS: usize = 4;
+const PARALLEL_VERIFY_MIN_RECEIPTS: usize = 128;
+const RECEIPT_VERIFY_CHUNK_SIZE: usize = 64;
 
 #[derive(Debug, Error)]
 pub enum ZapLedgerError {
@@ -89,8 +100,14 @@ pub enum ZapLedgerError {
     Base64(#[from] base64::DecodeError),
     #[error("failed to parse Ed25519 receipt key material: {0}")]
     Ed25519(#[from] ed25519_dalek::SignatureError),
+    #[error("receipt io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("failed to serialize receipt signing payload: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("receipt journal error: {0}")]
+    Journal(#[from] zap_journal::ZapJournalError),
+    #[error("receipt output {0} already exists")]
+    OutputExists(PathBuf),
 }
 
 pub type Result<T> = std::result::Result<T, ZapLedgerError>;
@@ -282,16 +299,159 @@ impl ReceiptReplicationResponse {
                 self.schema_version,
             ));
         }
-        for receipt in &self.receipts {
-            receipt.verify()?;
-            if receipt.receipt.node_id != self.node_id {
-                return Err(ZapLedgerError::ReceiptNodeMismatch {
-                    receipt_node_id: receipt.receipt.node_id,
-                    signer_node_id: self.node_id,
-                });
-            }
+        verify_action_receipts(&self.receipts, Some(self.node_id))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReceiptJournalStore {
+    journal: JournalStore,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReceiptJournalVerificationReport {
+    pub dir: PathBuf,
+    pub segments: usize,
+    pub receipts: usize,
+    pub verified: bool,
+}
+
+impl ReceiptJournalStore {
+    pub fn open(dir: impl Into<PathBuf>) -> Self {
+        Self {
+            journal: JournalStore::open(dir, JournalProfile::Receipts),
         }
+    }
+
+    pub fn dir(&self) -> &Path {
+        self.journal.dir()
+    }
+
+    pub fn append(&self, receipt: &SignedActionReceipt, sync_data: bool) -> Result<()> {
+        receipt.verify()?;
+        let payload = serde_json::to_vec(receipt)?;
+        self.journal.append(
+            JournalRecordInput {
+                kind: receipt.receipt.kind.clone(),
+                schema_version: RECEIPT_SCHEMA_VERSION as u16,
+                timestamp_micros: receipt.receipt.processed_at_micros,
+                id: None,
+                namespace: Some(receipt.receipt.action.clone()),
+                subject: Some(receipt.receipt.subject.clone()),
+                content_type: Some(RECEIPT_JOURNAL_CONTENT_TYPE.to_string()),
+                source_node: Some(receipt.receipt.source_node),
+                target_node: Some(receipt.receipt.target_node),
+                tombstone_for: None,
+                metadata: serde_json::json!({
+                    "frame_hash": receipt.receipt.frame_hash,
+                    "payload_hash": receipt.receipt.payload_hash,
+                    "output_hash": receipt.receipt.output_hash,
+                    "signer_node_id": receipt.signer_node_id,
+                    "signature": receipt.signature,
+                }),
+                payload,
+            },
+            sync_data,
+        )?;
         Ok(())
+    }
+
+    pub fn query(&self, request: &ReceiptReplicationRequest) -> Result<Vec<SignedActionReceipt>> {
+        request.validate()?;
+        let limit = request.effective_limit()?;
+        self.query_with_limit(request, limit)
+    }
+
+    pub fn query_with_limit(
+        &self,
+        request: &ReceiptReplicationRequest,
+        limit: usize,
+    ) -> Result<Vec<SignedActionReceipt>> {
+        request.validate()?;
+        let records = self.journal.query(&JournalQuery {
+            kind: request.kind.clone(),
+            subject: request.subject.clone(),
+            source_node: request.source_node,
+            target_node: request.target_node,
+            after_timestamp_micros: request.after_processed_at_micros,
+            until_timestamp_micros: request.until_processed_at_micros,
+            limit: Some(limit),
+            ..JournalQuery::default()
+        })?;
+        let mut receipts = Vec::new();
+        for record in records {
+            let receipt: SignedActionReceipt = serde_json::from_slice(&record.payload)?;
+            receipts.push(receipt);
+        }
+        verify_action_receipts(&receipts, None)?;
+        receipts.retain(|receipt| request.matches(receipt));
+        Ok(receipts)
+    }
+
+    pub fn all(&self) -> Result<Vec<SignedActionReceipt>> {
+        let mut receipts = Vec::new();
+        for record in self.journal.records()? {
+            let receipt: SignedActionReceipt = serde_json::from_slice(&record.payload)?;
+            receipts.push(receipt);
+        }
+        verify_action_receipts(&receipts, None)?;
+        Ok(receipts)
+    }
+
+    pub fn verify(&self) -> Result<ReceiptJournalVerificationReport> {
+        let report = self.journal.verify()?;
+        let receipts = self.all()?.len();
+        Ok(ReceiptJournalVerificationReport {
+            dir: report.dir,
+            segments: report.segments,
+            receipts,
+            verified: true,
+        })
+    }
+
+    pub fn rebuild_indexes(&self) -> Result<ReceiptJournalVerificationReport> {
+        self.journal.rebuild_indexes()?;
+        self.verify()
+    }
+
+    pub fn recover_partial_tail(&self) -> Result<bool> {
+        Ok(self.journal.recover_partial_tail()?.is_some())
+    }
+
+    pub fn import_jsonl(&self, input: &Path, force: bool) -> Result<usize> {
+        JournalStore::remove_dir_if_allowed(self.dir(), force)?;
+        fs::create_dir_all(self.dir())?;
+        let receipts = load_verified_receipt_jsonl(input)?;
+        for receipt in &receipts {
+            self.append(receipt, false)?;
+        }
+        Ok(receipts.len())
+    }
+
+    pub fn export_jsonl(&self, out: &Path, force: bool) -> Result<usize> {
+        if out.exists() && !force {
+            return Err(ZapLedgerError::OutputExists(out.to_path_buf()));
+        }
+        if let Some(parent) = out.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+            fs::create_dir_all(parent)?;
+        }
+        let receipts = self.all()?;
+        let mut output = String::new();
+        for receipt in &receipts {
+            output.push_str(&receipt.to_json_line()?);
+        }
+        fs::write(out, output)?;
+        Ok(receipts.len())
+    }
+
+    pub fn compact(&self, out: &Path, force: bool) -> Result<usize> {
+        JournalStore::remove_dir_if_allowed(out, force)?;
+        let compacted = ReceiptJournalStore::open(out);
+        let receipts = self.all()?;
+        for receipt in &receipts {
+            compacted.append(receipt, false)?;
+        }
+        Ok(receipts.len())
     }
 }
 
@@ -741,6 +901,124 @@ impl SignedActionReceipt {
     }
 }
 
+fn verify_action_receipts(
+    receipts: &[SignedActionReceipt],
+    expected_node_id: Option<Uuid>,
+) -> Result<()> {
+    if receipts.len() < BATCH_VERIFY_MIN_RECEIPTS {
+        return verify_action_receipt_scalar_chunk(receipts, expected_node_id);
+    }
+
+    if receipts.len() >= PARALLEL_VERIFY_MIN_RECEIPTS {
+        return receipts
+            .par_chunks(RECEIPT_VERIFY_CHUNK_SIZE)
+            .try_for_each(|chunk| verify_action_receipt_batch_chunk(chunk, expected_node_id));
+    }
+
+    verify_action_receipt_batch_chunk(receipts, expected_node_id)
+}
+
+fn verify_action_receipt_scalar_chunk(
+    receipts: &[SignedActionReceipt],
+    expected_node_id: Option<Uuid>,
+) -> Result<()> {
+    let mut key_cache: HashMap<&str, (VerifyingKey, Uuid)> = HashMap::new();
+    for receipt in receipts {
+        let (verifying_key, signature, message) =
+            prepare_receipt_verification(receipt, &mut key_cache)?;
+        verifying_key
+            .verify(&message, &signature)
+            .map_err(|_| ZapLedgerError::InvalidSignature)?;
+        verify_expected_receipt_node(receipt, expected_node_id)?;
+    }
+    Ok(())
+}
+
+fn verify_action_receipt_batch_chunk(
+    receipts: &[SignedActionReceipt],
+    expected_node_id: Option<Uuid>,
+) -> Result<()> {
+    let mut key_cache: HashMap<&str, (VerifyingKey, Uuid)> = HashMap::new();
+    let mut messages = Vec::with_capacity(receipts.len());
+    let mut signatures = Vec::with_capacity(receipts.len());
+    let mut verifying_keys = Vec::with_capacity(receipts.len());
+
+    for receipt in receipts {
+        let (verifying_key, signature, message) =
+            prepare_receipt_verification(receipt, &mut key_cache)?;
+        signatures.push(signature);
+        verifying_keys.push(verifying_key);
+        messages.push(message);
+    }
+
+    let message_refs = messages.iter().map(Vec::as_slice).collect::<Vec<&[u8]>>();
+    verify_batch(&message_refs, &signatures, &verifying_keys)
+        .map_err(|_| ZapLedgerError::InvalidSignature)?;
+
+    for receipt in receipts {
+        verify_expected_receipt_node(receipt, expected_node_id)?;
+    }
+    Ok(())
+}
+
+fn prepare_receipt_verification<'a>(
+    receipt: &'a SignedActionReceipt,
+    key_cache: &mut HashMap<&'a str, (VerifyingKey, Uuid)>,
+) -> Result<(VerifyingKey, Signature, Vec<u8>)> {
+    if receipt.receipt.schema_version != RECEIPT_SCHEMA_VERSION {
+        return Err(ZapLedgerError::UnsupportedSchemaVersion(
+            receipt.receipt.schema_version,
+        ));
+    }
+    if receipt.receipt.node_id != receipt.signer_node_id {
+        return Err(ZapLedgerError::ReceiptNodeMismatch {
+            receipt_node_id: receipt.receipt.node_id,
+            signer_node_id: receipt.signer_node_id,
+        });
+    }
+
+    let cache_key = receipt.signer_public_key.as_str();
+    let (verifying_key, derived_node_id) = match key_cache.get(cache_key).copied() {
+        Some(cached) => cached,
+        None => {
+            let public_key_bytes =
+                decode_fixed::<PUBLIC_KEY_LEN>(&receipt.signer_public_key, "public_key")?;
+            let derived_node_id = node_id_from_public_key(&public_key_bytes);
+            let verifying_key = VerifyingKey::from_bytes(&public_key_bytes)?;
+            key_cache.insert(cache_key, (verifying_key, derived_node_id));
+            (verifying_key, derived_node_id)
+        }
+    };
+    if derived_node_id != receipt.signer_node_id {
+        return Err(ZapLedgerError::SignerNodeMismatch {
+            declared: receipt.signer_node_id,
+            derived: derived_node_id,
+        });
+    }
+
+    let signature_bytes = decode_fixed::<SIGNATURE_LEN>(&receipt.signature, "signature")?;
+    Ok((
+        verifying_key,
+        Signature::from_bytes(&signature_bytes),
+        receipt.signing_message()?,
+    ))
+}
+
+fn verify_expected_receipt_node(
+    receipt: &SignedActionReceipt,
+    expected_node_id: Option<Uuid>,
+) -> Result<()> {
+    if let Some(expected_node_id) = expected_node_id
+        && receipt.receipt.node_id != expected_node_id
+    {
+        return Err(ZapLedgerError::ReceiptNodeMismatch {
+            receipt_node_id: receipt.receipt.node_id,
+            signer_node_id: expected_node_id,
+        });
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 struct ReceiptSigningPayload<'a> {
     receipt: &'a ActionReceipt,
@@ -757,6 +1035,24 @@ struct ReceiptSegmentManifestSigningPayload<'a> {
 
 pub fn hash_bytes(bytes: &[u8]) -> String {
     format!("{HASH_PREFIX}{}", blake3::hash(bytes).to_hex())
+}
+
+pub fn load_verified_receipt_jsonl(path: &Path) -> Result<Vec<SignedActionReceipt>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let input = fs::read_to_string(path)?;
+    let mut receipts = Vec::new();
+    for line in input.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let receipt = SignedActionReceipt::from_json_str(line)?;
+        receipts.push(receipt);
+    }
+    verify_action_receipts(&receipts, None)?;
+    Ok(receipts)
 }
 
 fn receipt_hash(receipt: &SignedActionReceipt) -> Result<String> {
@@ -913,6 +1209,36 @@ mod tests {
     }
 
     #[test]
+    fn receipt_journal_appends_queries_exports_and_verifies() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ReceiptJournalStore::open(temp.path().join("receipts"));
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let first = receipt_at(&node, &source, 1_000, "echo");
+        let second = receipt_at(&node, &source, 1_100, "telemetry");
+        store.append(&first, false).unwrap();
+        store.append(&second, false).unwrap();
+
+        let request = ReceiptReplicationRequest {
+            after_processed_at_micros: Some(999),
+            kind: Some("action".to_string()),
+            subject: Some("echo".to_string()),
+            source_node: Some(source.node_id()),
+            target_node: Some(node.node_id()),
+            ..ReceiptReplicationRequest::default()
+        };
+        let receipts = store.query(&request).unwrap();
+        assert_eq!(receipts, vec![first.clone()]);
+        assert_eq!(store.verify().unwrap().receipts, 2);
+
+        let jsonl = temp.path().join("receipts.jsonl");
+        assert_eq!(store.export_jsonl(&jsonl, false).unwrap(), 2);
+        let imported = ReceiptJournalStore::open(temp.path().join("imported"));
+        assert_eq!(imported.import_jsonl(&jsonl, false).unwrap(), 2);
+        assert_eq!(imported.all().unwrap(), vec![first, second]);
+    }
+
+    #[test]
     fn receipt_records_poa() {
         let node = Keypair::generate();
         let source = Keypair::generate();
@@ -1006,6 +1332,102 @@ mod tests {
             wrong_node.verify(),
             Err(ZapLedgerError::ReceiptNodeMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn receipt_replication_response_verifies_empty_batch() {
+        let node = Keypair::generate();
+        let response = ReceiptReplicationResponse::new(node.node_id(), Vec::new(), false);
+
+        response.verify().unwrap();
+    }
+
+    #[test]
+    fn receipt_replication_response_batch_verifies_eight_receipts() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let receipts = (0..8)
+            .map(|index| receipt_at(&node, &source, 1_000 + index, "echo"))
+            .collect::<Vec<_>>();
+        let response = ReceiptReplicationResponse::new(node.node_id(), receipts, false);
+
+        response.verify().unwrap();
+    }
+
+    #[test]
+    fn receipt_replication_response_batch_detects_modified_signature() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let mut receipts = (0..8)
+            .map(|index| receipt_at(&node, &source, 1_000 + index, "echo"))
+            .collect::<Vec<_>>();
+        let mut signature = STANDARD_NO_PAD.decode(&receipts[3].signature).unwrap();
+        signature[0] ^= 0x55;
+        receipts[3].signature = STANDARD_NO_PAD.encode(signature);
+        let response = ReceiptReplicationResponse::new(node.node_id(), receipts, false);
+
+        assert!(matches!(
+            response.verify(),
+            Err(ZapLedgerError::InvalidSignature)
+        ));
+    }
+
+    #[test]
+    fn receipt_replication_response_batch_detects_wrong_node() {
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let mut receipts = (0..8)
+            .map(|index| receipt_at(&node, &source, 1_000 + index, "echo"))
+            .collect::<Vec<_>>();
+        receipts[4].receipt.node_id = source.node_id();
+        let response = ReceiptReplicationResponse::new(node.node_id(), receipts, false);
+
+        assert!(matches!(
+            response.verify(),
+            Err(ZapLedgerError::ReceiptNodeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn receipt_batch_verifies_mixed_signers_without_expected_node() {
+        let node_a = Keypair::generate();
+        let node_b = Keypair::generate();
+        let source = Keypair::generate();
+        let mut receipts = (0..4)
+            .map(|index| receipt_at(&node_a, &source, 1_000 + index, "echo"))
+            .collect::<Vec<_>>();
+        receipts.extend((0..4).map(|index| receipt_at(&node_b, &source, 2_000 + index, "echo")));
+
+        verify_action_receipts(&receipts, None).unwrap();
+    }
+
+    #[test]
+    fn receipt_journal_batch_verifies_query_all_and_report() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = ReceiptJournalStore::open(temp.path().join("receipts"));
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let receipts = (0..8)
+            .map(|index| {
+                receipt_at(
+                    &node,
+                    &source,
+                    1_000 + index,
+                    if index % 2 == 0 { "echo" } else { "telemetry" },
+                )
+            })
+            .collect::<Vec<_>>();
+        for receipt in &receipts {
+            store.append(receipt, false).unwrap();
+        }
+
+        let request = ReceiptReplicationRequest {
+            subject: Some("echo".to_string()),
+            ..ReceiptReplicationRequest::default()
+        };
+        assert_eq!(store.query(&request).unwrap().len(), 4);
+        assert_eq!(store.all().unwrap(), receipts);
+        assert_eq!(store.verify().unwrap().receipts, 8);
     }
 
     #[test]

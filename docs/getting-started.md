@@ -39,7 +39,7 @@ cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures
 Expected result:
 
 ```text
-fixtures=fixtures files=14 valid=true
+fixtures=fixtures files=17 valid=true
 ```
 
 Validate the bundled domain packs:
@@ -65,6 +65,47 @@ Expected result:
 ```text
 test result: ok
 ```
+
+## PACT Profile Check
+
+PACT records are signed action records carried inside normal ZAP envelopes.
+They reuse the same Ed25519 key files and BLAKE3 hashing rules as the rest of
+the protocol.
+
+Create, sign, and verify a local PACT record:
+
+```bash
+cargo run --locked -p zap-cli -- keygen --out .zap/pact-demo.key --force
+cargo run --locked -p zap-cli -- pact create \
+  --actor agent.alpha \
+  --target driver.valve \
+  --intent valve.open \
+  --object '{"valve":"v-7"}' \
+  --terms '{"max_runtime_ms":5000}' \
+  --created-at-micros 1893456000000000 \
+  --out pact-unsigned.json \
+  --force
+cargo run --locked -p zap-cli -- pact sign \
+  --input pact-unsigned.json \
+  --key .zap/pact-demo.key \
+  --out pact-signed.json \
+  --force
+cargo run --locked -p zap-cli -- pact verify \
+  --input pact-signed.json \
+  --now-micros 1893457000000000 \
+  --json
+```
+
+Expected result includes:
+
+```json
+{
+  "valid": true,
+  "status": "active"
+}
+```
+
+For the full profile, see [ZAP PACT Profile](pact.md).
 
 ## Config Checks
 

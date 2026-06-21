@@ -43,6 +43,8 @@ Already implemented:
   call limits;
 - signed driver manifests, local ZapStore registries, publications, install
   plans, and offline bundles;
+- PACT signed action records with canonical BLAKE3 hashing, Ed25519 signatures,
+  revocation evidence, offline bundles, and receipt references;
 - capability advertisements, grants, requirements, route planning, and
   hash-chained capability cache verification;
 - append-only memory and signed receipt ledgers;
@@ -60,7 +62,8 @@ ZAP reaches the next maturity level when these outcomes are true:
 - production operators can run `doctor --strict` and trust that the daemon,
   policy, registry, receipts, routes, PoA, and observability posture are checked;
 - every official SDK passes the same conformance fixtures for frames, envelopes,
-  signatures, datagrams, control messages, receipts, capabilities, and PoA;
+  signatures, datagrams, control messages, receipts, capabilities, PoA, and
+  PACT records;
 - high-risk actions are fail-closed by policy and cannot run without explicit
   grants, PoA, human approval, or simulation when configured;
 - ZAP nodes expose real metrics and health status matching the Prometheus and
@@ -229,7 +232,7 @@ Deliverables:
   messages, and compatibility rules;
 - publish golden fixtures for unsigned frames, signed frames, auth trailers, PoA
   trailers, `ZENV`, encrypted datagrams, ZapStore messages, capability messages,
-  receipts, and agent messages;
+  receipts, PACT records/bundles, and agent messages;
 - generate or validate SDK constants from the source of truth;
 - add SDK conformance tests for Rust, TypeScript, Python, and Go;
 - expand common SDK surfaces:
@@ -240,6 +243,7 @@ Deliverables:
   - ZapStore registry, bundle, and install plan verification;
   - capability query and verification;
   - receipt verification and pull helpers;
+  - PACT canonical hash, signature verification, and bundle verification;
   - agent protocol contracts.
 - publish a compatibility matrix in `docs/sdks.md`;
 - add `zap fixtures verify --sdk <path>` and `zap schema export` workflows.
@@ -504,11 +508,12 @@ Success metrics:
 10. Add receipt fsync mode, segment rotation, and indexed pull planning.
 11. Add durable replay protection design and implementation.
 12. Add runtime `max_host_calls` and per-action budgets.
-13. Create protocol fixtures for frames, envelopes, signatures, PoA, and control
-    messages.
-14. Add SDK conformance tests against fixtures.
+13. Expand protocol fixtures for remaining frame, envelope, signature, PoA, and
+    control edge cases.
+14. Broaden SDK conformance tests against fixtures beyond the current PACT,
+    receipt, envelope, and control coverage.
 15. Expand SDK surface to frame signing, verification, receipts, capabilities,
-    and agent messages.
+    PACT helpers, and agent messages.
 16. Add CLI workflows for agent intent/session/delegation/negotiation/status.
 17. Define the domain pack manifest format.
 18. Build `zap-pack-agentic-dev` as the first complete domain pack.

@@ -53,6 +53,14 @@ export default function ProtocolPage() {
         </AlertDescription>
       </Alert>
 
+      <Alert className="border-purple-500/20 bg-purple-500/5 text-purple-300">
+        <FileSignature className="w-4 h-4 text-purple-400" />
+        <AlertTitle className="font-semibold text-purple-400">PACT Profile</AlertTitle>
+        <AlertDescription className="text-xs">
+          <code>zap.pact.record</code> uses <code>kind = action</code> and <code>application/zap-pact+json</code>. Verification, revocation, and bundles use control subjects while reusing ZAP BLAKE3 and Ed25519 domain signatures.
+        </AlertDescription>
+      </Alert>
+
       {/* Wire Frame Header Section */}
       <Card className="bg-zinc-950/40 border-zinc-850 overflow-hidden">
         <CardHeader>

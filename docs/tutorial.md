@@ -14,8 +14,8 @@ We will build a smart factory telemetry system with two nodes:
   └────────────┘                       └────────────┘
                                              │
                                              ▼
-                                     Signed JSONL Ledger
-                                     (actions.receipt.jsonl)
+                                     Signed Binary Journal
+                                     (receipts/*.zjseg)
 ```
 
 ---
@@ -133,8 +133,7 @@ enforce_signatures = true
 enforce_replay_protection = true
 
 [receipts]
-enabled = true
-path = "../../.zap/node-a-receipts.jsonl"
+dir = "../../.zap/node-a-receipts"
 
 [[drivers]]
 action = "thermostat.setpoint"
@@ -208,13 +207,13 @@ cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
 On Node A, ZAP will:
 1. Verify the incoming envelope's signature.
 2. Compile and execute `thermostat.wat` inside Wasmtime with a resource limit.
-3. Write a signed execution receipt to `.zap/node-a-receipts.jsonl`.
+3. Write a signed execution receipt to `.zap/node-a-receipts`.
 
 ### Verify the Audit Trail
 Check that Node A's receipts ledger has not been tampered with:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --path .zap/node-a-receipts.jsonl
+cargo run -p zap-cli -- receipts verify --dir .zap/node-a-receipts
 ```
 Output:
 ```

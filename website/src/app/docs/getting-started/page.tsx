@@ -112,7 +112,7 @@ cargo build --locked -p zap-cli`}</code>
                 <h3 className="text-white font-semibold">Verify Protocol Fixtures</h3>
               </div>
               <p className="text-sm text-zinc-400">
-                Shared fixtures keep Rust, Python, TypeScript, Go, and operator tooling aligned on stable protocol contracts.
+                Shared fixtures keep Rust, Python, TypeScript, Go, and operator tooling aligned on stable protocol contracts, including PACT records and bundles.
               </p>
             </div>
             <div className="flex-1">
@@ -127,6 +127,30 @@ cargo build --locked -p zap-cli`}</code>
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
                 <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 2</Badge>
+                <h3 className="text-white font-semibold">Verify a PACT Record</h3>
+              </div>
+              <p className="text-sm text-zinc-400">
+                PACT records prove intent, consent, proof, terms, and revocation state using the same ZAP key files and offline verification model.
+              </p>
+            </div>
+            <div className="flex-1">
+              <pre className="text-xs bg-[#050505] p-3.5 rounded-lg border border-zinc-900 font-mono text-zinc-300">
+                <code>{`cargo run --locked -p zap-cli -- pact create \\
+  --actor agent.alpha --target driver.valve --intent valve.open \\
+  --out pact-unsigned.json --force
+cargo run --locked -p zap-cli -- pact sign \\
+  --input pact-unsigned.json --key .zap/node.key \\
+  --out pact-signed.json --force
+cargo run --locked -p zap-cli -- pact verify \\
+  --input pact-signed.json --json`}</code>
+              </pre>
+            </div>
+          </div>
+
+          <div className="flex flex-col md:flex-row gap-6 p-6 rounded-xl border border-zinc-850 bg-zinc-950/20">
+            <div className="flex-1 space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 3</Badge>
                 <h3 className="text-white font-semibold">Validate Domain Packs</h3>
               </div>
               <p className="text-sm text-zinc-400">
@@ -144,7 +168,7 @@ cargo build --locked -p zap-cli`}</code>
           <div className="flex flex-col md:flex-row gap-6 p-6 rounded-xl border border-zinc-850 bg-zinc-950/20">
             <div className="flex-1 space-y-2">
               <div className="flex items-center gap-2">
-                <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 3</Badge>
+                <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px] px-2 py-0.5">Step 4</Badge>
                 <h3 className="text-white font-semibold">Run Live Dispatch Smoke</h3>
               </div>
               <p className="text-sm text-zinc-400">

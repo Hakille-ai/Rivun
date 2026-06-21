@@ -38,6 +38,19 @@ Protocol fixture changes must pass the release-readiness gate in
 or changed canonical subjects require migration notes even when binary wire
 versions do not change.
 
+## Profile Versions
+
+Profiles such as PACT live above the wire format and inside `ZENV` envelopes.
+They carry their own `schema_version` while reusing existing ZAP identity,
+hashing, signatures, policy, PoA, and receipts.
+
+PACT v1 uses content type `application/zap-pact+json`, subjects
+`zap.pact.record`, `zap.pact.verify`, `zap.pact.revoke`, and
+`zap.pact.bundle`, plus the signature domain `ZAP-PACT-v1`. Changes to the
+canonical signing field list, field order, nested JSON normalization, hash
+format, signature domain, or subject/content-type constants are compatibility
+events and require migration notes plus fixture updates across official SDKs.
+
 ## Domain Packs and SDKs
 
 Domain pack metadata uses `schema_version`. Compatible additions to pack
