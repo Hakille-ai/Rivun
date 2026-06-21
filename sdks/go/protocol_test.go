@@ -47,6 +47,26 @@ func TestRegistryBundleManifestControlFrameRoundTrips(t *testing.T) {
 	}
 }
 
+func TestEnvelopeRejectsInvalidUTF8(t *testing.T) {
+	if _, err := NewEnvelope(KindControl, string([]byte{0xff}), "application/json", nil); err == nil {
+		t.Fatal("expected invalid UTF-8 subject to be rejected")
+	}
+
+	env, err := NewEnvelope(KindControl, "zap.test", "application/json", []byte("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := env.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded[EnvelopeHeaderLen] = 0xff
+
+	if _, err := DecodeEnvelope(encoded); err == nil || !strings.Contains(err.Error(), "invalid UTF-8 in subject") {
+		t.Fatalf("DecodeEnvelope error = %v", err)
+	}
+}
+
 func TestRegistryBundleManifestRequestFixtureMatchesSDK(t *testing.T) {
 	var fixture struct {
 		Envelope struct {

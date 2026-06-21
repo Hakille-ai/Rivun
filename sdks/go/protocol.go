@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -120,6 +121,12 @@ func NewEnvelope(kind MessageKind, subject string, contentType string, body []by
 }
 
 func (env Envelope) Validate() error {
+	if !utf8.ValidString(env.Subject) {
+		return errors.New("subject must be valid UTF-8")
+	}
+	if !utf8.ValidString(env.ContentType) {
+		return errors.New("content_type must be valid UTF-8")
+	}
 	return validateLengths(env.Kind, len([]byte(env.Subject)), len([]byte(env.ContentType)), len(env.Metadata), len(env.Body))
 }
 
@@ -197,6 +204,12 @@ func DecodeEnvelope(input []byte) (Envelope, error) {
 	contentTypeStart := subjectStart + subjectLen
 	metadataStart := contentTypeStart + contentTypeLen
 	bodyStart := metadataStart + metadataLen
+	if !utf8.Valid(input[subjectStart:contentTypeStart]) {
+		return Envelope{}, errors.New("invalid UTF-8 in subject")
+	}
+	if !utf8.Valid(input[contentTypeStart:metadataStart]) {
+		return Envelope{}, errors.New("invalid UTF-8 in content_type")
+	}
 	return Envelope{
 		Kind:          kind,
 		ID:            id,

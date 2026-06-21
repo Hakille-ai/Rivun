@@ -1,4 +1,4 @@
-import { Terminal, ShieldCheck, Users, Send, Key } from 'lucide-react';
+import { Terminal, Users, Send, Key } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";

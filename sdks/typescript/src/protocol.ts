@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createSocket, type Socket } from "node:dgram";
+import { TextDecoder } from "node:util";
 
 export const MAGIC = "ZENV";
 export const VERSION = 1;
@@ -16,6 +17,9 @@ export const REGISTRY_INDEX_REQUEST_SUBJECT = "zap.registry.index.request";
 export const REGISTRY_INDEX_RESPONSE_SUBJECT = "zap.registry.index.response";
 export const REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT = "zap.registry.bundle.manifest.request";
 export const REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT = "zap.registry.bundle.manifest.response";
+
+const UUID_RE = /^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+const fatalUtf8 = new TextDecoder("utf-8", { fatal: true });
 
 export const ZapMessageKind = {
   data: 1,
@@ -122,8 +126,8 @@ export class ZapEnvelope {
       id,
       correlationId,
       causationId,
-      subject: bytes.subarray(subjectStart, contentTypeStart).toString("utf8"),
-      contentType: bytes.subarray(contentTypeStart, metadataStart).toString("utf8"),
+      subject: decodeUtf8(bytes.subarray(subjectStart, contentTypeStart), "subject"),
+      contentType: decodeUtf8(bytes.subarray(contentTypeStart, metadataStart), "content_type"),
       metadata: bytes.subarray(metadataStart, bodyStart),
       body: bytes.subarray(bodyStart),
     });
@@ -319,6 +323,9 @@ function toBytes(value: Uint8Array | string): Uint8Array {
 
 function uuidToBytes(value: string | null): Buffer {
   if (value === null) return Buffer.alloc(16);
+  if (!UUID_RE.test(value)) {
+    throw new Error(`invalid UUID ${value}`);
+  }
   return Buffer.from(value.replaceAll("-", ""), "hex");
 }
 
@@ -330,4 +337,12 @@ function bytesToUuid(bytes: Uint8Array): string {
 function optionalUuid(bytes: Uint8Array): string | null {
   if (Buffer.from(bytes).equals(Buffer.alloc(16))) return null;
   return bytesToUuid(bytes);
+}
+
+function decodeUtf8(bytes: Uint8Array, field: string): string {
+  try {
+    return fatalUtf8.decode(bytes);
+  } catch {
+    throw new Error(`invalid UTF-8 in ${field}`);
+  }
 }

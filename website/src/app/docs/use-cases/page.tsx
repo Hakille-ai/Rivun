@@ -1,5 +1,5 @@
 import Image from 'next/image';
-import { Cpu, Activity, ShieldAlert, Bot, Cpu as RoboticsIcon, Layers } from 'lucide-react';
+import { Bot, Cpu as RoboticsIcon, Layers } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 
 export default function UseCasesPage() {

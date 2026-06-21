@@ -49,7 +49,7 @@ use zap_ledger::{
     ReceiptReplicationResponse, SignedActionReceipt,
 };
 use zap_memory::{MemoryJournalStore, MemoryPut, MemoryStore};
-use zap_net::{Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
+use zap_net::{MAX_DATAGRAM_SIZE, Peer, TransportKey, ZapEndpoint, ZapEndpointConfig};
 use zap_pact::{PACT_CONTENT_TYPE, PACT_RECORD_SUBJECT, ZapPact};
 use zap_policy::{PolicyInput, PolicyRule, PolicySet};
 use zap_router::{RouteDecision, RouteMessage, RouteRule, RouteTable};
@@ -3251,6 +3251,11 @@ fn validate_config_with_executor(
     {
         bail!("max_datagram_size must be at least 128 bytes");
     }
+    if let Some(max_datagram_size) = config.max_datagram_size
+        && max_datagram_size > MAX_DATAGRAM_SIZE
+    {
+        bail!("max_datagram_size must be at most {MAX_DATAGRAM_SIZE} bytes");
+    }
 
     warn_key_file_permissions(&config.key_file, &mut warnings)?;
     validate_receipts(config)?;
@@ -5739,6 +5744,24 @@ fsync = "always"
 
         let error = config.validate().unwrap_err();
         assert!(format!("{error:#}").contains("transport_key must not be all zeros"));
+    }
+
+    #[test]
+    fn config_validation_rejects_oversized_datagram_buffer() {
+        let temp = tempfile::tempdir().unwrap();
+        let local = Keypair::generate();
+        let peer = Keypair::generate();
+        let mut config = validation_config(
+            &temp,
+            &local,
+            &peer,
+            public_key_string(&peer),
+            "4242424242424242424242424242424242424242424242424242424242424242".to_string(),
+        );
+        config.max_datagram_size = Some(MAX_DATAGRAM_SIZE + 1);
+
+        let error = config.validate().unwrap_err();
+        assert!(format!("{error:#}").contains("max_datagram_size must be at most"));
     }
 
     #[test]
