@@ -23,7 +23,12 @@ pub struct ZapRelayEnvelope {
 
 impl ZapRelayEnvelope {
     #[must_use]
-    pub fn new(origin_node: Uuid, relay_node: Uuid, final_target: Uuid, inner_frame: Bytes) -> Self {
+    pub fn new(
+        origin_node: Uuid,
+        relay_node: Uuid,
+        final_target: Uuid,
+        inner_frame: Bytes,
+    ) -> Self {
         Self {
             magic: RELAY_ENVELOPE_MAGIC,
             version: RELAY_ENVELOPE_VERSION,

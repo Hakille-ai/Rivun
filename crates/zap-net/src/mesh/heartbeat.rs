@@ -53,7 +53,9 @@ impl HeartbeatScheduler {
 
     #[must_use]
     pub fn next_interval(&self) -> Duration {
-        let factor = self.backoff_multiplier.powi(self.consecutive_failures.min(10) as i32);
+        let factor = self
+            .backoff_multiplier
+            .powi(self.consecutive_failures.min(10) as i32);
         let base_millis = (self.base_interval.as_millis() as f64 * factor) as u64;
         let clamped_base = base_millis.min(self.max_interval.as_millis() as u64);
 

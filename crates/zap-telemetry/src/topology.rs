@@ -71,7 +71,9 @@ impl FleetTopology {
     pub fn active_peer_count(&self) -> usize {
         self.nodes
             .values()
-            .filter(|n| n.node_id != self.local_node_id && n.health_status != FleetNodeHealth::Unreachable)
+            .filter(|n| {
+                n.node_id != self.local_node_id && n.health_status != FleetNodeHealth::Unreachable
+            })
             .count()
     }
 

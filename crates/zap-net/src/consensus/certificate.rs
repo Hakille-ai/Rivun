@@ -71,7 +71,8 @@ impl SwarmCommitCertificate {
     #[must_use]
     pub fn encode_trailer(&self) -> Vec<u8> {
         let bitmask_len = self.signer_bitmask.len() as u16;
-        let mut out = Vec::with_capacity(76 + self.signer_bitmask.len() + self.signatures.len() * 64);
+        let mut out =
+            Vec::with_capacity(76 + self.signer_bitmask.len() + self.signatures.len() * 64);
         out.extend_from_slice(&CONSENSUS_TRAILER_MAGIC);
         out.extend_from_slice(&CONSENSUS_TRAILER_VERSION.to_be_bytes());
         out.extend_from_slice(&self.threshold.to_be_bytes());
@@ -122,8 +123,10 @@ impl SwarmCommitCertificate {
         }
         let signer_bitmask = bytes[76..mask_end].to_vec();
         let sigs_bytes = &bytes[mask_end..];
-        if sigs_bytes.len() % 64 != 0 {
-            return Err(ConsensusError::InvalidSignaturePayloadLength(sigs_bytes.len()));
+        if !sigs_bytes.len().is_multiple_of(64) {
+            return Err(ConsensusError::InvalidSignaturePayloadLength(
+                sigs_bytes.len(),
+            ));
         }
         let sig_count = sigs_bytes.len() / 64;
         let mut signatures = Vec::with_capacity(sig_count);

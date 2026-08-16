@@ -1,8 +1,8 @@
-use tempfile::tempdir;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use tempfile::tempdir;
 use uuid::Uuid;
 use zap_core::{ZapFlags, ZapFrame, now_micros};
 use zap_node::durable_replay::DurableReplayStore;
@@ -32,7 +32,9 @@ fn stress_test_replay_store_crash_restart_replay_flood() {
                 bytes::Bytes::from(payload),
             )
             .unwrap();
-            store.check_and_insert(&frame, base_now + (i as u64)).unwrap();
+            store
+                .check_and_insert(&frame, base_now + (i as u64))
+                .unwrap();
             initial_frames.push(frame);
         }
     }
@@ -42,7 +44,9 @@ fn stress_test_replay_store_crash_restart_replay_flood() {
         let mut store = DurableReplayStore::open(&wal_path, count * 2, 3_600_000_000).unwrap();
         let mut rejected = 0;
         for frame in &initial_frames {
-            let err = store.check_and_insert(frame, base_now + count as u64).unwrap_err();
+            let err = store
+                .check_and_insert(frame, base_now + count as u64)
+                .unwrap_err();
             if err.to_string().contains("replayed frame rejected") {
                 rejected += 1;
             }
@@ -64,7 +68,9 @@ fn stress_test_replay_store_crash_restart_replay_flood() {
                 bytes::Bytes::from(payload),
             )
             .unwrap();
-            store.check_and_insert(&frame, base_now + count as u64 + (i as u64)).unwrap();
+            store
+                .check_and_insert(&frame, base_now + count as u64 + (i as u64))
+                .unwrap();
             new_frames.push(frame);
         }
     }
@@ -74,7 +80,9 @@ fn stress_test_replay_store_crash_restart_replay_flood() {
         let mut store = DurableReplayStore::open(&wal_path, count * 3, 3_600_000_000).unwrap();
         let mut rejected = 0;
         for frame in initial_frames.iter().chain(new_frames.iter()) {
-            let err = store.check_and_insert(frame, base_now + count as u64 * 2).unwrap_err();
+            let err = store
+                .check_and_insert(frame, base_now + count as u64 * 2)
+                .unwrap_err();
             if err.to_string().contains("replayed frame rejected") {
                 rejected += 1;
             }
@@ -162,7 +170,9 @@ fn stress_test_replay_store_compaction_under_load() {
                 bytes::Bytes::from(format!("frame_{i}")),
             )
             .unwrap();
-            store.check_and_insert(&frame, base_now + (i as u64)).unwrap();
+            store
+                .check_and_insert(&frame, base_now + (i as u64))
+                .unwrap();
             frames.push(frame);
         }
 
@@ -175,7 +185,9 @@ fn stress_test_replay_store_compaction_under_load() {
         let mut store = DurableReplayStore::open(&wal_path, count * 2, 3_600_000_000).unwrap();
         let mut rejected = 0;
         for frame in &frames {
-            let err = store.check_and_insert(frame, base_now + count as u64 * 2).unwrap_err();
+            let err = store
+                .check_and_insert(frame, base_now + count as u64 * 2)
+                .unwrap_err();
             if err.to_string().contains("replayed frame rejected") {
                 rejected += 1;
             }
@@ -229,7 +241,10 @@ fn stress_test_replay_store_partial_write_corruption() {
     {
         let mut store = DurableReplayStore::open(&wal_path, 100, 3_600_000_000).unwrap();
         // Check frame1 replay rejection
-        assert!(store.check_and_insert(&frame1, base_now).is_err(), "frame1 must be recognized");
+        assert!(
+            store.check_and_insert(&frame1, base_now).is_err(),
+            "frame1 must be recognized"
+        );
 
         // Insert frame2
         store.check_and_insert(&frame2, base_now + 100).unwrap();
@@ -241,9 +256,15 @@ fn stress_test_replay_store_partial_write_corruption() {
         let f1_rej = store.check_and_insert(&frame1, base_now).is_err();
         let f2_rej = store.check_and_insert(&frame2, base_now + 100).is_err();
 
-        println!("ReplayStore partial write test: f1_rej={}, f2_rej={}", f1_rej, f2_rej);
+        println!(
+            "ReplayStore partial write test: f1_rej={}, f2_rej={}",
+            f1_rej, f2_rej
+        );
         assert!(f1_rej, "frame1 must be rejected as replay");
-        assert!(f2_rej, "frame2 appended after crash must be rejected as replay");
+        assert!(
+            f2_rej,
+            "frame2 appended after crash must be rejected as replay"
+        );
     }
 }
 
@@ -273,7 +294,9 @@ fn stress_test_replay_store_concurrent_access() {
                     )
                     .unwrap();
                     let mut guard = store.lock().unwrap();
-                    guard.check_and_insert(&frame, base_now + (i as u64)).unwrap();
+                    guard
+                        .check_and_insert(&frame, base_now + (i as u64))
+                        .unwrap();
                 }
             })
         })
@@ -297,11 +320,17 @@ fn stress_test_replay_store_concurrent_access() {
                     bytes::Bytes::from(format!("t_{t}_f_{i}")),
                 )
                 .unwrap();
-                if store.check_and_insert(&frame, base_now + 1_000_000).is_err() {
+                if store
+                    .check_and_insert(&frame, base_now + 1_000_000)
+                    .is_err()
+                {
                     count += 1;
                 }
             }
         }
-        assert_eq!(count, 5000, "All 5,000 frames inserted concurrently must survive restart!");
+        assert_eq!(
+            count, 5000,
+            "All 5,000 frames inserted concurrently must survive restart!"
+        );
     }
 }

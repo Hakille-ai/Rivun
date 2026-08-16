@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use zap_crypto::{Keypair, node_id_from_public_key};
-use sha2::{Digest, Sha256};
 
 use crate::{DomainPackStatus, ZapStoreError};
 
@@ -162,7 +162,8 @@ impl DomainPackBundleSignature {
                     matched = true;
                     break;
                 }
-                if let (Some(sig_bytes), Ok(trust_bytes)) = (signer_key_bytes, parse_public_key_str(&cleaned))
+                if let (Some(sig_bytes), Ok(trust_bytes)) =
+                    (signer_key_bytes, parse_public_key_str(&cleaned))
                     && sig_bytes == trust_bytes
                 {
                     matched = true;
@@ -266,14 +267,19 @@ impl DomainPackBundle {
             files: &mut BTreeMap<String, Vec<u8>>,
             artifacts: &mut Vec<DomainPackArtifactDigest>,
         ) -> Result<(), ZapStoreError> {
-            let entries = fs::read_dir(current_dir)
-                .map_err(|e| ZapStoreError::IoError(e.to_string()))?;
+            let entries =
+                fs::read_dir(current_dir).map_err(|e| ZapStoreError::IoError(e.to_string()))?;
             for entry in entries {
                 let entry = entry.map_err(|e| ZapStoreError::IoError(e.to_string()))?;
                 let path = entry.path();
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
 
-                if file_name.starts_with('.') || file_name == "target" || file_name == "node_modules" || file_name.ends_with(".zpack") || file_name.ends_with(".sig") {
+                if file_name.starts_with('.')
+                    || file_name == "target"
+                    || file_name == "node_modules"
+                    || file_name.ends_with(".zpack")
+                    || file_name.ends_with(".sig")
+                {
                     continue;
                 }
 
@@ -282,12 +288,14 @@ impl DomainPackBundle {
                 } else if path.is_file() {
                     let rel_path = path
                         .strip_prefix(base_dir)
-                        .map_err(|_| ZapStoreError::InvalidDomainPackArtifactPath(path.display().to_string()))?
+                        .map_err(|_| {
+                            ZapStoreError::InvalidDomainPackArtifactPath(path.display().to_string())
+                        })?
                         .to_string_lossy()
                         .replace('\\', "/");
 
-                    let content = fs::read(&path)
-                        .map_err(|e| ZapStoreError::IoError(e.to_string()))?;
+                    let content =
+                        fs::read(&path).map_err(|e| ZapStoreError::IoError(e.to_string()))?;
                     let sha256_hex = compute_sha256_hex(&content);
                     let size_bytes = content.len() as u64;
 
@@ -301,7 +309,8 @@ impl DomainPackBundle {
                         "text/markdown"
                     } else {
                         "application/octet-stream"
-                    }.to_string();
+                    }
+                    .to_string();
 
                     artifacts.push(DomainPackArtifactDigest {
                         relative_path: rel_path.clone(),
@@ -382,13 +391,18 @@ impl DomainPackBundle {
         let mut offset = 8;
 
         if offset + 4 > bytes.len() {
-            return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated bundle header".to_string()));
+            return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                "truncated bundle header".to_string(),
+            ));
         }
-        let manifest_len = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        let manifest_len =
+            u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
 
         if offset + manifest_len > bytes.len() {
-            return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated manifest payload".to_string()));
+            return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                "truncated manifest payload".to_string(),
+            ));
         }
         let manifest_bytes = &bytes[offset..offset + manifest_len];
         offset += manifest_len;
@@ -397,22 +411,30 @@ impl DomainPackBundle {
             .map_err(|e| ZapStoreError::InvalidDomainPackBundleFormat(e.to_string()))?;
 
         if offset + 4 > bytes.len() {
-            return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated files header".to_string()));
+            return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                "truncated files header".to_string(),
+            ));
         }
-        let files_count = u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+        let files_count =
+            u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
         offset += 4;
 
         let mut files = BTreeMap::new();
 
         for _ in 0..files_count {
             if offset + 2 > bytes.len() {
-                return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated file path len".to_string()));
+                return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                    "truncated file path len".to_string(),
+                ));
             }
-            let path_len = u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap()) as usize;
+            let path_len =
+                u16::from_be_bytes(bytes[offset..offset + 2].try_into().unwrap()) as usize;
             offset += 2;
 
             if offset + path_len > bytes.len() {
-                return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated file path".to_string()));
+                return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                    "truncated file path".to_string(),
+                ));
             }
             let rel_path = String::from_utf8(bytes[offset..offset + path_len].to_vec())
                 .map_err(|e| ZapStoreError::InvalidDomainPackBundleFormat(e.to_string()))?;
@@ -421,7 +443,9 @@ impl DomainPackBundle {
             let rel_path_buf = PathBuf::from(&rel_path);
             for component in rel_path_buf.components() {
                 match component {
-                    std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                    std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_) => {
                         return Err(ZapStoreError::InvalidDomainPackArtifactPath(format!(
                             "path traversal in bundle file path: {}",
                             rel_path
@@ -432,13 +456,18 @@ impl DomainPackBundle {
             }
 
             if offset + 8 > bytes.len() {
-                return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated file content len".to_string()));
+                return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                    "truncated file content len".to_string(),
+                ));
             }
-            let content_len = u64::from_be_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
+            let content_len =
+                u64::from_be_bytes(bytes[offset..offset + 8].try_into().unwrap()) as usize;
             offset += 8;
 
             if offset + content_len > bytes.len() {
-                return Err(ZapStoreError::InvalidDomainPackBundleFormat("truncated file content".to_string()));
+                return Err(ZapStoreError::InvalidDomainPackBundleFormat(
+                    "truncated file content".to_string(),
+                ));
             }
             let content = bytes[offset..offset + content_len].to_vec();
             offset += content_len;
@@ -461,18 +490,27 @@ impl DomainPackBundle {
     }
 
     pub fn open_from_file(bundle_path: &Path) -> Result<Self, ZapStoreError> {
-        let bytes = fs::read(bundle_path)
-            .map_err(|e| ZapStoreError::IoError(format!("failed to read bundle file {}: {}", bundle_path.display(), e)))?;
+        let bytes = fs::read(bundle_path).map_err(|e| {
+            ZapStoreError::IoError(format!(
+                "failed to read bundle file {}: {}",
+                bundle_path.display(),
+                e
+            ))
+        })?;
         Self::decode_bytes(&bytes)
     }
 
     pub fn write_to_file(&self, output_path: &Path) -> Result<(), ZapStoreError> {
         if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| ZapStoreError::IoError(e.to_string()))?;
+            fs::create_dir_all(parent).map_err(|e| ZapStoreError::IoError(e.to_string()))?;
         }
-        fs::write(output_path, &self.raw_bytes)
-            .map_err(|e| ZapStoreError::IoError(format!("failed to write bundle file {}: {}", output_path.display(), e)))
+        fs::write(output_path, &self.raw_bytes).map_err(|e| {
+            ZapStoreError::IoError(format!(
+                "failed to write bundle file {}: {}",
+                output_path.display(),
+                e
+            ))
+        })
     }
 
     pub fn verify_integrity(&self) -> Result<(), ZapStoreError> {
@@ -535,8 +573,7 @@ impl DomainPackBundle {
 
             let out_path = target_dir.join(&rel_path_buf);
             if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent)
-                    .map_err(|e| ZapStoreError::IoError(e.to_string()))?;
+                fs::create_dir_all(parent).map_err(|e| ZapStoreError::IoError(e.to_string()))?;
             }
 
             let canonical_parent = out_path
@@ -552,8 +589,13 @@ impl DomainPackBundle {
                 )));
             }
 
-            fs::write(&out_path, content)
-                .map_err(|e| ZapStoreError::IoError(format!("failed to write extracted file {}: {}", out_path.display(), e)))?;
+            fs::write(&out_path, content).map_err(|e| {
+                ZapStoreError::IoError(format!(
+                    "failed to write extracted file {}: {}",
+                    out_path.display(),
+                    e
+                ))
+            })?;
         }
 
         Ok(())

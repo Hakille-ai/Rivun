@@ -308,22 +308,22 @@ impl MemoryMapper {
     }
 
     /// Safely translates a guest pointer into an immutable byte slice.
-    pub fn translate_slice<'a>(
-        memory: &'a [u8],
+    pub fn translate_slice(
+        memory: &[u8],
         guest_ptr: u32,
         len: usize,
-    ) -> Result<&'a [u8], BufferError> {
+    ) -> Result<&[u8], BufferError> {
         Self::validate_range(guest_ptr, len, memory.len())?;
         let start = guest_ptr as usize;
         Ok(&memory[start..start + len])
     }
 
     /// Safely translates a guest pointer into a mutable byte slice.
-    pub fn translate_slice_mut<'a>(
-        memory: &'a mut [u8],
+    pub fn translate_slice_mut(
+        memory: &mut [u8],
         guest_ptr: u32,
         len: usize,
-    ) -> Result<&'a mut [u8], BufferError> {
+    ) -> Result<&mut [u8], BufferError> {
         Self::validate_range(guest_ptr, len, memory.len())?;
         let start = guest_ptr as usize;
         Ok(&mut memory[start..start + len])

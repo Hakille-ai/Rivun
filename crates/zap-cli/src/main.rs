@@ -44,6 +44,7 @@ use zap_envelope::{
     DEFAULT_CONTENT_TYPE as DEFAULT_ENVELOPE_CONTENT_TYPE, ZapEnvelope, ZapEnvelopeRef,
     ZapMessageKind,
 };
+use zap_gateway::{AgentGatewayServer, GatewayConfig, ProvenanceChainDigest};
 use zap_ledger::{
     DEFAULT_RECEIPT_REPLICATION_LIMIT, RECEIPT_REPLICATION_CONTENT_TYPE,
     RECEIPT_REPLICATION_REQUEST_SUBJECT, RECEIPT_REPLICATION_RESPONSE_SUBJECT,
@@ -76,7 +77,6 @@ use zap_store::{
     RegistryBundleManifestResponse, RegistryIndexRequest, RegistryIndexResponse,
     RegistryInstallPlan, RegistryInstallPlanRequest, RegistryPublication, artifact_hash,
 };
-use zap_gateway::{AgentGatewayServer, GatewayConfig, ProvenanceChainDigest};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -1210,11 +1210,17 @@ enum PackCommand {
     Install {
         #[arg(long, help = "Path to .zpack archive bundle file")]
         bundle: PathBuf,
-        #[arg(long, help = "Path to detached signature file (optional if alongside bundle)")]
+        #[arg(
+            long,
+            help = "Path to detached signature file (optional if alongside bundle)"
+        )]
         signature: Option<PathBuf>,
         #[arg(long, help = "Target pack store installation directory")]
         store_dir: PathBuf,
-        #[arg(long, help = "Trusted publisher public key(s) for offline signature check")]
+        #[arg(
+            long,
+            help = "Trusted publisher public key(s) for offline signature check"
+        )]
         trusted_key: Vec<String>,
         #[arg(long, help = "Force overwrite if version is already installed")]
         force: bool,
@@ -1225,7 +1231,10 @@ enum PackCommand {
     Audit {
         #[arg(long, help = "Path to domain pack directory or .zpack bundle")]
         pack: PathBuf,
-        #[arg(long, help = "Maximum acceptable risk level (low, medium, high, critical)")]
+        #[arg(
+            long,
+            help = "Maximum acceptable risk level (low, medium, high, critical)"
+        )]
         max_risk: Option<String>,
         #[arg(long)]
         json: bool,
@@ -3543,16 +3552,16 @@ async fn gateway_start(opts: GatewayStartOptions<'_>) -> Result<()> {
         let key_arc = Arc::new(key);
         let node = Arc::new(ZapNode::from_config(node_config.clone()).await?);
         let policy = Arc::new(PolicySet::default());
-        let journal = node_config.receipts.dir.as_ref().map(|d| {
-            Arc::new(std::sync::Mutex::new(
-                ReceiptJournalStore::open(d),
-            ))
-        });
-        let memory = node_config.memory.dir.as_ref().map(|d| {
-            Arc::new(std::sync::Mutex::new(
-                MemoryJournalStore::open(d),
-            ))
-        });
+        let journal = node_config
+            .receipts
+            .dir
+            .as_ref()
+            .map(|d| Arc::new(std::sync::Mutex::new(ReceiptJournalStore::open(d))));
+        let memory = node_config
+            .memory
+            .dir
+            .as_ref()
+            .map(|d| Arc::new(std::sync::Mutex::new(MemoryJournalStore::open(d))));
         (Some(node), Some(key_arc), Some(policy), journal, memory)
     } else {
         let keypair = if Path::new(".zap/node.key").exists() {
@@ -3562,34 +3571,22 @@ async fn gateway_start(opts: GatewayStartOptions<'_>) -> Result<()> {
         } else {
             Some(Arc::new(Keypair::generate()))
         };
-        let journal = opts.journal_dir.map(|d| {
-            Arc::new(std::sync::Mutex::new(
-                ReceiptJournalStore::open(d),
-            ))
-        });
-        let memory = opts.memory_dir.map(|d| {
-            Arc::new(std::sync::Mutex::new(
-                MemoryJournalStore::open(d),
-            ))
-        });
+        let journal = opts
+            .journal_dir
+            .map(|d| Arc::new(std::sync::Mutex::new(ReceiptJournalStore::open(d))));
+        let memory = opts
+            .memory_dir
+            .map(|d| Arc::new(std::sync::Mutex::new(MemoryJournalStore::open(d))));
         (None, keypair, None, journal, memory)
     };
 
-    let mut gw_config =
-        GatewayConfig::new(opts.http_bind).with_max_frame_size(opts.max_frame_size);
+    let mut gw_config = GatewayConfig::new(opts.http_bind).with_max_frame_size(opts.max_frame_size);
     if let Some(token) = opts.auth_token {
         gw_config = gw_config.with_auth_token(token);
     }
     gw_config.enable_mcp_stdio = opts.mcp_stdio;
 
-    let server = AgentGatewayServer::new(
-        gw_config,
-        node,
-        keypair,
-        policy_set,
-        journal,
-        memory,
-    );
+    let server = AgentGatewayServer::new(gw_config, node, keypair, policy_set, journal, memory);
 
     server.run().await?;
     Ok(())
@@ -3608,9 +3605,9 @@ async fn gateway_status(addr: &str, json: bool) -> Result<()> {
         .trim_start_matches("https://");
     let host_port = authority.split('/').next().unwrap_or(authority);
 
-    let socket_addr: SocketAddr = host_port
-        .parse()
-        .context("Failed to parse gateway status target address as SocketAddr (expected host:port)")?;
+    let socket_addr: SocketAddr = host_port.parse().context(
+        "Failed to parse gateway status target address as SocketAddr (expected host:port)",
+    )?;
 
     let mut stream = tokio::net::TcpStream::connect(socket_addr)
         .await
@@ -3678,16 +3675,26 @@ fn provenance_verify(
     public_key_hex: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let chain_content = fs::read_to_string(chain_path)
-        .with_context(|| format!("failed to read provenance chain file {}", chain_path.display()))?;
-    let chain: ProvenanceChainDigest = serde_json::from_str(&chain_content)
-        .with_context(|| format!("failed to parse provenance chain JSON from {}", chain_path.display()))?;
+    let chain_content = fs::read_to_string(chain_path).with_context(|| {
+        format!(
+            "failed to read provenance chain file {}",
+            chain_path.display()
+        )
+    })?;
+    let chain: ProvenanceChainDigest = serde_json::from_str(&chain_content).with_context(|| {
+        format!(
+            "failed to parse provenance chain JSON from {}",
+            chain_path.display()
+        )
+    })?;
 
     let public_key = if let Some(hex_str) = public_key_hex {
-        let bytes = hex::decode(hex_str)
-            .context("invalid hex encoding for public-key")?;
+        let bytes = hex::decode(hex_str).context("invalid hex encoding for public-key")?;
         if bytes.len() != 32 {
-            bail!("public key must be 32 bytes (64 hex characters), got {} bytes", bytes.len());
+            bail!(
+                "public key must be 32 bytes (64 hex characters), got {} bytes",
+                bytes.len()
+            );
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
@@ -3849,7 +3856,8 @@ fn fleet_doctor(
 ) -> Result<()> {
     let (node_id, receipts_dir, memory_dir) = if config_path.exists() {
         if let Ok(config) = zap_node::ZapNodeConfig::from_path(config_path) {
-            let key = load_keypair(&config.key_file).unwrap_or_else(|_| zap_crypto::Keypair::generate());
+            let key =
+                load_keypair(&config.key_file).unwrap_or_else(|_| zap_crypto::Keypair::generate());
             (
                 key.node_id(),
                 config.receipts.dir.clone(),
@@ -3988,11 +3996,8 @@ fn incident_snapshot(options: IncidentSnapshotOptions<'_>) -> Result<()> {
     };
 
     let metrics_text = "# HELP zap_replay_rejections_total Total replay rejections\n# TYPE zap_replay_rejections_total counter\nzap_replay_rejections_total 0\n";
-    let live_snapshot = zap_telemetry::IncidentCapturer::capture(
-        node_id,
-        metrics_text,
-        Some(options.config_path),
-    );
+    let live_snapshot =
+        zap_telemetry::IncidentCapturer::capture(node_id, metrics_text, Some(options.config_path));
 
     let is_gz = options.format == "tar.gz"
         || options.format == "tgz"
@@ -7910,7 +7915,11 @@ fn pack(command: PackCommand) -> Result<()> {
             force,
             json,
         } => pack_install(&bundle, signature, &store_dir, trusted_key, force, json),
-        PackCommand::Audit { pack, max_risk, json } => pack_audit(&pack, max_risk, json),
+        PackCommand::Audit {
+            pack,
+            max_risk,
+            json,
+        } => pack_audit(&pack, max_risk, json),
         PackCommand::Validate { pack, json } => pack_validate(&pack, json),
         PackCommand::Inspect { pack, json } => pack_inspect(&pack, json),
         PackCommand::List { root, json } => pack_list(&root, json),
@@ -8048,7 +8057,10 @@ action = "cap.example.read"
 fn pack_build(pack_dir: &Path, out: Option<PathBuf>, json: bool) -> Result<()> {
     let bundle = zap_store::DomainPackBundle::build_from_dir(pack_dir)?;
     let out_path = out.unwrap_or_else(|| {
-        let file_name = format!("{}-{}.zpack", bundle.manifest.pack_id, bundle.manifest.version);
+        let file_name = format!(
+            "{}-{}.zpack",
+            bundle.manifest.pack_id, bundle.manifest.version
+        );
         pack_dir.parent().unwrap_or(pack_dir).join(file_name)
     });
 
@@ -8068,7 +8080,11 @@ fn pack_build(pack_dir: &Path, out: Option<PathBuf>, json: bool) -> Result<()> {
     } else {
         println!(
             "Built bundle {} version {} at {} (size: {} bytes, artifacts: {})",
-            report.pack_id, report.version, report.bundle_path, report.size_bytes, report.artifact_count
+            report.pack_id,
+            report.version,
+            report.bundle_path,
+            report.size_bytes,
+            report.artifact_count
         );
     }
     Ok(())
@@ -8176,20 +8192,26 @@ fn pack_verify(
 
     if sig_path.exists() {
         match fs::read_to_string(&sig_path) {
-            Ok(sig_json) => match serde_json::from_str::<zap_store::DomainPackBundleSignature>(&sig_json) {
-                Ok(sig) => {
-                    let trusted_keys = public_key.into_iter().collect::<Vec<_>>();
-                    match sig.verify_against_trusted_keys(&bundle.bundle_sha256, &trusted_keys) {
-                        Ok(()) => signature_ok = true,
-                        Err(e) => errors.push(format!("signature verification failed: {e}")),
+            Ok(sig_json) => {
+                match serde_json::from_str::<zap_store::DomainPackBundleSignature>(&sig_json) {
+                    Ok(sig) => {
+                        let trusted_keys = public_key.into_iter().collect::<Vec<_>>();
+                        match sig.verify_against_trusted_keys(&bundle.bundle_sha256, &trusted_keys)
+                        {
+                            Ok(()) => signature_ok = true,
+                            Err(e) => errors.push(format!("signature verification failed: {e}")),
+                        }
                     }
+                    Err(e) => errors.push(format!("failed to parse signature JSON: {e}")),
                 }
-                Err(e) => errors.push(format!("failed to parse signature JSON: {e}")),
-            },
+            }
             Err(e) => errors.push(format!("failed to read signature file: {e}")),
         }
     } else if has_explicit_sig {
-        errors.push(format!("signature file not found at {}", sig_path.display()));
+        errors.push(format!(
+            "signature file not found at {}",
+            sig_path.display()
+        ));
     }
 
     if !no_policy_check {
@@ -8261,17 +8283,22 @@ fn pack_install(
         && let Some(deps_arr) = pack_toml.get("dependencies").and_then(|v| v.as_array())
     {
         for dep in deps_arr {
-            let pack_id = dep.get("pack_id")
+            let pack_id = dep
+                .get("pack_id")
                 .or_else(|| dep.get("id"))
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let version_req = dep.get("version_req")
+            let version_req = dep
+                .get("version_req")
                 .or_else(|| dep.get("version"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("*")
                 .to_string();
-            let optional = dep.get("optional").and_then(|v| v.as_bool()).unwrap_or(false);
+            let optional = dep
+                .get("optional")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             if !pack_id.is_empty() {
                 declared_deps.push(zap_store::DomainPackDependencySpec {
                     pack_id,
@@ -8285,8 +8312,8 @@ fn pack_install(
     let registry_file = store_dir.join("registry.json");
     let mut registry = if registry_file.exists() {
         let json_str = fs::read_to_string(&registry_file)?;
-        serde_json::from_str::<zap_store::DomainPackRegistry>(&json_str)
-            .unwrap_or_else(|_| zap_store::DomainPackRegistry {
+        serde_json::from_str::<zap_store::DomainPackRegistry>(&json_str).unwrap_or_else(|_| {
+            zap_store::DomainPackRegistry {
                 schema_version: 1,
                 generated_by: None,
                 channel: None,
@@ -8294,7 +8321,8 @@ fn pack_install(
                 operator_public_key: None,
                 signature: None,
                 entries: Vec::new(),
-            })
+            }
+        })
     } else {
         zap_store::DomainPackRegistry {
             schema_version: 1,
@@ -8308,8 +8336,13 @@ fn pack_install(
     };
 
     let resolver = zap_store::DomainPackDependencyResolver::new(&registry);
-    let plan = resolver.resolve(&bundle.manifest.pack_id, &bundle.manifest.version, &declared_deps)?;
-    let installed_dependencies: Vec<String> = plan.install_order.iter().map(|e| e.id.clone()).collect();
+    let plan = resolver.resolve(
+        &bundle.manifest.pack_id,
+        &bundle.manifest.version,
+        &declared_deps,
+    )?;
+    let installed_dependencies: Vec<String> =
+        plan.install_order.iter().map(|e| e.id.clone()).collect();
 
     let install_target_dir = store_dir
         .join("packs")
@@ -8364,7 +8397,9 @@ fn pack_install(
         labels: Vec::new(),
     };
 
-    registry.entries.retain(|e| !(e.id == entry.id && e.version == entry.version));
+    registry
+        .entries
+        .retain(|e| !(e.id == entry.id && e.version == entry.version));
     registry.entries.push(entry);
 
     fs::create_dir_all(store_dir)?;
@@ -8417,7 +8452,10 @@ fn pack_audit(pack_path: &Path, max_risk: Option<String>, json: bool) -> Result<
             report.pack_id, report.version, report.overall_risk, report.passed
         );
         for issue in &report.issues {
-            println!("  [{:?}] {}: {}", issue.severity, issue.category, issue.message);
+            println!(
+                "  [{:?}] {}: {}",
+                issue.severity, issue.category, issue.message
+            );
         }
     }
 
@@ -11817,7 +11855,9 @@ async fn cluster(command: ClusterCommand) -> Result<()> {
             if nodes == 0 {
                 bail!("node count must be greater than zero");
             }
-            println!("==> Spawning in-memory ZAP cluster topology (nodes={nodes}, base_port={base_port})...");
+            println!(
+                "==> Spawning in-memory ZAP cluster topology (nodes={nodes}, base_port={base_port})..."
+            );
             let mut mesh_nodes = Vec::new();
             for i in 0..nodes {
                 let node_id = Uuid::new_v4();
@@ -11831,11 +11871,10 @@ async fn cluster(command: ClusterCommand) -> Result<()> {
                 .map(|(id, ep)| zap_net::GossipMesh::new(*id, ep))
                 .collect();
 
-            for i in 0..nodes {
-                for j in 0..nodes {
+            for (i, mesh) in meshes.iter_mut().enumerate() {
+                for (j, (peer_id, peer_ep)) in mesh_nodes.iter().enumerate() {
                     if i != j {
-                        let (peer_id, peer_ep) = &mesh_nodes[j];
-                        meshes[i].register_peer(
+                        mesh.register_peer(
                             *peer_id,
                             peer_ep,
                             vec!["compute".into(), "consensus".into()],
@@ -11846,12 +11885,12 @@ async fn cluster(command: ClusterCommand) -> Result<()> {
             }
 
             // Simulate heartbeats & vector clock sync
-            for i in 0..nodes {
-                let clk = meshes[i].vector_clock.clone();
-                let src_id = meshes[i].self_node_id;
-                for j in 0..nodes {
+            let clocks: Vec<_> = meshes.iter().map(|m| m.vector_clock.clone()).collect();
+            let node_ids: Vec<_> = meshes.iter().map(|m| m.self_node_id).collect();
+            for (i, (id, clk)) in node_ids.iter().zip(&clocks).enumerate() {
+                for (j, mesh) in meshes.iter_mut().enumerate() {
                     if i != j {
-                        meshes[j].record_heartbeat(src_id, &clk, 5, 2000);
+                        mesh.record_heartbeat(*id, clk, 5, 2000);
                     }
                 }
             }
@@ -11877,9 +11916,14 @@ async fn cluster(command: ClusterCommand) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("[+] Cluster online: {nodes} active nodes communicating over P2P gossip mesh");
+                println!(
+                    "[+] Cluster online: {nodes} active nodes communicating over P2P gossip mesh"
+                );
                 for (id, ep) in &mesh_nodes {
-                    println!("    - Node {id} @ {ep} [PEERS: {}] [STATUS: HEALTHY]", nodes - 1);
+                    println!(
+                        "    - Node {id} @ {ep} [PEERS: {}] [STATUS: HEALTHY]",
+                        nodes - 1
+                    );
                 }
             }
             Ok(())
@@ -11894,7 +11938,10 @@ async fn cluster(command: ClusterCommand) -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("[+] Simulated cluster status: {nodes} nodes, quorum threshold = {}, status = SYNCED", (nodes * 2 / 3) + 1);
+                println!(
+                    "[+] Simulated cluster status: {nodes} nodes, quorum threshold = {}, status = SYNCED",
+                    (nodes * 2 / 3) + 1
+                );
             }
             Ok(())
         }
@@ -11920,7 +11967,12 @@ async fn swarm(command: SwarmCommand) -> Result<()> {
             let mut peer_ids = Vec::new();
             for i in 1..nodes {
                 let id = Uuid::new_v4();
-                mesh.register_peer(id, format!("127.0.0.1:{}", 9000 + i), vec!["consensus".into()], 1000);
+                mesh.register_peer(
+                    id,
+                    format!("127.0.0.1:{}", 9000 + i),
+                    vec!["consensus".into()],
+                    1000,
+                );
                 peer_ids.push(id);
             }
 
@@ -11951,8 +12003,16 @@ async fn swarm(command: SwarmCommand) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!("[+] Swarm consensus benchmark completed:");
-                println!("    Nodes: {nodes} | Total Ops: {total_ops} | Elapsed: {:.3}s", elapsed.as_secs_f64());
-                println!("    Throughput: {:.2} ops/sec (Quorum = {}/{})", ops_per_sec, (nodes * 2 / 3) + 1, nodes);
+                println!(
+                    "    Nodes: {nodes} | Total Ops: {total_ops} | Elapsed: {:.3}s",
+                    elapsed.as_secs_f64()
+                );
+                println!(
+                    "    Throughput: {:.2} ops/sec (Quorum = {}/{})",
+                    ops_per_sec,
+                    (nodes * 2 / 3) + 1,
+                    nodes
+                );
             }
             Ok(())
         }
@@ -11990,7 +12050,10 @@ async fn swarm(command: SwarmCommand) -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
                 println!("[+] Swarm Partition Chaos Test:");
-                println!("    Nodes: {nodes} | Partition Fraction: {:.0}%", partition_fraction * 100.0);
+                println!(
+                    "    Nodes: {nodes} | Partition Fraction: {:.0}%",
+                    partition_fraction * 100.0
+                );
                 println!("    Partition Fault Detection Triggered: {partition_detected}");
             }
             Ok(())

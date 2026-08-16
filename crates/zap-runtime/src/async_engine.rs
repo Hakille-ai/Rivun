@@ -2,10 +2,8 @@
 //! deterministic fuel tracking, streaming host bindings, and compiled async module caching.
 
 use crate::{
-    expect_func, expect_memory,
-    ipc::IpcRouter,
-    streaming::StreamingBufferPool,
-    DriverPermissions, ExecutionLimits, HostCallKind, HostCallRecord, ZapRuntimeError, Result,
+    DriverPermissions, ExecutionLimits, HostCallKind, HostCallRecord, Result, ZapRuntimeError,
+    expect_func, expect_memory, ipc::IpcRouter, streaming::StreamingBufferPool,
 };
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,8 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 use wasmtime::{
-    Caller, Config, Engine, Linker, Module, Store, StoreLimits,
-    StoreLimitsBuilder, ValType,
+    Caller, Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, ValType,
 };
 use zap_capability::DEFAULT_MAX_HOST_CALL_BYTES;
 
@@ -132,10 +129,10 @@ impl AsyncWasmModuleCache {
         if self.modules.contains_key(&driver.digest) {
             return;
         }
-        if self.modules.len() >= self.capacity {
-            if let Some(oldest) = self.order.pop_front() {
-                self.modules.remove(&oldest);
-            }
+        if self.modules.len() >= self.capacity
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.modules.remove(&oldest);
         }
         self.order.push_back(driver.digest.clone());
         self.modules.insert(driver.digest.clone(), driver);
@@ -195,16 +192,16 @@ impl AsyncWasmExecutor {
     pub fn compile_and_validate(&self, wasm_bytes: &[u8]) -> Result<AsyncCompiledDriver> {
         let module = Module::new(&self.engine, wasm_bytes)?;
         let digest = blake3::hash(wasm_bytes).to_hex().to_string();
-        let driver = AsyncCompiledDriver {
-            module,
-            digest,
-        };
+        let driver = AsyncCompiledDriver { module, digest };
         driver.validate_abi()?;
         Ok(driver)
     }
 
     /// Compile and validate with module caching.
-    pub async fn compile_and_validate_cached(&self, wasm_bytes: &[u8]) -> Result<AsyncCompiledDriver> {
+    pub async fn compile_and_validate_cached(
+        &self,
+        wasm_bytes: &[u8],
+    ) -> Result<AsyncCompiledDriver> {
         let digest = blake3::hash(wasm_bytes).to_hex().to_string();
         {
             let cache = self.module_cache.read().await;
@@ -229,8 +226,14 @@ impl AsyncWasmExecutor {
         payload: &[u8],
         limits: ExecutionLimits,
     ) -> Result<AsyncWasmExecutionResult> {
-        let action_len: i32 = action.len().try_into().map_err(|_| ZapRuntimeError::InputTooLarge(action.len()))?;
-        let payload_len: i32 = payload.len().try_into().map_err(|_| ZapRuntimeError::InputTooLarge(payload.len()))?;
+        let action_len: i32 = action
+            .len()
+            .try_into()
+            .map_err(|_| ZapRuntimeError::InputTooLarge(action.len()))?;
+        let payload_len: i32 = payload
+            .len()
+            .try_into()
+            .map_err(|_| ZapRuntimeError::InputTooLarge(payload.len()))?;
 
         let timeout_ms = limits.timeout_ms;
 
@@ -238,7 +241,9 @@ impl AsyncWasmExecutor {
 
         match tokio::time::timeout(Duration::from_millis(timeout_ms), fut).await {
             Ok(res) => res,
-            Err(_) => Err(ZapRuntimeError::Timeout { limit_ms: timeout_ms }),
+            Err(_) => Err(ZapRuntimeError::Timeout {
+                limit_ms: timeout_ms,
+            }),
         }
     }
 
@@ -284,20 +289,26 @@ impl AsyncWasmExecutor {
 
         let alloc_fn = instance.get_typed_func::<i32, i32>(&mut store, ALLOC_EXPORT)?;
         let dealloc_fn = instance.get_typed_func::<(i32, i32), ()>(&mut store, DEALLOC_EXPORT)?;
-        let execute_fn = instance.get_typed_func::<(i32, i32, i32, i32), i64>(&mut store, EXECUTE_EXPORT)?;
+        let execute_fn =
+            instance.get_typed_func::<(i32, i32, i32, i32), i64>(&mut store, EXECUTE_EXPORT)?;
 
         let action_ptr = alloc_fn.call_async(&mut store, action_len).await?;
         let payload_ptr = alloc_fn.call_async(&mut store, payload_len).await?;
 
         // Write action & payload into WASM memory
-        memory.write(&mut store, action_ptr as usize, action.as_bytes())
+        memory
+            .write(&mut store, action_ptr as usize, action.as_bytes())
             .map_err(|e| ZapRuntimeError::MemoryAccess(e.to_string()))?;
-        memory.write(&mut store, payload_ptr as usize, payload)
+        memory
+            .write(&mut store, payload_ptr as usize, payload)
             .map_err(|e| ZapRuntimeError::MemoryAccess(e.to_string()))?;
 
         // Call execute
         let packed_res = execute_fn
-            .call_async(&mut store, (action_ptr, action_len, payload_ptr, payload_len))
+            .call_async(
+                &mut store,
+                (action_ptr, action_len, payload_ptr, payload_len),
+            )
             .await?;
 
         let result_ptr = (packed_res as u64 >> 32) as u32;
@@ -318,10 +329,16 @@ impl AsyncWasmExecutor {
         }
 
         // Clean up allocations
-        let _ = dealloc_fn.call_async(&mut store, (action_ptr, action_len)).await;
-        let _ = dealloc_fn.call_async(&mut store, (payload_ptr, payload_len)).await;
+        let _ = dealloc_fn
+            .call_async(&mut store, (action_ptr, action_len))
+            .await;
+        let _ = dealloc_fn
+            .call_async(&mut store, (payload_ptr, payload_len))
+            .await;
         if result_len > 0 {
-            let _ = dealloc_fn.call_async(&mut store, (result_ptr as i32, result_len as i32)).await;
+            let _ = dealloc_fn
+                .call_async(&mut store, (result_ptr as i32, result_len as i32))
+                .await;
         }
 
         let remaining_fuel = store.get_fuel().unwrap_or(0);
@@ -396,7 +413,13 @@ impl AsyncWasmExecutor {
         linker.func_wrap(
             HOST_MODULE,
             HOST_DEVICE_CALL,
-            |caller: Caller<'_, AsyncStoreState>, _port: i32, _cmd_ptr: i32, _cmd_len: i32, _out_ptr: i32, _max_out_len: i32| -> i32 {
+            |caller: Caller<'_, AsyncStoreState>,
+             _port: i32,
+             _cmd_ptr: i32,
+             _cmd_len: i32,
+             _out_ptr: i32,
+             _max_out_len: i32|
+             -> i32 {
                 if !caller.data().permissions.device_call {
                     return HOST_DENIED;
                 }
@@ -408,7 +431,8 @@ impl AsyncWasmExecutor {
         linker.func_wrap_async(
             HOST_MODULE,
             HOST_ASYNC_STREAM_READ,
-            |mut caller: Caller<'_, AsyncStoreState>, (stream_id, ptr, max_len): (i32, i32, i32)| {
+            |mut caller: Caller<'_, AsyncStoreState>,
+             (stream_id, ptr, max_len): (i32, i32, i32)| {
                 Box::new(async move {
                     if stream_id < 0 || ptr < 0 || max_len < 0 {
                         return Ok(HOST_BAD_POINTER);
@@ -421,7 +445,9 @@ impl AsyncWasmExecutor {
 
                     match stream_res {
                         Ok(data) => {
-                            let Some(wasmtime::Extern::Memory(mem)) = caller.get_export(MEMORY_EXPORT) else {
+                            let Some(wasmtime::Extern::Memory(mem)) =
+                                caller.get_export(MEMORY_EXPORT)
+                            else {
                                 return Ok(HOST_MEMORY_ERROR);
                             };
                             if mem.write(&mut caller, ptr as usize, &data).is_err() {
@@ -445,7 +471,8 @@ impl AsyncWasmExecutor {
                         return Ok(HOST_BAD_POINTER);
                     }
                     let ulen = len as usize;
-                    let Some(wasmtime::Extern::Memory(mem)) = caller.get_export(MEMORY_EXPORT) else {
+                    let Some(wasmtime::Extern::Memory(mem)) = caller.get_export(MEMORY_EXPORT)
+                    else {
                         return Ok(HOST_MEMORY_ERROR);
                     };
                     let mut buf = vec![0u8; ulen];
@@ -552,13 +579,20 @@ mod tests {
         let driver = executor.compile_and_validate_cached(&wasm).await.unwrap();
 
         // Register stream 1 (input) and stream 2 (output) in the executor's stream pool
-        let ring_in = Arc::new(SpscRingBuffer::new(64, StreamBackpressurePolicy::DropOldest));
+        let ring_in = Arc::new(SpscRingBuffer::new(
+            64,
+            StreamBackpressurePolicy::DropOldest,
+        ));
         ring_in.write(b"sensor_telemetry_stream_chunk_42").unwrap();
 
-        let ring_out = Arc::new(SpscRingBuffer::new(64, StreamBackpressurePolicy::DropOldest));
+        let ring_out = Arc::new(SpscRingBuffer::new(
+            64,
+            StreamBackpressurePolicy::DropOldest,
+        ));
 
         {
-            let mut pool = executor.stream_pool().write().await;
+            let stream_pool = executor.stream_pool();
+            let mut pool = stream_pool.write().await;
             pool.register_stream(1, StreamTransport::SharedRingBuffer(ring_in));
             pool.register_stream(2, StreamTransport::SharedRingBuffer(ring_out.clone()));
         }
@@ -596,11 +630,13 @@ mod tests {
             ..ExecutionLimits::default()
         };
 
-        let err = executor.execute_async(&driver, "hang", b"", limits).await.unwrap_err();
+        let err = executor
+            .execute_async(&driver, "hang", b"", limits)
+            .await
+            .unwrap_err();
         assert!(matches!(
             err,
             ZapRuntimeError::Timeout { .. } | ZapRuntimeError::Wasmtime(_)
         ));
     }
-}
 }

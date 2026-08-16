@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -20,7 +20,11 @@ pub struct DurableReplayStore {
 }
 
 impl DurableReplayStore {
-    pub fn open(path: impl AsRef<Path>, capacity: usize, max_clock_skew_micros: u64) -> Result<Self> {
+    pub fn open(
+        path: impl AsRef<Path>,
+        capacity: usize,
+        max_clock_skew_micros: u64,
+    ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -110,8 +114,10 @@ impl DurableReplayStore {
             file.sync_data()?;
         }
 
-        self.seen.insert(fingerprint, (ts, frame.header.source_node));
-        self.order.push_back((fingerprint, frame.header.source_node, ts));
+        self.seen
+            .insert(fingerprint, (ts, frame.header.source_node));
+        self.order
+            .push_back((fingerprint, frame.header.source_node, ts));
 
         while self.order.len() > self.capacity {
             if let Some((expired, _, _)) = self.order.pop_front() {
@@ -144,7 +150,12 @@ impl DurableReplayStore {
             tmp_file.sync_all()?;
         }
         std::fs::rename(&tmp_path, &self.path)?;
-        self.file = Some(OpenOptions::new().append(true).read(true).open(&self.path)?);
+        self.file = Some(
+            OpenOptions::new()
+                .append(true)
+                .read(true)
+                .open(&self.path)?,
+        );
         Ok(())
     }
 }
@@ -155,7 +166,10 @@ pub fn frame_fingerprint(frame: &ZapFrame) -> [u8; 16] {
 }
 
 fn hex_hint(hint: &[u8]) -> String {
-    hint.iter().take(4).map(|byte| format!("{byte:02x}")).collect()
+    hint.iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[cfg(test)]

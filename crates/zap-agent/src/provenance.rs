@@ -12,7 +12,7 @@ use uuid::Uuid;
 use zap_core::now_micros;
 use zap_crypto::{Keypair, PublicKey, ZapCryptoError};
 
-use crate::{AgentIntent, Validate, ZapAgentError, Result};
+use crate::{AgentIntent, Result, Validate, ZapAgentError};
 
 pub const PROVENANCE_SCHEMA_VERSION: u8 = 1;
 pub const PROVENANCE_SIGNATURE_DOMAIN: &[u8] = b"ZAP-PROVENANCE-CHAIN-v1";
@@ -271,14 +271,8 @@ impl ProvenanceChainBuilder {
             "certificate_hash".to_string(),
             serde_json::Value::String(certificate_hash.to_string()),
         );
-        meta.insert(
-            "epoch".to_string(),
-            serde_json::Value::Number(epoch.into()),
-        );
-        meta.insert(
-            "round".to_string(),
-            serde_json::Value::Number(round.into()),
-        );
+        meta.insert("epoch".to_string(), serde_json::Value::Number(epoch.into()));
+        meta.insert("round".to_string(), serde_json::Value::Number(round.into()));
         meta.insert(
             "threshold".to_string(),
             serde_json::Value::Number(threshold.into()),
@@ -559,13 +553,14 @@ impl ProvenanceChainDigest {
             }
         } else {
             let prev_step = &self.steps[idx - 1];
-            let declared_prev = step.previous_hash.as_ref().ok_or(
-                ZapAgentError::StepVerificationFailed {
-                    stage,
-                    expected: format!("previous_hash == {}", prev_step.step_hash),
-                    actual: "None".to_string(),
-                },
-            )?;
+            let declared_prev =
+                step.previous_hash
+                    .as_ref()
+                    .ok_or(ZapAgentError::StepVerificationFailed {
+                        stage,
+                        expected: format!("previous_hash == {}", prev_step.step_hash),
+                        actual: "None".to_string(),
+                    })?;
 
             if declared_prev != &prev_step.step_hash {
                 return Err(ZapAgentError::StepVerificationFailed {

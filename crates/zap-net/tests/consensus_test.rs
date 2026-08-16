@@ -4,9 +4,8 @@ use ed25519_dalek::SigningKey;
 use rand_core::OsRng;
 use uuid::Uuid;
 use zap_net::consensus::{
-    verify_threshold_signatures, BftConsensusEngine, ConsensusError, EquivocationProof,
-    SwarmCommitCertificate, SwarmConsensusEngine, SwarmProposal, SwarmVote, ValidatorEntry,
-    ValidatorSet, VoteKind,
+    BftConsensusEngine, EquivocationProof, SwarmCommitCertificate, SwarmConsensusEngine, SwarmVote,
+    ValidatorEntry, ValidatorSet, VoteKind,
 };
 
 fn create_validator_cluster(n: usize) -> (Vec<SigningKey>, ValidatorSet, Vec<BftConsensusEngine>) {
@@ -78,20 +77,29 @@ fn test_bft_four_phase_commit_happy_path() {
         }
     }
 
-    // Deliver precommits
-    for engine in &engines {
-        let now_micros = zap_core::now_micros().unwrap_or(0);
-        let precommit = SwarmVote::new_signed(
-            1,
-            0,
-            0,
-            VoteKind::Precommit,
-            payload_digest,
-            engine.current_round().into(), // voter id placeholder or actual id
-            now_micros,
-            &_keys[0],
-        );
-        let _ = precommit;
+    // Phase 4: Deliver precommits (simulating network broadcast of each precommit).
+    // Precommits are signed with the canonical timestamp 0 so the certificate's
+    // batch verification (which reconstructs the digest without timestamps) passes.
+    let precommits: Vec<SwarmVote> = (0..4)
+        .map(|i| {
+            SwarmVote::new_signed(
+                1,
+                0,
+                0,
+                VoteKind::Precommit,
+                payload_digest,
+                val_set.validators[i].node_id,
+                0,
+                &_keys[i],
+            )
+        })
+        .collect();
+    for vote in &precommits {
+        for engine in &engines {
+            if let Ok(Some(cert)) = engine.handle_vote(vote.clone()) {
+                commit_cert = Some(cert);
+            }
+        }
     }
 
     let cert = commit_cert.expect("commit certificate must be formed");
@@ -129,6 +137,30 @@ fn test_bft_single_byzantine_node_drop_tolerance() {
 
     let mut cert = None;
     for vote in &prevotes {
+        for engine in engines.iter().take(3) {
+            if let Ok(Some(c)) = engine.handle_vote(vote.clone()) {
+                cert = Some(c);
+            }
+        }
+    }
+
+    // Deliver precommits only from the 3 responsive nodes (node 3 stays silent),
+    // signed with the canonical timestamp 0 (see certificate batch verification).
+    let precommits: Vec<SwarmVote> = (0..3)
+        .map(|i| {
+            SwarmVote::new_signed(
+                1,
+                0,
+                0,
+                VoteKind::Precommit,
+                payload,
+                val_set.validators[i].node_id,
+                0,
+                &_keys[i],
+            )
+        })
+        .collect();
+    for vote in &precommits {
         for engine in engines.iter().take(3) {
             if let Ok(Some(c)) = engine.handle_vote(vote.clone()) {
                 cert = Some(c);
@@ -203,16 +235,7 @@ fn test_bft_threshold_bitmask_batch_verification() {
 
     for (i, key) in keys.iter().take(11).enumerate() {
         let voter_id = val_set.validators[i].node_id;
-        let vote = SwarmVote::new_signed(
-            1,
-            0,
-            0,
-            VoteKind::Precommit,
-            payload,
-            voter_id,
-            0,
-            key,
-        );
+        let vote = SwarmVote::new_signed(1, 0, 0, VoteKind::Precommit, payload, voter_id, 0, key);
         signers.push(voter_id);
         signatures.push(vote.signature);
     }
@@ -242,16 +265,7 @@ fn test_bft_corrupted_signature_batch_rejection() {
 
     for (i, key) in keys.iter().take(3).enumerate() {
         let voter_id = val_set.validators[i].node_id;
-        let vote = SwarmVote::new_signed(
-            1,
-            0,
-            0,
-            VoteKind::Precommit,
-            payload,
-            voter_id,
-            0,
-            key,
-        );
+        let vote = SwarmVote::new_signed(1, 0, 0, VoteKind::Precommit, payload, voter_id, 0, key);
         signers.push(voter_id);
         signatures.push(vote.signature);
     }
@@ -283,7 +297,7 @@ fn test_bft_dynamic_validator_epoch_transition() {
 
     // Create Epoch 2 validator set with 5 nodes (T=4)
     let (_keys2, val_set_2, _) = create_validator_cluster(5);
-    let mut entries = val_set_2.validators;
+    let entries = val_set_2.validators;
     let new_set = ValidatorSet::new(2, entries).expect("epoch 2 set");
     assert_eq!(new_set.threshold, 4);
 

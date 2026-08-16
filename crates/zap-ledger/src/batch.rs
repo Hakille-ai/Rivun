@@ -11,8 +11,8 @@ use uuid::Uuid;
 use zap_crypto::{Keypair, PoaValidatorSet, node_id_from_public_key};
 
 use crate::{
-    MerkleMountainRange, SignedActionReceipt, ZapLedgerError, decode_fixed,
-    validate_artifact_hash, HASH_PREFIX,
+    HASH_PREFIX, MerkleMountainRange, SignedActionReceipt, ZapLedgerError, decode_fixed,
+    validate_artifact_hash,
 };
 
 pub const RECEIPT_BATCH_SEAL_SCHEMA_VERSION: u8 = 1;
@@ -218,8 +218,15 @@ impl ReceiptBatchSeal {
             let sig_bytes = decode_fixed::<SIGNATURE_LEN>(&val_sig.signature, "signature")?;
             let signature = Signature::from_bytes(&sig_bytes);
 
+            // Signatures were produced with `sign_domain_message`: domain || 0x00 || message.
+            let mut domain_msg =
+                Vec::with_capacity(BATCH_SEAL_SIGNATURE_DOMAIN.len() + 1 + signing_message.len());
+            domain_msg.extend_from_slice(BATCH_SEAL_SIGNATURE_DOMAIN);
+            domain_msg.push(0);
+            domain_msg.extend_from_slice(&signing_message);
+
             verifying_key
-                .verify(&signing_message, &signature)
+                .verify(&domain_msg, &signature)
                 .map_err(|_| ZapLedgerError::InvalidSignature)?;
 
             valid_signatures = valid_signatures.saturating_add(1);
@@ -229,10 +236,7 @@ impl ReceiptBatchSeal {
     }
 
     /// Creates an attestation request to send to a swarm validator.
-    pub fn create_attestation_request(
-        &self,
-        requester_node: Uuid,
-    ) -> BatchSealAttestationRequest {
+    pub fn create_attestation_request(&self, requester_node: Uuid) -> BatchSealAttestationRequest {
         BatchSealAttestationRequest {
             schema_version: BATCH_SEAL_ATTESTATION_REQUEST_SCHEMA_VERSION,
             requester_node,
@@ -366,7 +370,7 @@ mod tests {
     use super::*;
     use crate::ActionReceipt;
     use zap_core::ZapFlags;
-    use zap_crypto::{PoaValidatorDescriptor, POA_VALIDATOR_SET_SCHEMA_VERSION};
+    use zap_crypto::{POA_VALIDATOR_SET_SCHEMA_VERSION, PoaValidatorDescriptor};
 
     fn make_test_receipt(node: &Keypair, action: &str, seq: u64) -> SignedActionReceipt {
         let receipt = ActionReceipt {
@@ -459,7 +463,8 @@ mod tests {
         let non_member = Keypair::generate();
         let non_member_sig = seal.sign_with_validator(&non_member).unwrap();
         let mut non_member_seal = seal.clone();
-        non_member_seal.validator_signatures = vec![seal.validator_signatures[0].clone(), non_member_sig];
+        non_member_seal.validator_signatures =
+            vec![seal.validator_signatures[0].clone(), non_member_sig];
         assert!(non_member_seal.verify_quorum(&vset).is_err());
     }
 

@@ -11,9 +11,7 @@ pub use heartbeat::{HeartbeatAck, HeartbeatPing, HeartbeatScheduler};
 pub use mod_types::MeshError;
 pub use partition::PartitionStatus;
 pub use phi_detector::{PeerHealthState, PhiAccrualDetector};
-pub use relay::{
-    MAX_RELAY_HOPS, RELAY_ENVELOPE_MAGIC, RELAY_ENVELOPE_VERSION, ZapRelayEnvelope,
-};
+pub use relay::{MAX_RELAY_HOPS, RELAY_ENVELOPE_MAGIC, RELAY_ENVELOPE_VERSION, ZapRelayEnvelope};
 pub use topology::{MeshTopology, PeerMeshInfo, SwarmMeshTopology};
 
 #[cfg(test)]

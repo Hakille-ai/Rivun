@@ -2981,6 +2981,7 @@ dependencies = [
  "blake3",
  "bytes",
  "criterion",
+ "hex",
  "serde",
  "serde_json",
  "tempfile",

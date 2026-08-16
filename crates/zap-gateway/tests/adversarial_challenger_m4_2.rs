@@ -13,15 +13,14 @@ use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
 use zap_agent::{
-    AGENT_PROTOCOL_SCHEMA_VERSION, AgentId, AgentIntent,
-    CapabilityNegotiationRequest, DelegationRequest, IntentKind,
+    AGENT_PROTOCOL_SCHEMA_VERSION, AgentId, AgentIntent, CapabilityNegotiationRequest,
+    DelegationRequest, IntentKind,
 };
 use zap_core::now_micros;
 use zap_crypto::Keypair;
 use zap_gateway::{
-    GatewayConfig, HttpAgentGateway, ProvenanceChainBuilder,
-    ProvenanceChainDigest, ProvenanceStage, SseBroker, SseEvent,
-    WebSocketHandler, WsFrame, compute_ws_accept,
+    GatewayConfig, HttpAgentGateway, ProvenanceChainBuilder, ProvenanceChainDigest,
+    ProvenanceStage, SseBroker, SseEvent, WebSocketHandler, WsFrame, compute_ws_accept,
 };
 use zap_ledger::ReceiptJournalStore;
 use zap_memory::MemoryJournalStore;
@@ -59,7 +58,10 @@ async fn test_empirical_6_stage_provenance_causal_chain_integrity() {
         .with_policy(
             "sha256:d5a4c9b8e217036578efb9231456acde0987123456789abcdef0123456789abc",
             "ALLOW",
-            BTreeMap::from([("rule_matched".to_string(), serde_json::json!("policy.default.allow"))]),
+            BTreeMap::from([(
+                "rule_matched".to_string(),
+                serde_json::json!("policy.default.allow"),
+            )]),
         )
         .expect("Policy stage must build")
         .with_driver(
@@ -138,10 +140,7 @@ async fn test_empirical_adversarial_tamper_matrix_all_6_stages() {
     let base_chain = ProvenanceChainBuilder::new(session_id, intent_id)
         .with_intent(&intent)
         .unwrap()
-        .with_negotiation(
-            &serde_json::json!({"negotiate": "cap.v1"}),
-            BTreeMap::new(),
-        )
+        .with_negotiation(&serde_json::json!({"negotiate": "cap.v1"}), BTreeMap::new())
         .unwrap()
         .with_policy("policy_hash_1", "ALLOW", BTreeMap::new())
         .unwrap()
@@ -207,16 +206,27 @@ async fn test_empirical_adversarial_tamper_matrix_all_6_stages() {
 
     // 3. Test tampering root_hash directly
     let mut tampered_root = base_chain.clone();
-    tampered_root.root_hash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
+    tampered_root.root_hash =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string();
     let report_root = tampered_root.verify(&keypair.verifying_key()).unwrap();
     assert!(!report_root.valid);
-    assert!(report_root.failure_reason.unwrap().contains("Merkle root mismatch"));
+    assert!(
+        report_root
+            .failure_reason
+            .unwrap()
+            .contains("Merkle root mismatch")
+    );
 
     // 4. Test signer key mismatch
     let other_keypair = Keypair::generate();
     let report_signer = base_chain.verify(&other_keypair.verifying_key()).unwrap();
     assert!(!report_signer.valid);
-    assert!(report_signer.failure_reason.unwrap().contains("Signer node ID mismatch"));
+    assert!(
+        report_signer
+            .failure_reason
+            .unwrap()
+            .contains("Signer node ID mismatch")
+    );
 
     // 5. Test signature byte flipping
     let mut tampered_sig = base_chain.clone();
@@ -225,7 +235,12 @@ async fn test_empirical_adversarial_tamper_matrix_all_6_stages() {
     tampered_sig.signature = hex::encode(sig_bytes);
     let report_sig = tampered_sig.verify(&keypair.verifying_key()).unwrap();
     assert!(!report_sig.valid);
-    assert!(report_sig.failure_reason.unwrap().contains("Ed25519 signature"));
+    assert!(
+        report_sig
+            .failure_reason
+            .unwrap()
+            .contains("Ed25519 signature")
+    );
 }
 
 // ============================================================================
@@ -234,8 +249,7 @@ async fn test_empirical_adversarial_tamper_matrix_all_6_stages() {
 
 #[test]
 fn test_empirical_sse_event_wire_formatting_and_multiline() {
-    let single_line = SseEvent::new("status_update", r#"{"running":true}"#)
-        .with_id("evt-101");
+    let single_line = SseEvent::new("status_update", r#"{"running":true}"#).with_id("evt-101");
     let wire = single_line.to_sse_wire_format();
     assert_eq!(
         wire,
@@ -379,10 +393,16 @@ Sec-WebSocket-Version: 13\r\n\r\n",
     // 1. Send Text Frame -> Receive Ack Frame
     let text_msg = r#"{"agent":"tester","payload":"execute_action"}"#;
     let text_frame = WsFrame::text(text_msg);
-    ws_handler.write_frame(&mut stream, &text_frame).await.unwrap();
+    ws_handler
+        .write_frame(&mut stream, &text_frame)
+        .await
+        .unwrap();
 
     let ack_frame = ws_handler.read_frame(&mut stream).await.unwrap();
-    assert_eq!(ack_frame.opcode, zap_gateway::transports::ws::WS_OPCODE_TEXT);
+    assert_eq!(
+        ack_frame.opcode,
+        zap_gateway::transports::ws::WS_OPCODE_TEXT
+    );
     let ack_json: serde_json::Value = serde_json::from_slice(&ack_frame.payload).unwrap();
     assert_eq!(ack_json["status"], "acknowledged");
     assert_eq!(ack_json["bytes_received"], text_msg.len());
@@ -390,18 +410,30 @@ Sec-WebSocket-Version: 13\r\n\r\n",
     // 2. Send Ping -> Receive Pong
     let ping_data = b"ping_test_payload_123".to_vec();
     let ping_frame = WsFrame::ping(ping_data.clone());
-    ws_handler.write_frame(&mut stream, &ping_frame).await.unwrap();
+    ws_handler
+        .write_frame(&mut stream, &ping_frame)
+        .await
+        .unwrap();
 
     let pong_frame = ws_handler.read_frame(&mut stream).await.unwrap();
-    assert_eq!(pong_frame.opcode, zap_gateway::transports::ws::WS_OPCODE_PONG);
+    assert_eq!(
+        pong_frame.opcode,
+        zap_gateway::transports::ws::WS_OPCODE_PONG
+    );
     assert_eq!(pong_frame.payload, ping_data);
 
     // 3. Send Close -> Receive Close
     let close_frame = WsFrame::close(1000, "client_closing");
-    ws_handler.write_frame(&mut stream, &close_frame).await.unwrap();
+    ws_handler
+        .write_frame(&mut stream, &close_frame)
+        .await
+        .unwrap();
 
     let server_close = ws_handler.read_frame(&mut stream).await.unwrap();
-    assert_eq!(server_close.opcode, zap_gateway::transports::ws::WS_OPCODE_CLOSE);
+    assert_eq!(
+        server_close.opcode,
+        zap_gateway::transports::ws::WS_OPCODE_CLOSE
+    );
 }
 
 #[tokio::test]
@@ -440,11 +472,17 @@ async fn test_empirical_ws_frame_size_overflow_rejection() {
     let client_ws_handler = WebSocketHandler::new(4096);
     let oversized_payload = "A".repeat(1024);
     let oversized_frame = WsFrame::text(oversized_payload);
-    client_ws_handler.write_frame(&mut stream, &oversized_frame).await.unwrap();
+    client_ws_handler
+        .write_frame(&mut stream, &oversized_frame)
+        .await
+        .unwrap();
 
     // Server must reject with WS_CLOSE_MESSAGE_TOO_BIG (1009)
     let close_reply = client_ws_handler.read_frame(&mut stream).await.unwrap();
-    assert_eq!(close_reply.opcode, zap_gateway::transports::ws::WS_OPCODE_CLOSE);
+    assert_eq!(
+        close_reply.opcode,
+        zap_gateway::transports::ws::WS_OPCODE_CLOSE
+    );
     let close_code = u16::from_be_bytes([close_reply.payload[0], close_reply.payload[1]]);
     assert_eq!(close_code, 1009); // WS_CLOSE_MESSAGE_TOO_BIG
 }
@@ -499,7 +537,9 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
         "POST /v1/agent/sessions HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, s_json.len(), s_json
+        addr,
+        s_json.len(),
+        s_json
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut buf = vec![0u8; 2048];
@@ -513,9 +553,10 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
         negotiation_id: Uuid::new_v4(),
         session_id,
         requester_agent: AgentId::new("orchestrator_prime").unwrap(),
-        required_capabilities: BTreeSet::from([
-            zap_capability::CapabilityId::new("driver.execute:matrix_mul").unwrap(),
-        ]),
+        required_capabilities: BTreeSet::from([zap_capability::CapabilityId::new(
+            "driver.execute:matrix_mul",
+        )
+        .unwrap()]),
         optional_capabilities: BTreeSet::new(),
         desired_intents: BTreeSet::from([IntentKind::Act]),
         metadata: BTreeMap::new(),
@@ -524,7 +565,9 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
         "POST /v1/agent/negotiate HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, n_json.len(), n_json
+        addr,
+        n_json.len(),
+        n_json
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let n = stream.read(&mut buf).await.unwrap();
@@ -545,7 +588,9 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
         "POST /v1/agent/intents HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, intent_json.len(), intent_json
+        addr,
+        intent_json.len(),
+        intent_json
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let n = stream.read(&mut buf).await.unwrap();
@@ -558,7 +603,8 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     assert_eq!(resp_json["status"], "accepted");
     assert!(resp_json["provenance"].is_object());
 
-    let chain: ProvenanceChainDigest = serde_json::from_value(resp_json["provenance"].clone()).unwrap();
+    let chain: ProvenanceChainDigest =
+        serde_json::from_value(resp_json["provenance"].clone()).unwrap();
 
     // Step 4: Verify SSE event broadcast
     let sse_event = sse_rx.recv().await.unwrap();
@@ -572,7 +618,9 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     let chain_json = serde_json::to_string(&chain).unwrap();
     let req = format!(
         "POST /v1/agent/provenance/verify HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, chain_json.len(), chain_json
+        addr,
+        chain_json.len(),
+        chain_json
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let n = stream.read(&mut buf).await.unwrap();
@@ -613,7 +661,9 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
         "POST /v1/agent/delegate HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, d_json.len(), d_json
+        addr,
+        d_json.len(),
+        d_json
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let n = stream.read(&mut buf).await.unwrap();
@@ -640,7 +690,9 @@ async fn test_empirical_full_e2e_ai_agent_workflow() {
     let mut stream = TcpStream::connect(addr).await.unwrap();
     let req = format!(
         "POST /v1/agent/mcp HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, m_json.len(), m_json
+        addr,
+        m_json.len(),
+        m_json
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut buf = vec![0u8; 8192];
@@ -694,22 +746,40 @@ async fn test_empirical_out_of_order_and_missing_link_rejection() {
     let report_missing = missing_link_chain.verify(&keypair.verifying_key()).unwrap();
     assert!(!report_missing.valid);
     assert_eq!(report_missing.failed_stage, Some(ProvenanceStage::Driver));
-    assert!(report_missing.failure_reason.unwrap().contains("missing previous_hash link"));
+    assert!(
+        report_missing
+            .failure_reason
+            .unwrap()
+            .contains("missing previous_hash link")
+    );
 
     // 3. Set previous_hash on Intent (Step 0) -> rejected
     let mut bad_intent_chain = valid_chain.clone();
     bad_intent_chain.steps[0].previous_hash = Some("illegal_prev_hash_on_root".to_string());
     let report_bad_intent = bad_intent_chain.verify(&keypair.verifying_key()).unwrap();
     assert!(!report_bad_intent.valid);
-    assert_eq!(report_bad_intent.failed_stage, Some(ProvenanceStage::Intent));
-    assert!(report_bad_intent.failure_reason.unwrap().contains("First step must not have previous_hash"));
+    assert_eq!(
+        report_bad_intent.failed_stage,
+        Some(ProvenanceStage::Intent)
+    );
+    assert!(
+        report_bad_intent
+            .failure_reason
+            .unwrap()
+            .contains("First step must not have previous_hash")
+    );
 
     // 4. Empty chain steps -> rejected
     let mut empty_chain = valid_chain.clone();
     empty_chain.steps.clear();
     let report_empty = empty_chain.verify(&keypair.verifying_key()).unwrap();
     assert!(!report_empty.valid);
-    assert!(report_empty.failure_reason.unwrap().contains("contains no steps"));
+    assert!(
+        report_empty
+            .failure_reason
+            .unwrap()
+            .contains("contains no steps")
+    );
 }
 
 #[tokio::test]
@@ -770,4 +840,3 @@ async fn test_empirical_http_cors_and_bearer_auth_and_routing() {
     let resp = String::from_utf8_lossy(&buf[..n]);
     assert!(resp.starts_with("HTTP/1.1 404 Not Found"));
 }
-

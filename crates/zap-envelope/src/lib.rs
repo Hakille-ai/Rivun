@@ -350,6 +350,21 @@ impl ZapEnvelope {
         out.extend_from_slice(&self.body);
         out.freeze()
     }
+
+    /// Decode an owned envelope from its binary encoding (inverse of [`Self::encode`]).
+    pub fn decode(input: &[u8]) -> Result<Self> {
+        let parsed = ZapEnvelopeRef::parse(input)?;
+        Ok(Self {
+            kind: parsed.kind,
+            id: parsed.id,
+            correlation_id: parsed.correlation_id,
+            causation_id: parsed.causation_id,
+            subject: parsed.subject.to_string(),
+            content_type: parsed.content_type.to_string(),
+            metadata: Bytes::copy_from_slice(parsed.metadata),
+            body: Bytes::copy_from_slice(parsed.body),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -203,38 +203,31 @@ pub async fn execute_tool(
             }
 
             // Append to journal if available
-            let (seq, receipt_id) =
-                if let (Some(journal_lock), Some(key)) = (&ctx.journal, &ctx.node_keypair) {
-                    let now = now_micros().unwrap_or(0);
-                    let target_uuid =
-                        Uuid::parse_str(target_str).unwrap_or_else(|_| Uuid::new_v4());
-                    let frame = ZapFrame::with_timestamp(
-                        key.node_id(),
-                        target_uuid,
-                        ZapFlags::SIGNED,
-                        now,
-                        Bytes::copy_from_slice(payload.as_bytes()),
-                    )
+            let (seq, receipt_id) = if let (Some(journal_lock), Some(key)) =
+                (&ctx.journal, &ctx.node_keypair)
+            {
+                let now = now_micros().unwrap_or(0);
+                let target_uuid = Uuid::parse_str(target_str).unwrap_or_else(|_| Uuid::new_v4());
+                let frame = ZapFrame::with_timestamp(
+                    key.node_id(),
+                    target_uuid,
+                    ZapFlags::SIGNED,
+                    now,
+                    Bytes::copy_from_slice(payload.as_bytes()),
+                )
+                .map_err(|e| ZapGatewayError::Internal(e.to_string()))?;
+                let signed_receipt = SignedActionReceipt::new(key, &frame, action, None, now, None)
                     .map_err(|e| ZapGatewayError::Internal(e.to_string()))?;
-                    let signed_receipt = SignedActionReceipt::new(
-                        key,
-                        &frame,
-                        action,
-                        None,
-                        now,
-                        None,
-                    )
+                let journal = journal_lock
+                    .lock()
                     .map_err(|e| ZapGatewayError::Internal(e.to_string()))?;
-                    let journal = journal_lock
-                        .lock()
-                        .map_err(|e| ZapGatewayError::Internal(e.to_string()))?;
-                    journal
-                        .append(&signed_receipt, false)
-                        .map_err(|e| ZapGatewayError::Internal(e.to_string()))?;
-                    (1, format!("rcpt-{}", frame.header.timestamp_micros))
-                } else {
-                    (1, "rcpt-ephemeral".to_string())
-                };
+                journal
+                    .append(&signed_receipt, false)
+                    .map_err(|e| ZapGatewayError::Internal(e.to_string()))?;
+                (1, format!("rcpt-{}", frame.header.timestamp_micros))
+            } else {
+                (1, "rcpt-ephemeral".to_string())
+            };
 
             if let Some(node) = &ctx.node {
                 node.record_agent_gateway_request("mcp", "ok");
@@ -304,8 +297,9 @@ pub async fn execute_tool(
 
         "zap_agent_intent" => {
             let intent: AgentIntent = if let Some(intent_obj) = params.arguments.get("intent") {
-                serde_json::from_value(intent_obj.clone())
-                    .map_err(|e| ZapGatewayError::jsonrpc_invalid_params(format!("Invalid intent: {e}")))?
+                serde_json::from_value(intent_obj.clone()).map_err(|e| {
+                    ZapGatewayError::jsonrpc_invalid_params(format!("Invalid intent: {e}"))
+                })?
             } else {
                 let session_id = params
                     .arguments
@@ -417,32 +411,31 @@ pub async fn execute_tool(
                     ZapGatewayError::jsonrpc_invalid_params("Missing `chain` argument")
                 })?;
 
-            let chain: ProvenanceChainDigest = serde_json::from_value(chain_val.clone())
-                .map_err(|e| {
+            let chain: ProvenanceChainDigest =
+                serde_json::from_value(chain_val.clone()).map_err(|e| {
                     ZapGatewayError::jsonrpc_invalid_params(format!("Invalid chain JSON: {e}"))
                 })?;
 
-            let pk = if let Some(pk_str) =
-                params.arguments.get("public_key").and_then(|p| p.as_str())
-            {
-                let bytes = hex::decode(pk_str).map_err(|_| {
-                    ZapGatewayError::jsonrpc_invalid_params("Invalid hex for public_key")
-                })?;
-                if bytes.len() != 32 {
+            let pk =
+                if let Some(pk_str) = params.arguments.get("public_key").and_then(|p| p.as_str()) {
+                    let bytes = hex::decode(pk_str).map_err(|_| {
+                        ZapGatewayError::jsonrpc_invalid_params("Invalid hex for public_key")
+                    })?;
+                    if bytes.len() != 32 {
+                        return Err(ZapGatewayError::jsonrpc_invalid_params(
+                            "public_key must be 32 bytes",
+                        ));
+                    }
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(&bytes);
+                    PublicKey::from_bytes(arr)?
+                } else if let Some(keypair) = &ctx.node_keypair {
+                    keypair.verifying_key()
+                } else {
                     return Err(ZapGatewayError::jsonrpc_invalid_params(
-                        "public_key must be 32 bytes",
+                        "Missing public_key and no local node key available",
                     ));
-                }
-                let mut arr = [0u8; 32];
-                arr.copy_from_slice(&bytes);
-                PublicKey::from_bytes(arr)?
-            } else if let Some(keypair) = &ctx.node_keypair {
-                keypair.verifying_key()
-            } else {
-                return Err(ZapGatewayError::jsonrpc_invalid_params(
-                    "Missing public_key and no local node key available",
-                ));
-            };
+                };
 
             let report = chain.verify(&pk)?;
             if let Some(node) = &ctx.node

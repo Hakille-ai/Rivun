@@ -231,14 +231,23 @@ pub enum ZapStoreError {
     TomlEncode(#[from] toml::ser::Error),
     #[error("invalid domain pack bundle format: {0}")]
     InvalidDomainPackBundleFormat(String),
-    #[error("domain pack bundle digest mismatch for `{path}`: expected {expected}, actual {actual}")]
-    DomainPackBundleDigestMismatch { path: String, expected: String, actual: String },
+    #[error(
+        "domain pack bundle digest mismatch for `{path}`: expected {expected}, actual {actual}"
+    )]
+    DomainPackBundleDigestMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
     #[error("domain pack signature missing or invalid")]
     InvalidDomainPackBundleSignature,
     #[error("domain pack signature signer `{signer}` is not in trusted public keys whitelist")]
     UntrustedDomainPackSigner { signer: String },
     #[error("unsatisfied domain pack dependency `{pack_id}` version requirement `{requirement}`")]
-    UnsatisfiedDomainPackDependency { pack_id: String, requirement: String },
+    UnsatisfiedDomainPackDependency {
+        pack_id: String,
+        requirement: String,
+    },
     #[error("circular dependency detected in domain pack graph: {0}")]
     CircularDomainPackDependency(String),
     #[error("domain pack policy validation failed: {0}")]

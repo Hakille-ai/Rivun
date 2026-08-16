@@ -1,12 +1,12 @@
-use tempfile::tempdir;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tempfile::tempdir;
 use uuid::Uuid;
-use zap_net::durable_replay::DurableNonceStore;
 use zap_net::ZapNetError;
+use zap_net::durable_replay::DurableNonceStore;
 
 const NONCE_LEN: usize = 12;
 
@@ -35,7 +35,9 @@ fn stress_test_nonce_store_crash_restart_replay_flood() {
             let mut nonce = [0_u8; NONCE_LEN];
             nonce[0..8].copy_from_slice(&(i as u64).to_be_bytes());
             nonce[8..12].copy_from_slice(b"TEST");
-            store.remember(node_id, nonce, base_now + (i as u64)).unwrap();
+            store
+                .remember(node_id, nonce, base_now + (i as u64))
+                .unwrap();
             initial_nonces.push(nonce);
         }
         // Drop store without clean shutdown (simulating abrupt process exit)
@@ -47,7 +49,9 @@ fn stress_test_nonce_store_crash_restart_replay_flood() {
         let mut rejected = 0;
         for nonce in &initial_nonces {
             if store.contains(nonce) {
-                let err = store.remember(node_id, *nonce, base_now + count as u64).unwrap_err();
+                let err = store
+                    .remember(node_id, *nonce, base_now + count as u64)
+                    .unwrap_err();
                 if matches!(err, ZapNetError::ReplayedDatagramNonce { .. }) {
                     rejected += 1;
                 }
@@ -64,7 +68,9 @@ fn stress_test_nonce_store_crash_restart_replay_flood() {
             let mut nonce = [0_u8; NONCE_LEN];
             nonce[0..8].copy_from_slice(&((count + i) as u64).to_be_bytes());
             nonce[8..12].copy_from_slice(b"NEW!");
-            store.remember(node_id, nonce, base_now + count as u64 + (i as u64)).unwrap();
+            store
+                .remember(node_id, nonce, base_now + count as u64 + (i as u64))
+                .unwrap();
             new_nonces.push(nonce);
         }
 
@@ -77,7 +83,9 @@ fn stress_test_nonce_store_crash_restart_replay_flood() {
         let mut rejected = 0;
         for nonce in initial_nonces.iter().chain(new_nonces.iter()) {
             if store.contains(nonce) {
-                let err = store.remember(node_id, *nonce, base_now + count as u64 * 2).unwrap_err();
+                let err = store
+                    .remember(node_id, *nonce, base_now + count as u64 * 2)
+                    .unwrap_err();
                 if matches!(err, ZapNetError::ReplayedDatagramNonce { .. }) {
                     rejected += 1;
                 }
@@ -105,15 +113,25 @@ fn stress_test_nonce_store_clock_jumps() {
     {
         let mut store = DurableNonceStore::open(&wal_path, 100, max_age).unwrap();
         // Insert old nonce (2 hours ago) and valid nonce (10 seconds ago)
-        store.remember(node_id, nonce_old, base_time.saturating_sub(2 * max_age)).unwrap();
-        store.remember(node_id, nonce_valid, base_time.saturating_sub(10_000_000)).unwrap();
+        store
+            .remember(node_id, nonce_old, base_time.saturating_sub(2 * max_age))
+            .unwrap();
+        store
+            .remember(node_id, nonce_valid, base_time.saturating_sub(10_000_000))
+            .unwrap();
     }
 
     // Scenario A: Reopen store with clock within window
     {
         let store = DurableNonceStore::open(&wal_path, 100, max_age).unwrap();
-        assert!(store.contains(&nonce_valid), "Valid nonce within max_age window must be retained");
-        assert!(!store.contains(&nonce_old), "Old nonce outside max_age window must be pruned");
+        assert!(
+            store.contains(&nonce_valid),
+            "Valid nonce within max_age window must be retained"
+        );
+        assert!(
+            !store.contains(&nonce_old),
+            "Old nonce outside max_age window must be pruned"
+        );
     }
 
     // Scenario B: Clock jump backward (system clock set back 1 hour)
@@ -140,7 +158,9 @@ fn stress_test_nonce_store_compaction_under_load() {
             let mut nonce = [0_u8; NONCE_LEN];
             nonce[0..8].copy_from_slice(&(i as u64).to_be_bytes());
             nonce[8..12].copy_from_slice(b"CMP!");
-            store.remember(node_id, nonce, base_now + (i as u64)).unwrap();
+            store
+                .remember(node_id, nonce, base_now + (i as u64))
+                .unwrap();
             nonces.push(nonce);
         }
 
@@ -154,7 +174,9 @@ fn stress_test_nonce_store_compaction_under_load() {
         let mut rejected = 0;
         for nonce in &nonces {
             if store.contains(nonce) {
-                let err = store.remember(node_id, *nonce, base_now + count as u64 * 2).unwrap_err();
+                let err = store
+                    .remember(node_id, *nonce, base_now + count as u64 * 2)
+                    .unwrap_err();
                 if matches!(err, ZapNetError::ReplayedDatagramNonce { .. }) {
                     rejected += 1;
                 }
@@ -192,7 +214,10 @@ fn stress_test_nonce_store_partial_write_corruption() {
     // Reopen store from partially corrupted file
     {
         let mut store = DurableNonceStore::open(&wal_path, 100, 3_600_000_000).unwrap();
-        assert!(store.contains(&nonce1), "nonce1 should be preserved despite trailing garbage");
+        assert!(
+            store.contains(&nonce1),
+            "nonce1 should be preserved despite trailing garbage"
+        );
 
         // Write nonce2 into store
         store.remember(node_id, nonce2, base_now + 100).unwrap();
@@ -231,7 +256,9 @@ fn stress_test_nonce_store_concurrent_access() {
                     nonce[0..4].copy_from_slice(&(t as u32).to_be_bytes());
                     nonce[4..12].copy_from_slice(&(i as u64).to_be_bytes());
                     let mut guard = store.lock().unwrap();
-                    guard.remember(node_id, nonce, base_now + (i as u64)).unwrap();
+                    guard
+                        .remember(node_id, nonce, base_now + (i as u64))
+                        .unwrap();
                 }
             })
         })
@@ -251,13 +278,18 @@ fn stress_test_nonce_store_concurrent_access() {
                 nonce[0..4].copy_from_slice(&(t as u32).to_be_bytes());
                 nonce[4..12].copy_from_slice(&(i as u64).to_be_bytes());
                 if store.contains(&nonce) {
-                    let err = store.remember(node_id, nonce, base_now + 1_000_000).unwrap_err();
+                    let err = store
+                        .remember(node_id, nonce, base_now + 1_000_000)
+                        .unwrap_err();
                     if matches!(err, ZapNetError::ReplayedDatagramNonce { .. }) {
                         count += 1;
                     }
                 }
             }
         }
-        assert_eq!(count, 5000, "All 5,000 nonces inserted concurrently must survive restart!");
+        assert_eq!(
+            count, 5000,
+            "All 5,000 nonces inserted concurrently must survive restart!"
+        );
     }
 }

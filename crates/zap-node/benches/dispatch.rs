@@ -104,6 +104,9 @@ impl NodeBench {
             message_policy: zap_node::MessagePolicyConfig::default(),
             message_schema: zap_node::MessageSchemaConfig::default(),
             routes: Vec::new(),
+            swarm: zap_node::SwarmConfig::default(),
+            gossip: zap_node::GossipConfig::default(),
+            mesh: zap_node::MeshConfig::default(),
         };
         let node = ZapNode::from_config(config).await.unwrap();
         sender_endpoint

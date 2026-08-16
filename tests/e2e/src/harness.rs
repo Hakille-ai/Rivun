@@ -6,33 +6,17 @@
 use anyhow::{Context, Result};
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    fs,
-    net::{SocketAddr, UdpSocket},
-    path::{Path, PathBuf},
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, fs, net::UdpSocket, path::PathBuf};
 use tempfile::{TempDir, tempdir};
 use uuid::Uuid;
 
-use zap_agent::{AgentId, AgentIntent, AgentMessage, AgentSession, IntentKind, ProvenanceChainBuilder, ProvenanceStage};
-use zap_capability::DriverPermissions;
 use zap_core::{ZapFlags, ZapFrame, now_micros};
-use zap_crypto::{Keypair, PublicKey, sign_frame, verify_frame};
-use zap_ledger::{
-    ActionReceipt, MerkleMountainRange, MmrHash, MmrInclusionProof, MmrRollupCommitment,
-    PoaReceipt, ReceiptJournalStore, ReceiptReplicationRequest, ReceiptReplicationResponse,
-    SignedActionReceipt,
-};
-use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{GossipMesh, Peer, PeerHealth, QuorumProposal, VectorClock, ZapEndpoint, ZapEndpointConfig};
-use zap_node::ZapNodeConfig;
-use zap_pact::{Validate, ZapPact, ZapPactBundle, ZapPactRevocation, ZapPactStatus};
-use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
-use zap_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
-use zap_telemetry::{FleetDoctor, FleetNodeHealth, FleetNodeState, FleetTopology, IncidentCapturer, PrometheusExporter, ZapNodeMetricsSnapshot};
+use zap_crypto::Keypair;
+use zap_ledger::{ReceiptJournalStore, SignedActionReceipt};
+use zap_memory::MemoryJournalStore;
+use zap_net::{GossipMesh, QuorumProposal};
+use zap_pact::ZapPact;
+use zap_telemetry::{FleetNodeHealth, FleetNodeState, FleetTopology};
 
 /// Simple helper to generate a free UDP port.
 pub fn free_udp_addr() -> String {
@@ -162,7 +146,8 @@ impl SimulatedNode {
         fs::write(&config_path, toml_content)?;
 
         let gossip = GossipMesh::new(node_id, addr.clone());
-        let journal = ReceiptJournalStore::open_with_keypair(dir.path().join("receipts"), keypair.clone());
+        let journal =
+            ReceiptJournalStore::open_with_keypair(dir.path().join("receipts"), keypair.clone());
         let memory = MemoryJournalStore::open(dir.path().join("memory"));
         let topology = FleetTopology::new(node_id, cluster_name);
 
@@ -181,21 +166,15 @@ impl SimulatedNode {
 
     /// Append a test signed action receipt to this node's journal.
     pub fn record_action(&self, action: &str, payload: &[u8]) -> Result<SignedActionReceipt> {
-        let now = now_micros()?;
         let frame = ZapFrame::new(
             self.node_id,
             Uuid::nil(),
             ZapFlags::SIGNED,
             Bytes::copy_from_slice(payload),
         )?;
-        let signed = SignedActionReceipt::new(
-            &self.keypair,
-            &frame,
-            action,
-            None,
-            now,
-            None,
-        )?;
+        let processed_at = now_micros()?.max(frame.header.timestamp_micros);
+        let signed =
+            SignedActionReceipt::new(&self.keypair, &frame, action, None, processed_at, None)?;
         self.journal.append(&signed, false)?;
         Ok(signed)
     }
@@ -227,7 +206,12 @@ impl SimulatedCluster {
         for node in nodes.values_mut() {
             for (peer_id, peer_addr) in &peer_infos {
                 if *peer_id != node.node_id {
-                    node.gossip.register_peer(*peer_id, peer_addr.clone(), vec!["compute".into(), "storage".into()], now);
+                    node.gossip.register_peer(
+                        *peer_id,
+                        peer_addr.clone(),
+                        vec!["compute".into(), "storage".into()],
+                        now,
+                    );
                     node.topology.register_node(FleetNodeState {
                         node_id: *peer_id,
                         addr: peer_addr.parse().ok(),
@@ -270,7 +254,8 @@ impl SimulatedCluster {
 
         for (id, node) in self.nodes.iter_mut() {
             if *id != from_id {
-                node.gossip.record_heartbeat(from_id, &clock, load_factor, now);
+                node.gossip
+                    .record_heartbeat(from_id, &clock, load_factor, now);
             }
         }
         Ok(())
@@ -281,8 +266,11 @@ impl SimulatedCluster {
         let now = now_micros()?;
         let simulated_dead_time = now + 20_000_000; // 20s in the future
 
+        // If every node is isolated, all peers age out on every node.
+        let all_isolated = isolated_ids.len() >= self.nodes.len();
+
         for (id, node) in self.nodes.iter_mut() {
-            if !isolated_ids.contains(id) {
+            if all_isolated || !isolated_ids.contains(id) {
                 // Main partition: isolated nodes time out
                 let _ = node.gossip.evaluate_health(simulated_dead_time);
             }
@@ -302,19 +290,31 @@ impl SimulatedCluster {
         let now = now_micros()?;
         let deadline = now + 60_000_000;
 
-        let proposer = self.nodes.get_mut(&proposer_id).context("proposer not found")?;
-        proposer.gossip.create_proposal(proposal_id, topic, terms_hash, deadline);
+        let proposer = self
+            .nodes
+            .get_mut(&proposer_id)
+            .context("proposer not found")?;
+        proposer
+            .gossip
+            .create_proposal(proposal_id, topic, terms_hash, deadline);
 
         for voter_id in voting_node_ids {
-            let voter = self.nodes.get(&voter_id).context("voter not found")?;
+            let voter = self.nodes.get(voter_id).context("voter not found")?;
             let sig = public_key_string(&voter.keypair);
 
             let proposer = self.nodes.get_mut(&proposer_id).unwrap();
-            let _ = proposer.gossip.cast_vote(proposal_id, *voter_id, sig, now)?;
+            let _ = proposer
+                .gossip
+                .cast_vote(proposal_id, *voter_id, sig, now)?;
         }
 
         let proposer = self.nodes.get(&proposer_id).unwrap();
-        let prop = proposer.gossip.proposals.get(&proposal_id).cloned().context("proposal missing")?;
+        let prop = proposer
+            .gossip
+            .proposals
+            .get(&proposal_id)
+            .cloned()
+            .context("proposal missing")?;
         Ok(prop)
     }
 }

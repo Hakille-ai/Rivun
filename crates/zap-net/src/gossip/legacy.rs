@@ -1,9 +1,6 @@
 //! Legacy GossipMesh and QuorumProposal compatibility structures.
 
-use super::{
-    error::GossipError,
-    vector_clock::VectorClock,
-};
+use super::{error::GossipError, vector_clock::VectorClock};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -61,14 +58,11 @@ pub struct GossipMesh {
 impl GossipMesh {
     #[must_use]
     pub fn new(self_node_id: Uuid, self_endpoint: impl Into<String>) -> Self {
-        let mut vector_clock = VectorClock::new();
-        vector_clock.increment(self_node_id);
-
         Self {
             self_node_id,
             self_endpoint: self_endpoint.into(),
             peers: HashMap::new(),
-            vector_clock,
+            vector_clock: VectorClock::new(),
             proposals: HashMap::new(),
             suspect_timeout: Duration::from_millis(3000),
             dead_timeout: Duration::from_millis(8000),
@@ -268,7 +262,9 @@ mod tests {
         mesh.register_peer(p2, "127.0.0.1:9002", vec!["compute.robotics".into()], 1000);
 
         // Initially both alive, choose lowest load
-        let selected = mesh.select_route_for_capability("compute.robotics").unwrap();
+        let selected = mesh
+            .select_route_for_capability("compute.robotics")
+            .unwrap();
         assert!(selected.node_id == p1 || selected.node_id == p2);
 
         // Advance time: p1 missed heartbeats -> Dead
@@ -282,7 +278,9 @@ mod tests {
         let _ = mesh.evaluate_health(15_000_000);
 
         // Routing automatically fails over exclusively to p2
-        let route = mesh.select_route_for_capability("compute.robotics").unwrap();
+        let route = mesh
+            .select_route_for_capability("compute.robotics")
+            .unwrap();
         assert_eq!(route.node_id, p2);
     }
 

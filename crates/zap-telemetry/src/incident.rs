@@ -45,7 +45,11 @@ impl ProcessState {
                             vms_bytes = val_kb * 1024;
                         }
                     } else if line.starts_with("Threads:") {
-                        if let Some(threads) = line.split_whitespace().nth(1).and_then(|s| s.parse::<usize>().ok()) {
+                        if let Some(threads) = line
+                            .split_whitespace()
+                            .nth(1)
+                            .and_then(|s| s.parse::<usize>().ok())
+                        {
                             thread_count = threads;
                         }
                     }
@@ -75,7 +79,9 @@ impl ProcessState {
             let mut rss_bytes = 16 * 1024 * 1024;
             let mut vms_bytes = 64 * 1024 * 1024;
             let mut open_fds_count = 12;
-            let thread_count = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+            let thread_count = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
 
             #[repr(C)]
             struct ProcessMemoryCounters {
@@ -140,7 +146,9 @@ impl ProcessState {
                 rss_bytes: 16 * 1024 * 1024,
                 vms_bytes: 64 * 1024 * 1024,
                 cpu_usage_pct: 0.5,
-                thread_count: std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4),
+                thread_count: std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(4),
                 open_fds_count: 12,
                 uptime_seconds,
             }
@@ -188,12 +196,14 @@ impl SocketState {
                         if parts.len() >= 4 {
                             let state = parts[3];
                             let local_addr = parts[1];
-                            if state == "0A" { // TCP_LISTEN
+                            if state == "0A" {
+                                // TCP_LISTEN
                                 if let Some((_, port_hex)) = local_addr.split_once(':') {
                                     if let Ok(port) = u16::from_str_radix(port_hex, 16) {
                                         if !listening_ports.contains(&port) {
                                             listening_ports.push(port);
-                                            active_sockets.push(format!("0.0.0.0:{port} (TCP LISTEN)"));
+                                            active_sockets
+                                                .push(format!("0.0.0.0:{port} (TCP LISTEN)"));
                                         }
                                     }
                                 }
@@ -275,6 +285,7 @@ const SENSITIVE_KEYWORDS: &[&str] = &[
     "bearer_token",
     "secret",
     "token",
+    "pass",
 ];
 
 impl SecretRedactor {
@@ -285,10 +296,14 @@ impl SecretRedactor {
 
         for line in input.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with("-----BEGIN") && (trimmed.contains("KEY") || trimmed.contains("PRIVATE")) {
+            if trimmed.starts_with("-----BEGIN")
+                && (trimmed.contains("KEY") || trimmed.contains("PRIVATE"))
+            {
                 in_pem_block = true;
                 lines_after_pem.push(line.to_string());
-            } else if trimmed.starts_with("-----END") && (trimmed.contains("KEY") || trimmed.contains("PRIVATE")) {
+            } else if trimmed.starts_with("-----END")
+                && (trimmed.contains("KEY") || trimmed.contains("PRIVATE"))
+            {
                 in_pem_block = false;
                 lines_after_pem.push(line.to_string());
             } else if in_pem_block {
@@ -345,9 +360,7 @@ fn redact_keyword_occurrences(text: &str, keyword: &str) -> String {
             }
         }
 
-        if is_kv
-            && let Some(d_pos) = delimiter_pos
-        {
+        if is_kv && let Some(d_pos) = delimiter_pos {
             let after_delim = &after_kw[d_pos + 1..];
             let trimmed_val = after_delim.trim_start();
             let leading_ws_len = after_delim.len() - trimmed_val.len();
@@ -361,7 +374,8 @@ fn redact_keyword_occurrences(text: &str, keyword: &str) -> String {
                     out.push_str(&after_delim[..leading_ws_len]);
                     out.push_str("\"[REDACTED]\"");
 
-                    let matched_len = keyword.len() + d_pos + 1 + leading_ws_len + 1 + end_quote + 1;
+                    let matched_len =
+                        keyword.len() + d_pos + 1 + leading_ws_len + 1 + end_quote + 1;
                     rest = &rest[idx + matched_len..];
                     continue;
                 }
@@ -374,7 +388,8 @@ fn redact_keyword_occurrences(text: &str, keyword: &str) -> String {
                     out.push_str(&after_delim[..leading_ws_len]);
                     out.push_str("'[REDACTED]'");
 
-                    let matched_len = keyword.len() + d_pos + 1 + leading_ws_len + 1 + end_quote + 1;
+                    let matched_len =
+                        keyword.len() + d_pos + 1 + leading_ws_len + 1 + end_quote + 1;
                     rest = &rest[idx + matched_len..];
                     continue;
                 }
@@ -483,10 +498,19 @@ impl IncidentCapturer {
         builder.add_file("metrics.prom", snapshot.prometheus_metrics.as_bytes());
 
         let mut diagnostics = String::new();
-        diagnostics.push_str(&format!("ZAP Incident Snapshot Node ID: {}\n", snapshot.node_id));
-        diagnostics.push_str(&format!("Timestamp Micros: {}\n", snapshot.timestamp_micros));
+        diagnostics.push_str(&format!(
+            "ZAP Incident Snapshot Node ID: {}\n",
+            snapshot.node_id
+        ));
+        diagnostics.push_str(&format!(
+            "Timestamp Micros: {}\n",
+            snapshot.timestamp_micros
+        ));
         diagnostics.push_str(&format!("PID: {}\n", snapshot.process.pid));
-        diagnostics.push_str(&format!("Active Sockets: {:?}\n", snapshot.sockets.active_sockets));
+        diagnostics.push_str(&format!(
+            "Active Sockets: {:?}\n",
+            snapshot.sockets.active_sockets
+        ));
         builder.add_file("diagnostics.txt", diagnostics.as_bytes());
 
         if let Some(cfg) = snapshot.config_summary.get("config_content_redacted") {

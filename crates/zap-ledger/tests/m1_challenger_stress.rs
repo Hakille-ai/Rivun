@@ -51,7 +51,8 @@ fn test_rapid_rotation_and_sealing_stress() {
         max_segment_records: Some(2),
     };
 
-    let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+    let store =
+        ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
 
     let total_records = 100;
     for i in 0..total_records {
@@ -105,7 +106,8 @@ fn test_rapid_rotation_with_segment_pruning() {
         max_segment_records: Some(2),
     };
 
-    let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+    let store =
+        ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
 
     for i in 0..30 {
         let receipt = make_receipt(&node, &source, 1_000 + i * 10, "prune_test", "sensor");
@@ -141,7 +143,8 @@ fn test_signature_and_manifest_tampering() {
         ..Default::default()
     };
 
-    let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+    let store =
+        ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
 
     for i in 0..10 {
         let receipt = make_receipt(&node, &source, 1_000 + i * 10, "tamper", "sensor");
@@ -163,25 +166,40 @@ fn test_signature_and_manifest_tampering() {
     let last_char = bad_sig.pop().unwrap();
     bad_sig.push(if last_char == 'A' { 'B' } else { 'A' });
     signed_json["signature"] = serde_json::Value::String(bad_sig);
-    fs::write(&sig_path, serde_json::to_string_pretty(&signed_json).unwrap()).unwrap();
+    fs::write(
+        &sig_path,
+        serde_json::to_string_pretty(&signed_json).unwrap(),
+    )
+    .unwrap();
 
     let verify_res = store.load_signed_manifest(0);
     assert!(
-        matches!(verify_res, Err(ZapLedgerError::InvalidSignature) | Err(ZapLedgerError::Base64(_))),
+        matches!(
+            verify_res,
+            Err(ZapLedgerError::InvalidSignature) | Err(ZapLedgerError::Base64(_))
+        ),
         "Expected InvalidSignature or Base64 error, got: {:?}",
         verify_res
     );
 
     // Restore valid signature
     signed_json["signature"] = serde_json::Value::String(orig_sig);
-    fs::write(&sig_path, serde_json::to_string_pretty(&signed_json).unwrap()).unwrap();
+    fs::write(
+        &sig_path,
+        serde_json::to_string_pretty(&signed_json).unwrap(),
+    )
+    .unwrap();
 
     // 2. Signer Public Key Tampering (Replacing with another key)
     let other_key = Keypair::generate();
     let other_pub_b64 = base64::engine::general_purpose::STANDARD_NO_PAD
         .encode(other_key.verifying_key().to_bytes());
     signed_json["signer_public_key"] = serde_json::Value::String(other_pub_b64);
-    fs::write(&sig_path, serde_json::to_string_pretty(&signed_json).unwrap()).unwrap();
+    fs::write(
+        &sig_path,
+        serde_json::to_string_pretty(&signed_json).unwrap(),
+    )
+    .unwrap();
 
     let verify_res = store.load_signed_manifest(0);
     assert!(
@@ -272,7 +290,11 @@ fn test_query_fast_correctness_and_boundary_conditions() {
         ..ReceiptReplicationRequest::default()
     };
     let results = store.query_fast(&req).unwrap();
-    assert!(results.iter().all(|r| r.receipt.processed_at_micros > 2_000 && r.receipt.processed_at_micros <= 3_000));
+    assert!(
+        results.iter().all(
+            |r| r.receipt.processed_at_micros > 2_000 && r.receipt.processed_at_micros <= 3_000
+        )
+    );
 
     // Boundary check 2: Limit enforcement
     let req_limit = ReceiptReplicationRequest {
@@ -302,7 +324,8 @@ fn test_corruption_recovery_and_tail_truncation() {
     // Append corrupted garbage at the end (partial record)
     let mut file = fs::OpenOptions::new().append(true).open(&seg_path).unwrap();
     use std::io::Write;
-    file.write_all(b"ZJRC\x01\x00\x00\x00corrupted garbage tail bytes").unwrap();
+    file.write_all(b"ZJRC\x01\x00\x00\x00corrupted garbage tail bytes")
+        .unwrap();
     drop(file);
 
     assert!(fs::metadata(&seg_path).unwrap().len() > orig_len);

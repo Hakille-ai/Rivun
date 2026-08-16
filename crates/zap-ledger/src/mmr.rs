@@ -20,10 +20,7 @@ pub enum MmrError {
     #[error("MMR is empty")]
     EmptyMmr,
     #[error("invalid inclusion proof: hash mismatch (computed {computed}, expected {expected})")]
-    InvalidProof {
-        computed: String,
-        expected: String,
-    },
+    InvalidProof { computed: String, expected: String },
     #[error("corrupted MMR tree structure")]
     CorruptedStructure,
     #[error("invalid leaf count in proof")]
@@ -35,15 +32,9 @@ pub enum MmrError {
     #[error("unsupported zmmr version {0}")]
     UnsupportedZmmrVersion(u16),
     #[error("invalid zmmr payload: expected {expected} bytes, got {actual}")]
-    InvalidZmmrPayload {
-        expected: usize,
-        actual: usize,
-    },
+    InvalidZmmrPayload { expected: usize, actual: usize },
     #[error("zmmr root mismatch: computed {computed}, expected {expected}")]
-    ZmmrRootMismatch {
-        computed: String,
-        expected: String,
-    },
+    ZmmrRootMismatch { computed: String, expected: String },
 }
 
 /// 32-byte Blake3 cryptographic digest.
@@ -182,8 +173,7 @@ impl MmrBatchInclusionProof {
                 let peak_hex = untouched_map
                     .get(&m_idx)
                     .ok_or(MmrError::CorruptedStructure)?;
-                let peak_bytes =
-                    hex::decode(peak_hex).map_err(|_| MmrError::CorruptedStructure)?;
+                let peak_bytes = hex::decode(peak_hex).map_err(|_| MmrError::CorruptedStructure)?;
                 if peak_bytes.len() != 32 {
                     return Err(MmrError::CorruptedStructure);
                 }
@@ -480,15 +470,23 @@ mod serde_peaks_64 {
     use super::*;
     use serde::{Deserializer, Serializer, de::Error};
 
-    pub fn serialize<S: Serializer>(peaks: &[Option<MmrHash>; 64], serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(
+        peaks: &[Option<MmrHash>; 64],
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         let vec: Vec<&Option<MmrHash>> = peaks.iter().collect();
         vec.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> std::result::Result<[Option<MmrHash>; 64], D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<[Option<MmrHash>; 64], D::Error> {
         let vec: Vec<Option<MmrHash>> = Vec::deserialize(deserializer)?;
         if vec.len() != 64 {
-            return Err(D::Error::custom(format!("expected 64 elements for peaks, got {}", vec.len())));
+            return Err(D::Error::custom(format!(
+                "expected 64 elements for peaks, got {}",
+                vec.len()
+            )));
         }
         let mut arr = [None; 64];
         for (i, item) in vec.into_iter().enumerate() {
@@ -1086,8 +1084,7 @@ impl MerkleMountainRange {
             return Err(MmrError::InvalidLeafCount);
         }
 
-        let leaf_bytes =
-            hex::decode(&proof.leaf_hash).map_err(|_| MmrError::CorruptedStructure)?;
+        let leaf_bytes = hex::decode(&proof.leaf_hash).map_err(|_| MmrError::CorruptedStructure)?;
         if leaf_bytes.len() != 32 {
             return Err(MmrError::CorruptedStructure);
         }
@@ -1113,8 +1110,7 @@ impl MerkleMountainRange {
 
         let mut curr_idx = proof.leaf_index - target_tree_start;
         for sister_hex in &proof.sister_hashes {
-            let sister_bytes =
-                hex::decode(sister_hex).map_err(|_| MmrError::CorruptedStructure)?;
+            let sister_bytes = hex::decode(sister_hex).map_err(|_| MmrError::CorruptedStructure)?;
             if sister_bytes.len() != 32 {
                 return Err(MmrError::CorruptedStructure);
             }

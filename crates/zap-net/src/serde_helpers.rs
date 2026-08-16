@@ -1,7 +1,7 @@
 //! Serde helper modules for 64-byte Ed25519 signatures.
 
 pub mod signature_bytes {
-    use serde::{de::Error, Deserializer, Serializer, de::Visitor};
+    use serde::{Deserializer, Serializer, de::Error, de::Visitor};
     use std::fmt;
 
     pub fn serialize<S>(sig: &[u8; 64], serializer: S) -> Result<S::Ok, S::Error>
@@ -57,8 +57,8 @@ pub mod signature_bytes {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut out = [0_u8; 64];
-                for i in 0..64 {
-                    out[i] = seq
+                for slot in &mut out {
+                    *slot = seq
                         .next_element()?
                         .ok_or_else(|| Error::custom("expected 64 elements"))?;
                 }
@@ -75,7 +75,7 @@ pub mod signature_bytes {
 }
 
 pub mod signatures_vec {
-    use serde::{de::Error, Deserializer, Serializer, de::SeqAccess, de::Visitor};
+    use serde::{Deserializer, Serializer, de::Error, de::SeqAccess, de::Visitor};
     use std::fmt;
 
     pub fn serialize<S>(sigs: &[[u8; 64]], serializer: S) -> Result<S::Ok, S::Error>
@@ -110,9 +110,13 @@ pub mod signatures_vec {
                 while let Some(elem) = seq.next_element::<serde_json::Value>()? {
                     match elem {
                         serde_json::Value::String(s) => {
-                            let bytes = hex::decode(&s).map_err(|e| Error::custom(e.to_string()))?;
+                            let bytes =
+                                hex::decode(&s).map_err(|e| Error::custom(e.to_string()))?;
                             if bytes.len() != 64 {
-                                return Err(Error::custom(format!("expected 64 bytes, got {}", bytes.len())));
+                                return Err(Error::custom(format!(
+                                    "expected 64 bytes, got {}",
+                                    bytes.len()
+                                )));
                             }
                             let mut sig = [0_u8; 64];
                             sig.copy_from_slice(&bytes);
@@ -120,11 +124,15 @@ pub mod signatures_vec {
                         }
                         serde_json::Value::Array(arr) => {
                             if arr.len() != 64 {
-                                return Err(Error::custom(format!("expected 64 elements, got {}", arr.len())));
+                                return Err(Error::custom(format!(
+                                    "expected 64 elements, got {}",
+                                    arr.len()
+                                )));
                             }
                             let mut sig = [0_u8; 64];
                             for (i, v) in arr.iter().enumerate() {
-                                sig[i] = v.as_u64().ok_or_else(|| Error::custom("invalid u8"))? as u8;
+                                sig[i] =
+                                    v.as_u64().ok_or_else(|| Error::custom("invalid u8"))? as u8;
                             }
                             out.push(sig);
                         }

@@ -47,7 +47,9 @@ impl DurableNonceStore {
                 while file.read_exact(&mut buf).is_ok() {
                     let timestamp_micros = u64::from_be_bytes(buf[0..8].try_into().unwrap());
                     let node_id = Uuid::from_slice(&buf[8..24]).unwrap_or_default();
-                    if max_age_micros == 0 || now_micros.saturating_sub(timestamp_micros) <= max_age_micros {
+                    if max_age_micros == 0
+                        || now_micros.saturating_sub(timestamp_micros) <= max_age_micros
+                    {
                         let mut nonce = [0_u8; NONCE_LEN];
                         nonce.copy_from_slice(&buf[24..36]);
                         seen.insert(nonce);
@@ -88,7 +90,12 @@ impl DurableNonceStore {
         self.seen.contains(nonce)
     }
 
-    pub fn remember(&mut self, node_id: Uuid, nonce: [u8; NONCE_LEN], timestamp_micros: u64) -> Result<()> {
+    pub fn remember(
+        &mut self,
+        node_id: Uuid,
+        nonce: [u8; NONCE_LEN],
+        timestamp_micros: u64,
+    ) -> Result<()> {
         if self.capacity == 0 {
             return Ok(());
         }
@@ -126,7 +133,9 @@ impl DurableNonceStore {
                 .open(&tmp_path)?;
             tmp_file.write_all(DURABLE_NONCE_MAGIC)?;
             for (nonce, node_id, timestamp_micros) in &self.order {
-                if self.max_age_micros == 0 || now_micros.saturating_sub(*timestamp_micros) <= self.max_age_micros {
+                if self.max_age_micros == 0
+                    || now_micros.saturating_sub(*timestamp_micros) <= self.max_age_micros
+                {
                     let mut buf = [0_u8; DURABLE_NONCE_RECORD_LEN];
                     buf[0..8].copy_from_slice(&timestamp_micros.to_be_bytes());
                     buf[8..24].copy_from_slice(node_id.as_bytes());
@@ -137,7 +146,12 @@ impl DurableNonceStore {
             tmp_file.sync_all()?;
         }
         std::fs::rename(&tmp_path, &self.path)?;
-        self.file = Some(OpenOptions::new().append(true).read(true).open(&self.path)?);
+        self.file = Some(
+            OpenOptions::new()
+                .append(true)
+                .read(true)
+                .open(&self.path)?,
+        );
         Ok(())
     }
 }

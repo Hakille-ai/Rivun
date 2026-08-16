@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -134,11 +134,13 @@ impl SpscRingBuffer {
                     let needed = write_len - avail;
                     let to_drop = needed.min(self.available_read());
                     self.skip_read(to_drop);
-                    self.dropped_bytes.fetch_add(to_drop as u64, Ordering::AcqRel);
+                    self.dropped_bytes
+                        .fetch_add(to_drop as u64, Ordering::AcqRel);
                 }
                 StreamBackpressurePolicy::DropNewest => {
                     let to_drop = write_len.saturating_sub(avail);
-                    self.dropped_bytes.fetch_add(to_drop as u64, Ordering::AcqRel);
+                    self.dropped_bytes
+                        .fetch_add(to_drop as u64, Ordering::AcqRel);
                     if avail == 0 {
                         return Ok(0);
                     }
@@ -169,7 +171,8 @@ impl SpscRingBuffer {
         }
 
         self.head.store(head, Ordering::Release);
-        self.total_written.fetch_add(data.len() as u64, Ordering::AcqRel);
+        self.total_written
+            .fetch_add(data.len() as u64, Ordering::AcqRel);
         Ok(data.len())
     }
 
@@ -238,8 +241,15 @@ impl AsyncModbusConnection {
         }
     }
 
-    pub async fn read_holding_registers(&self, addr: u16, count: u16) -> Result<Vec<u16>, StreamingError> {
-        let guard = self.holding_registers.lock().map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
+    pub async fn read_holding_registers(
+        &self,
+        addr: u16,
+        count: u16,
+    ) -> Result<Vec<u16>, StreamingError> {
+        let guard = self
+            .holding_registers
+            .lock()
+            .map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
         let mut res = Vec::with_capacity(count as usize);
         for i in 0..count {
             let val = guard.get(&(addr + i)).copied().unwrap_or(0);
@@ -248,8 +258,15 @@ impl AsyncModbusConnection {
         Ok(res)
     }
 
-    pub async fn write_holding_registers(&self, addr: u16, values: &[u16]) -> Result<(), StreamingError> {
-        let mut guard = self.holding_registers.lock().map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
+    pub async fn write_holding_registers(
+        &self,
+        addr: u16,
+        values: &[u16],
+    ) -> Result<(), StreamingError> {
+        let mut guard = self
+            .holding_registers
+            .lock()
+            .map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
         for (idx, &val) in values.iter().enumerate() {
             guard.insert(addr + idx as u16, val);
         }
@@ -257,7 +274,10 @@ impl AsyncModbusConnection {
     }
 
     pub async fn read_coils(&self, addr: u16, count: u16) -> Result<Vec<bool>, StreamingError> {
-        let guard = self.coils.lock().map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
+        let guard = self
+            .coils
+            .lock()
+            .map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
         let mut res = Vec::with_capacity(count as usize);
         for i in 0..count {
             let val = guard.get(&(addr + i)).copied().unwrap_or(false);
@@ -267,7 +287,10 @@ impl AsyncModbusConnection {
     }
 
     pub async fn write_coil(&self, addr: u16, value: bool) -> Result<(), StreamingError> {
-        let mut guard = self.coils.lock().map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
+        let mut guard = self
+            .coils
+            .lock()
+            .map_err(|_| StreamingError::Modbus("mutex poisoned".into()))?;
         guard.insert(addr, value);
         Ok(())
     }
@@ -309,11 +332,20 @@ impl StreamingBufferPool {
     }
 
     /// Read up to `max_len` bytes from the specified stream ID.
-    pub async fn read_async(&self, stream_id: u32, max_len: usize) -> Result<Vec<u8>, StreamingError> {
-        let transport = self.streams.get(&stream_id).ok_or(StreamingError::StreamNotFound(stream_id))?;
+    pub async fn read_async(
+        &self,
+        stream_id: u32,
+        max_len: usize,
+    ) -> Result<Vec<u8>, StreamingError> {
+        let transport = self
+            .streams
+            .get(&stream_id)
+            .ok_or(StreamingError::StreamNotFound(stream_id))?;
         match transport {
             StreamTransport::Memory(q) => {
-                let mut guard = q.lock().map_err(|_| StreamingError::Io("lock poisoned".into()))?;
+                let mut guard = q
+                    .lock()
+                    .map_err(|_| StreamingError::Io("lock poisoned".into()))?;
                 let to_read = max_len.min(guard.len());
                 let mut out = Vec::with_capacity(to_read);
                 for _ in 0..to_read {
@@ -331,7 +363,9 @@ impl StreamingBufferPool {
             }
             StreamTransport::Modbus(mb) => {
                 // Modbus binary register serialization
-                let regs = mb.read_holding_registers(0, (max_len / 2).max(1) as u16).await?;
+                let regs = mb
+                    .read_holding_registers(0, (max_len / 2).max(1) as u16)
+                    .await?;
                 let mut bytes = Vec::with_capacity(regs.len() * 2);
                 for reg in regs {
                     bytes.extend_from_slice(&reg.to_be_bytes());
@@ -344,10 +378,15 @@ impl StreamingBufferPool {
 
     /// Write bytes into the specified stream ID.
     pub async fn write_async(&self, stream_id: u32, data: &[u8]) -> Result<usize, StreamingError> {
-        let transport = self.streams.get(&stream_id).ok_or(StreamingError::StreamNotFound(stream_id))?;
+        let transport = self
+            .streams
+            .get(&stream_id)
+            .ok_or(StreamingError::StreamNotFound(stream_id))?;
         match transport {
             StreamTransport::Memory(q) => {
-                let mut guard = q.lock().map_err(|_| StreamingError::Io("lock poisoned".into()))?;
+                let mut guard = q
+                    .lock()
+                    .map_err(|_| StreamingError::Io("lock poisoned".into()))?;
                 guard.extend(data.iter().copied());
                 Ok(data.len())
             }
@@ -415,7 +454,10 @@ mod tests {
     #[tokio::test]
     async fn test_streaming_buffer_pool_integration() {
         let mut pool = StreamingBufferPool::new();
-        let ring = Arc::new(SpscRingBuffer::new(128, StreamBackpressurePolicy::DropOldest));
+        let ring = Arc::new(SpscRingBuffer::new(
+            128,
+            StreamBackpressurePolicy::DropOldest,
+        ));
         pool.register_stream(1, StreamTransport::SharedRingBuffer(ring));
 
         let queue = Arc::new(Mutex::new(VecDeque::new()));

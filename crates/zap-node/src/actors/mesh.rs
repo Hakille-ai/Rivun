@@ -4,13 +4,12 @@ use anyhow::Result;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc, watch};
 use tracing::{debug, warn};
-use zap_net::mesh::{HeartbeatScheduler, MeshTopology, PartitionStatus, PeerHealthState};
+use zap_net::mesh::{HeartbeatScheduler, MeshTopology, PartitionStatus};
 
-use super::{InboundMeshPacket, MeshHealthStatus, MeshPacketKind};
+use super::{InboundMeshPacket, MeshHealthStatus};
 use crate::config::MeshConfig;
 
 pub struct MeshActor {
-    config: MeshConfig,
     inbound_rx: mpsc::Receiver<InboundMeshPacket>,
     status_tx: watch::Sender<MeshHealthStatus>,
     shutdown_rx: broadcast::Receiver<()>,
@@ -33,7 +32,6 @@ impl MeshActor {
             Duration::from_millis(config.heartbeat_interval_ms * 10),
         );
         Self {
-            config,
             inbound_rx,
             status_tx,
             shutdown_rx,
@@ -84,11 +82,21 @@ impl MeshActor {
             let status = topo.partition_status(4, now_micros);
             let is_partitioned = !status.is_operational();
             let (quorum_ratio, reachable_validators, total_validators) = match status {
-                PartitionStatus::Normal { reachable_ratio, reachable_count, total_validators } => {
-                    (reachable_ratio, reachable_count, total_validators)
-                }
-                PartitionStatus::DegradedMinority { reachable_ratio, reachable_count, total_validators, .. } => {
-                    warn!(reachable_count, total_validators, "Mesh degraded in minority partition");
+                PartitionStatus::Normal {
+                    reachable_ratio,
+                    reachable_count,
+                    total_validators,
+                } => (reachable_ratio, reachable_count, total_validators),
+                PartitionStatus::DegradedMinority {
+                    reachable_ratio,
+                    reachable_count,
+                    total_validators,
+                    ..
+                } => {
+                    warn!(
+                        reachable_count,
+                        total_validators, "Mesh degraded in minority partition"
+                    );
                     (reachable_ratio, reachable_count, total_validators)
                 }
                 PartitionStatus::Isolated => (0.0, 1, 4),

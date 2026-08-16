@@ -4,10 +4,10 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use zap_driver_sdk::{
-    BackpressurePolicy, IpcChannel, IpcChannelConfig, IpcMessage, IpcTopology, IPC_MSG_DOMAIN,
-};
 use thiserror::Error;
+use zap_driver_sdk::{
+    BackpressurePolicy, IPC_MSG_DOMAIN, IpcChannel, IpcChannelConfig, IpcMessage, IpcTopology,
+};
 
 /// IPC runtime errors.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -57,12 +57,16 @@ impl IpcPipe {
             return Err(RuntimeIpcError::LockPoisoned);
         }
 
-        self.channel.send(msg).map_err(|_| RuntimeIpcError::BufferOverflow(self.channel.config().channel_id))
+        self.channel
+            .send(msg)
+            .map_err(|_| RuntimeIpcError::BufferOverflow(self.channel.config().channel_id))
     }
 
     /// Receive the next message from the pipe.
     pub fn recv(&self) -> Result<Option<IpcMessage>, RuntimeIpcError> {
-        self.channel.recv().map_err(|_| RuntimeIpcError::LockPoisoned)
+        self.channel
+            .recv()
+            .map_err(|_| RuntimeIpcError::LockPoisoned)
     }
 
     /// Get current causal chain transcript hash.
@@ -92,7 +96,10 @@ impl IpcRouter {
     /// Build and register channels for a given topology.
     pub fn configure_topology(&mut self, topology: IpcTopology, capacity: usize) {
         match topology {
-            IpcTopology::PointToPoint { source_stage, target_stage } => {
+            IpcTopology::PointToPoint {
+                source_stage,
+                target_stage,
+            } => {
                 let channel_id = (source_stage << 16) | target_stage;
                 let pipe = IpcPipe::new(
                     source_stage,
@@ -125,7 +132,10 @@ impl IpcRouter {
                     self.pipes.insert((src, dst), pipe);
                 }
             }
-            IpcTopology::FanOut { source_stage, target_stages } => {
+            IpcTopology::FanOut {
+                source_stage,
+                target_stages,
+            } => {
                 for target in target_stages {
                     let channel_id = (source_stage << 16) | target;
                     let pipe = IpcPipe::new(
@@ -142,7 +152,10 @@ impl IpcRouter {
                     self.pipes.insert((source_stage, target), pipe);
                 }
             }
-            IpcTopology::FanIn { source_stages, target_stage } => {
+            IpcTopology::FanIn {
+                source_stages,
+                target_stage,
+            } => {
                 for source in source_stages {
                     let channel_id = (source << 16) | target_stage;
                     let pipe = IpcPipe::new(
@@ -163,15 +176,30 @@ impl IpcRouter {
     }
 
     /// Forward a message from a source stage to a target stage.
-    pub fn route_message(&self, src: u32, dst: u32, msg: IpcMessage) -> Result<(), RuntimeIpcError> {
-        let pipe = self.pipes.get(&(src, dst)).ok_or(RuntimeIpcError::StageNotConnected(src))?;
+    pub fn route_message(
+        &self,
+        src: u32,
+        dst: u32,
+        msg: IpcMessage,
+    ) -> Result<(), RuntimeIpcError> {
+        let pipe = self
+            .pipes
+            .get(&(src, dst))
+            .ok_or(RuntimeIpcError::StageNotConnected(src))?;
         pipe.send(msg)?;
         Ok(())
     }
 
     /// Receive next message destined for a stage from a source stage.
-    pub fn receive_message(&self, src: u32, dst: u32) -> Result<Option<IpcMessage>, RuntimeIpcError> {
-        let pipe = self.pipes.get(&(src, dst)).ok_or(RuntimeIpcError::StageNotConnected(dst))?;
+    pub fn receive_message(
+        &self,
+        src: u32,
+        dst: u32,
+    ) -> Result<Option<IpcMessage>, RuntimeIpcError> {
+        let pipe = self
+            .pipes
+            .get(&(src, dst))
+            .ok_or(RuntimeIpcError::StageNotConnected(dst))?;
         pipe.recv()
     }
 

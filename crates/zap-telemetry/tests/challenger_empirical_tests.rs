@@ -35,7 +35,13 @@ fn test_challenger_corrupted_wal_detection() {
         .find(|c| c.category == "replay_guard")
         .expect("replay_guard check exists");
     assert_eq!(check.status, FleetDoctorStatus::Failed);
-    assert!(check.detail.as_ref().unwrap().contains("invalid magic header"));
+    assert!(
+        check
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("invalid magic header")
+    );
 
     // 2. Corrupted Magic in WAL (8 bytes, wrong content)
     fs::remove_file(&wal_truncated).unwrap();
@@ -54,7 +60,13 @@ fn test_challenger_corrupted_wal_detection() {
         .find(|c| c.category == "replay_guard")
         .unwrap();
     assert_eq!(check2.status, FleetDoctorStatus::Failed);
-    assert!(check2.detail.as_ref().unwrap().contains("invalid magic header"));
+    assert!(
+        check2
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("invalid magic header")
+    );
 
     // 3. Valid Magic WAL (b"ZAPFRM01")
     fs::remove_file(&wal_corrupted).unwrap();
@@ -68,7 +80,13 @@ fn test_challenger_corrupted_wal_detection() {
         .find(|c| c.category == "replay_guard")
         .unwrap();
     assert_eq!(check3.status, FleetDoctorStatus::Passed);
-    assert!(check3.detail.as_ref().unwrap().contains("Verified 1 WAL file(s) with valid ZAPFRM01"));
+    assert!(
+        check3
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("Verified 1 WAL file(s) with valid ZAPFRM01")
+    );
 }
 
 #[test]
@@ -112,10 +130,10 @@ fn test_challenger_journal_manifest_and_segment_failures() {
         segment_bytes: 100,
         segment_hash: "blake3:0000000000000000000000000000000000000000000000000000000000000000"
             .to_string(),
-        first_receipt_hash: "blake3:1111111111111111111111111111111111111111111111111111111111111111"
-            .to_string(),
-        last_receipt_hash: "blake3:2222222222222222222222222222222222222222222222222222222222222222"
-            .to_string(),
+        first_receipt_hash:
+            "blake3:1111111111111111111111111111111111111111111111111111111111111111".to_string(),
+        last_receipt_hash:
+            "blake3:2222222222222222222222222222222222222222222222222222222222222222".to_string(),
         first_processed_at_micros: 1000,
         last_processed_at_micros: 2000,
         previous_segment_hash: None,
@@ -126,7 +144,11 @@ fn test_challenger_journal_manifest_and_segment_failures() {
 
     // Tamper with receipts_count in signed manifest JSON
     manifest_json["manifest"]["receipts_count"] = serde_json::json!(9999);
-    fs::write(&manifest_file, serde_json::to_string_pretty(&manifest_json).unwrap()).unwrap();
+    fs::write(
+        &manifest_file,
+        serde_json::to_string_pretty(&manifest_json).unwrap(),
+    )
+    .unwrap();
 
     let report2 = FleetDoctor::evaluate(node_id, None, Some(&receipts_dir), None, None);
     assert_eq!(
@@ -140,7 +162,13 @@ fn test_challenger_journal_manifest_and_segment_failures() {
         .find(|c| c.category == "journal")
         .unwrap();
     assert_eq!(check2.status, FleetDoctorStatus::Failed);
-    assert!(check2.detail.as_ref().unwrap().contains("signature invalid"));
+    assert!(
+        check2
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("signature invalid")
+    );
 
     // 3. Valid signed manifest
     fs::write(&manifest_file, signed_manifest.to_json_string().unwrap()).unwrap();
@@ -151,7 +179,13 @@ fn test_challenger_journal_manifest_and_segment_failures() {
         .find(|c| c.category == "journal")
         .unwrap();
     assert_eq!(check3.status, FleetDoctorStatus::Passed);
-    assert!(check3.detail.as_ref().unwrap().contains("Receipt journal verified: 1 segment(s), 1 signed manifest(s)"));
+    assert!(
+        check3
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("Receipt journal verified: 1 segment(s), 1 signed manifest(s)")
+    );
 }
 
 #[test]
@@ -170,7 +204,11 @@ fn test_challenger_invalid_pack_registry_signatures() {
     assert!(registry.verify_signature().is_ok());
 
     // Write valid registry
-    fs::write(&registry_path, serde_json::to_string_pretty(&registry).unwrap()).unwrap();
+    fs::write(
+        &registry_path,
+        serde_json::to_string_pretty(&registry).unwrap(),
+    )
+    .unwrap();
 
     let node_id = Uuid::new_v4();
     let report = FleetDoctor::evaluate(node_id, Some(&config_path), None, None, None);
@@ -180,13 +218,23 @@ fn test_challenger_invalid_pack_registry_signatures() {
         .find(|c| c.category == "pack_registry")
         .unwrap();
     assert_eq!(check.status, FleetDoctorStatus::Passed);
-    assert!(check.detail.as_ref().unwrap().contains("verified with valid signature"));
+    assert!(
+        check
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("verified with valid signature")
+    );
 
     // 2. Tamper with registry content (change generated_by after signing)
     let mut tampered_json: serde_json::Value =
         serde_json::from_str(&registry.to_json_string().unwrap()).unwrap();
     tampered_json["generated_by"] = serde_json::json!("malicious_hacker");
-    fs::write(&registry_path, serde_json::to_string_pretty(&tampered_json).unwrap()).unwrap();
+    fs::write(
+        &registry_path,
+        serde_json::to_string_pretty(&tampered_json).unwrap(),
+    )
+    .unwrap();
 
     let report_tampered = FleetDoctor::evaluate(node_id, Some(&config_path), None, None, None);
     assert_eq!(
@@ -200,11 +248,21 @@ fn test_challenger_invalid_pack_registry_signatures() {
         .find(|c| c.category == "pack_registry")
         .unwrap();
     assert_eq!(check_tampered.status, FleetDoctorStatus::Failed);
-    assert!(check_tampered.detail.as_ref().unwrap().contains("Pack registry signature invalid"));
+    assert!(
+        check_tampered
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("Pack registry signature invalid")
+    );
 
     // 3. Unsigned registry
     registry.signature = None;
-    fs::write(&registry_path, serde_json::to_string_pretty(&registry).unwrap()).unwrap();
+    fs::write(
+        &registry_path,
+        serde_json::to_string_pretty(&registry).unwrap(),
+    )
+    .unwrap();
     let report_unsigned = FleetDoctor::evaluate(node_id, Some(&config_path), None, None, None);
     let check_unsigned = report_unsigned
         .checks
@@ -212,7 +270,13 @@ fn test_challenger_invalid_pack_registry_signatures() {
         .find(|c| c.category == "pack_registry")
         .unwrap();
     assert_eq!(check_unsigned.status, FleetDoctorStatus::Warning);
-    assert!(check_unsigned.detail.as_ref().unwrap().contains("present but unsigned"));
+    assert!(
+        check_unsigned
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("present but unsigned")
+    );
 }
 
 #[test]
@@ -246,7 +310,13 @@ fn test_challenger_quorum_failure_threshold_and_degradation() {
         .unwrap();
     // 1 active node (local) < quorum threshold (3) -> Warning
     assert_eq!(cert_check.status, FleetDoctorStatus::Warning);
-    assert!(cert_check.detail.as_ref().unwrap().contains("below quorum threshold (3/4)"));
+    assert!(
+        cert_check
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("below quorum threshold (3/4)")
+    );
 
     // Case 2: Mark peers active so active nodes >= threshold -> Passed
     for node in topology.nodes.values_mut() {
@@ -263,7 +333,13 @@ fn test_challenger_quorum_failure_threshold_and_degradation() {
         .find(|c| c.category == "certificate_validity")
         .unwrap();
     assert_eq!(cert_check_passed.status, FleetDoctorStatus::Passed);
-    assert!(cert_check_passed.detail.as_ref().unwrap().contains("validator quorum threshold met"));
+    assert!(
+        cert_check_passed
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("validator quorum threshold met")
+    );
 }
 
 #[test]
@@ -313,7 +389,9 @@ b3BlbnNzaC1rZXktdjEAAAA...private_ssh_key_data...
     // Test 3: Standalone 64-char Hexadecimal tokens
     let raw_hex_text = "Key fingerprint: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 is valid.";
     let redacted_hex = SecretRedactor::redact_text(raw_hex_text);
-    assert!(!redacted_hex.contains("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+    assert!(
+        !redacted_hex.contains("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    );
     assert!(redacted_hex.contains("[REDACTED_SECRET_KEY]"));
     assert!(redacted_hex.contains("Key fingerprint: [REDACTED_SECRET_KEY] is valid."));
 }
@@ -334,7 +412,11 @@ fn test_challenger_tar_gz_decompression_and_contents() {
     let mut tar_bytes = Vec::new();
     decoder.read_to_end(&mut tar_bytes).unwrap();
 
-    assert_eq!(tar_bytes.len() % 512, 0, "Decompressed tar must be 512-byte aligned");
+    assert_eq!(
+        tar_bytes.len() % 512,
+        0,
+        "Decompressed tar must be 512-byte aligned"
+    );
 
     // Inspect tarball entries
     let mut offset = 0;
@@ -394,7 +476,11 @@ fn test_challenger_tar_gz_decompression_and_contents() {
             _ => {}
         }
 
-        let padding = if !size.is_multiple_of(512) { 512 - (size % 512) } else { 0 };
+        let padding = if !size.is_multiple_of(512) {
+            512 - (size % 512)
+        } else {
+            0
+        };
         offset += size + padding;
     }
 
@@ -414,25 +500,38 @@ fn test_challenger_prometheus_escaping_and_all_fields() {
     let snapshot = ZapNodeMetricsSnapshot {
         node_id,
         frames_sent_total: vec![
-            PeerCounter { peer: peer_1, value: 100 },
-            PeerCounter { peer: peer_2, value: 200 },
-        ],
-        frames_received_total: vec![PeerCounter { peer: peer_1, value: 50 }],
-        frames_rejected_total: vec![
-            ReasonCounter {
-                reason: "invalid_signature\nwith_quote\"and\\backslash".to_string(),
-                value: 12,
+            PeerCounter {
+                peer: peer_1,
+                value: 100,
+            },
+            PeerCounter {
+                peer: peer_2,
+                value: 200,
             },
         ],
-        driver_execution_errors_total: vec![
-            ActionCounter {
-                action: "action_\"wasm\"_exec".to_string(),
-                value: 4,
-            },
-        ],
+        frames_received_total: vec![PeerCounter {
+            peer: peer_1,
+            value: 50,
+        }],
+        frames_rejected_total: vec![ReasonCounter {
+            reason: "invalid_signature\nwith_quote\"and\\backslash".to_string(),
+            value: 12,
+        }],
+        driver_execution_errors_total: vec![ActionCounter {
+            action: "action_\"wasm\"_exec".to_string(),
+            value: 4,
+        }],
         peer_trust_status: vec![
-            PeerTrustGauge { peer: peer_1, status: "trusted".to_string(), value: 1 },
-            PeerTrustGauge { peer: peer_2, status: "quarantined".to_string(), value: 0 },
+            PeerTrustGauge {
+                peer: peer_1,
+                status: "trusted".to_string(),
+                value: 1,
+            },
+            PeerTrustGauge {
+                peer: peer_2,
+                status: "quarantined".to_string(),
+                value: 0,
+            },
         ],
         registry_signature_valid: Some(1),
         capability_cache_age_seconds: Some(3600),

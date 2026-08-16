@@ -7,9 +7,9 @@ use anyhow::{Context, Result, anyhow, bail};
 pub mod actors;
 pub mod config;
 pub mod durable_replay;
-pub use config::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
+pub use config::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
@@ -1267,7 +1267,8 @@ impl ReceiptDurabilityState {
 }
 
 pub use zap_telemetry::{
-    ActionCounter, PeerCounter, PeerTrustGauge, ReasonCounter, TransportCounter, ZapNodeMetricsSnapshot,
+    ActionCounter, PeerCounter, PeerTrustGauge, ReasonCounter, TransportCounter,
+    ZapNodeMetricsSnapshot,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1367,7 +1368,6 @@ impl PeerTrustStatus {
         }
     }
 }
-
 
 fn health_text_escape(value: &str) -> String {
     value
@@ -4430,7 +4430,10 @@ impl ReplayGuard {
         }
     }
 
-    fn with_durable_store(capacity: usize, durable_store: durable_replay::DurableReplayStore) -> Self {
+    fn with_durable_store(
+        capacity: usize,
+        durable_store: durable_replay::DurableReplayStore,
+    ) -> Self {
         Self {
             capacity,
             durable_store: Some(durable_store),
@@ -4755,6 +4758,9 @@ mod tests {
             message_policy,
             message_schema,
             routes: Vec::new(),
+            swarm: SwarmConfig::default(),
+            gossip: GossipConfig::default(),
+            mesh: MeshConfig::default(),
         };
         let node = ZapNode::from_config(config).await.unwrap();
         sender_endpoint
@@ -4819,6 +4825,9 @@ mod tests {
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
+            swarm: SwarmConfig::default(),
+            gossip: GossipConfig::default(),
+            mesh: MeshConfig::default(),
         }
     }
 
@@ -6258,6 +6267,9 @@ fsync = "always"
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
+            swarm: SwarmConfig::default(),
+            gossip: GossipConfig::default(),
+            mesh: MeshConfig::default(),
         };
         let node = ZapNode::from_config(config).await.unwrap();
         sender_endpoint
@@ -6595,6 +6607,9 @@ fsync = "always"
                 },
                 target: RouteTarget::peer(target_key.node_id()),
             }],
+            swarm: SwarmConfig::default(),
+            gossip: GossipConfig::default(),
+            mesh: MeshConfig::default(),
         };
         let router = ZapNode::from_config(config).await.unwrap();
         sender_endpoint
@@ -7178,6 +7193,9 @@ required_json_fields = ["message"]
             message_policy: MessagePolicyConfig::default(),
             message_schema: MessageSchemaConfig::default(),
             routes: Vec::new(),
+            swarm: SwarmConfig::default(),
+            gossip: GossipConfig::default(),
+            mesh: MeshConfig::default(),
         };
         let node = ZapNode::from_config(config).await.unwrap();
         sender_endpoint

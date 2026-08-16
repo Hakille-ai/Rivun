@@ -22,8 +22,8 @@ pub use buffer::{
 };
 pub use error::{BufferError, DriverError, IpcError};
 pub use ipc::{
-    BackpressurePolicy, BackpressureStrategy, IpcChannel, IpcChannelConfig, IpcFlags, IpcMessage,
-    IpcPipe, IpcRingBuffer, IpcTopology, IPC_MSG_DOMAIN,
+    BackpressurePolicy, BackpressureStrategy, IPC_MSG_DOMAIN, IpcChannel, IpcChannelConfig,
+    IpcFlags, IpcMessage, IpcPipe, IpcRingBuffer, IpcTopology,
 };
 
 pub const DRIVER_ABI_VERSION: u16 = 1;

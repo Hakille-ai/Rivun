@@ -2,7 +2,7 @@
 
 use super::{
     cache::GossipDeduplicationCache,
-    envelope::{GossipEnvelope, GossipMessageId, DEFAULT_MAX_HOPS},
+    envelope::{DEFAULT_MAX_HOPS, GossipEnvelope, GossipMessageId},
     error::GossipError,
 };
 use bytes::Bytes;
@@ -10,8 +10,8 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Mutex, RwLock,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -141,10 +141,10 @@ impl SwarmGossipEngine for SwarmGossipDispatcher {
             if !envelope.verify_signature(&self.signing_key.verifying_key()) {
                 return Err(GossipError::InvalidSignature(envelope.origin_node));
             }
-        } else if let Some(vk) = self.get_peer_key(&envelope.origin_node) {
-            if !envelope.verify_signature(&vk) {
-                return Err(GossipError::InvalidSignature(envelope.origin_node));
-            }
+        } else if let Some(vk) = self.get_peer_key(&envelope.origin_node)
+            && !envelope.verify_signature(&vk)
+        {
+            return Err(GossipError::InvalidSignature(envelope.origin_node));
         }
 
         // Deduplication check

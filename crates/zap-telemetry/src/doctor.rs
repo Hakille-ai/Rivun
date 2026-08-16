@@ -30,8 +30,12 @@ impl FleetDoctorStatus {
 
     pub fn merge(self, other: Self) -> Self {
         match (self, other) {
-            (FleetDoctorStatus::Failed, _) | (_, FleetDoctorStatus::Failed) => FleetDoctorStatus::Failed,
-            (FleetDoctorStatus::Warning, _) | (_, FleetDoctorStatus::Warning) => FleetDoctorStatus::Warning,
+            (FleetDoctorStatus::Failed, _) | (_, FleetDoctorStatus::Failed) => {
+                FleetDoctorStatus::Failed
+            }
+            (FleetDoctorStatus::Warning, _) | (_, FleetDoctorStatus::Warning) => {
+                FleetDoctorStatus::Warning
+            }
             _ => FleetDoctorStatus::Passed,
         }
     }
@@ -112,7 +116,10 @@ impl FleetDoctor {
             let active = topo.active_peer_count();
             if active == 0 && topo.nodes.len() > 1 {
                 net_status = FleetDoctorStatus::Warning;
-                net_detail = format!("0 active peers out of {} configured nodes", topo.nodes.len());
+                net_detail = format!(
+                    "0 active peers out of {} configured nodes",
+                    topo.nodes.len()
+                );
             }
         }
         checks.push(
@@ -161,7 +168,8 @@ impl FleetDoctor {
         overall_status = overall_status.merge(storage_status);
 
         // 3. Replay Guard Category Check
-        let (replay_status, replay_detail) = Self::check_replay_guard(memory_dir, receipts_dir, config_path);
+        let (replay_status, replay_detail) =
+            Self::check_replay_guard(memory_dir, receipts_dir, config_path);
         checks.push(
             FleetDoctorCheck::new(
                 "replay_guard",
@@ -218,7 +226,8 @@ impl FleetDoctor {
         overall_status = overall_status.merge(pack_status);
 
         // 6. Certificate & Key Validity Category Check
-        let (cert_status, cert_detail) = Self::check_certificate_and_quorum(node_id, config_path, topology);
+        let (cert_status, cert_detail) =
+            Self::check_certificate_and_quorum(node_id, config_path, topology);
         checks.push(
             FleetDoctorCheck::new(
                 "certificate_validity",
@@ -236,8 +245,50 @@ impl FleetDoctor {
         );
         overall_status = overall_status.merge(cert_status);
 
+        // 7. Peer Trust Category Check
+        let mut trust_status = FleetDoctorStatus::Passed;
+        let mut trust_detail = String::from("All registered peers have trusted status");
+        if let Some(topo) = topology {
+            let mut failed_peers: Vec<String> = Vec::new();
+            let mut warned_peers: Vec<String> = Vec::new();
+            for peer in topo.nodes.values() {
+                if peer.node_id == node_id {
+                    continue;
+                }
+                match peer.trust_status.as_str() {
+                    "trusted" => {}
+                    "untrusted" | "quarantined" | "revoked" | "banned" | "blacklisted"
+                    | "compromised" => {
+                        failed_peers.push(format!("{} ({})", peer.node_id, peer.trust_status));
+                    }
+                    _ => warned_peers.push(format!("{} ({})", peer.node_id, peer.trust_status)),
+                }
+            }
+            if !failed_peers.is_empty() {
+                trust_status = FleetDoctorStatus::Failed;
+                trust_detail = format!("Untrusted peer(s) in fleet: {}", failed_peers.join(", "));
+            } else if !warned_peers.is_empty() {
+                trust_status = FleetDoctorStatus::Warning;
+                trust_detail = format!("Non-trusted peer(s) in fleet: {}", warned_peers.join(", "));
+            }
+        }
+        checks.push(
+            FleetDoctorCheck::new(
+                "peer_trust",
+                "peer_trust_status",
+                trust_status,
+                if trust_status == FleetDoctorStatus::Passed {
+                    "All registered peers have trusted status"
+                } else {
+                    "Untrusted or non-trusted peer(s) present in fleet topology"
+                },
+            )
+            .with_detail(trust_detail),
+        );
+        overall_status = overall_status.merge(trust_status);
+
         let summary = format!(
-            "Fleet Doctor evaluated 6 core criteria ({} checks): {}",
+            "Fleet Doctor evaluated 7 core criteria ({} checks): {}",
             checks.len(),
             overall_status.as_str()
         );
@@ -306,14 +357,19 @@ impl FleetDoctor {
                 if file.read_exact(&mut magic).is_err() || &magic != DURABLE_FRAME_MAGIC {
                     return (
                         FleetDoctorStatus::Failed,
-                        format!("WAL file `{}` corrupted: invalid magic header", wal_path.display()),
+                        format!(
+                            "WAL file `{}` corrupted: invalid magic header",
+                            wal_path.display()
+                        ),
                     );
                 }
                 verified += 1;
             }
             return (
                 FleetDoctorStatus::Passed,
-                format!("Verified {verified} WAL file(s) with valid ZAPFRM01 framing and durable window (max skew 30s)"),
+                format!(
+                    "Verified {verified} WAL file(s) with valid ZAPFRM01 framing and durable window (max skew 30s)"
+                ),
             );
         }
 
@@ -358,7 +414,10 @@ impl FleetDoctor {
             Err(err) => {
                 return (
                     FleetDoctorStatus::Failed,
-                    format!("Failed to read receipt directory `{}`: {err}", r_dir.display()),
+                    format!(
+                        "Failed to read receipt directory `{}`: {err}",
+                        r_dir.display()
+                    ),
                 );
             }
         };
@@ -369,7 +428,10 @@ impl FleetDoctor {
                 continue;
             }
             let fname = path.file_name().unwrap_or_default().to_string_lossy();
-            if fname.ends_with(".zjmanifest.json.sig") || fname.ends_with(".zjmanifest.json") || fname.ends_with(".sig") {
+            if fname.ends_with(".zjmanifest.json.sig")
+                || fname.ends_with(".zjmanifest.json")
+                || fname.ends_with(".sig")
+            {
                 let content = match fs::read_to_string(&path) {
                     Ok(c) => c,
                     Err(e) => {
@@ -395,7 +457,10 @@ impl FleetDoctor {
                     Err(e) => {
                         return (
                             FleetDoctorStatus::Failed,
-                            format!("Receipt segment manifest corrupted in `{}`: {e}", path.display()),
+                            format!(
+                                "Receipt segment manifest corrupted in `{}`: {e}",
+                                path.display()
+                            ),
                         );
                     }
                 }
@@ -407,7 +472,10 @@ impl FleetDoctor {
                     if &magic != JOURNAL_SEGMENT_MAGIC {
                         return (
                             FleetDoctorStatus::Failed,
-                            format!("Receipt journal segment `{}` has invalid magic", path.display()),
+                            format!(
+                                "Receipt journal segment `{}` has invalid magic",
+                                path.display()
+                            ),
                         );
                     }
                     segment_count += 1;
@@ -425,7 +493,10 @@ impl FleetDoctor {
         } else {
             (
                 FleetDoctorStatus::Passed,
-                format!("Receipt journal directory verified at {} (0 segments)", r_dir.display()),
+                format!(
+                    "Receipt journal directory verified at {} (0 segments)",
+                    r_dir.display()
+                ),
             )
         }
     }
@@ -459,7 +530,10 @@ impl FleetDoctor {
                         if let Err(e) = registry.verify_signature() {
                             return (
                                 FleetDoctorStatus::Failed,
-                                format!("Pack registry signature invalid in `{}`: {e}", path.display()),
+                                format!(
+                                    "Pack registry signature invalid in `{}`: {e}",
+                                    path.display()
+                                ),
                             );
                         }
                         return (
@@ -472,7 +546,10 @@ impl FleetDoctor {
                     } else {
                         return (
                             FleetDoctorStatus::Warning,
-                            format!("Pack registry at `{}` is present but unsigned", path.display()),
+                            format!(
+                                "Pack registry at `{}` is present but unsigned",
+                                path.display()
+                            ),
                         );
                     }
                 }
@@ -483,7 +560,10 @@ impl FleetDoctor {
                         if let Err(e) = registry.verify_signature() {
                             return (
                                 FleetDoctorStatus::Failed,
-                                format!("Driver registry signature invalid in `{}`: {e}", path.display()),
+                                format!(
+                                    "Driver registry signature invalid in `{}`: {e}",
+                                    path.display()
+                                ),
                             );
                         }
                         return (
@@ -496,14 +576,20 @@ impl FleetDoctor {
                     } else {
                         return (
                             FleetDoctorStatus::Warning,
-                            format!("Driver registry at `{}` is present but unsigned", path.display()),
+                            format!(
+                                "Driver registry at `{}` is present but unsigned",
+                                path.display()
+                            ),
                         );
                     }
                 }
 
                 return (
                     FleetDoctorStatus::Failed,
-                    format!("Registry file at `{}` contains unparseable registry JSON", path.display()),
+                    format!(
+                        "Registry file at `{}` contains unparseable registry JSON",
+                        path.display()
+                    ),
                 );
             }
         }
@@ -548,7 +634,10 @@ impl FleetDoctor {
                 } else {
                     return (
                         FleetDoctorStatus::Failed,
-                        format!("Node key file at `{}` is invalid or corrupted", key_path.display()),
+                        format!(
+                            "Node key file at `{}` is invalid or corrupted",
+                            key_path.display()
+                        ),
                     );
                 }
             }

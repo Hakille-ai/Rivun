@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    MerkleMountainRange, ReceiptBatchSeal, SignedActionReceipt, ZapLedgerError, hash_leaf,
-    validate_artifact_hash, HASH_PREFIX,
+    HASH_PREFIX, MerkleMountainRange, ReceiptBatchSeal, SignedActionReceipt, ZapLedgerError,
+    hash_leaf, validate_artifact_hash,
 };
 
 pub const ZK_ROLLUP_SCHEMA_VERSION: u8 = 1;
@@ -200,16 +200,10 @@ impl ZkReceiptBatchProof {
             ));
         }
 
-        validate_artifact_hash(
-            "initial_state_root",
-            &self.public_inputs.initial_state_root,
-        )?;
+        validate_artifact_hash("initial_state_root", &self.public_inputs.initial_state_root)?;
         validate_artifact_hash("final_state_root", &self.public_inputs.final_state_root)?;
         validate_artifact_hash("batch_mmr_root", &self.public_inputs.batch_mmr_root)?;
-        validate_artifact_hash(
-            "quorum_commitment",
-            &self.public_inputs.quorum_commitment,
-        )?;
+        validate_artifact_hash("quorum_commitment", &self.public_inputs.quorum_commitment)?;
 
         if self.mmr_root != self.public_inputs.batch_mmr_root {
             return Ok(false);
@@ -248,9 +242,9 @@ impl ZkReceiptBatchProof {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ActionReceipt;
     use zap_core::ZapFlags;
     use zap_crypto::Keypair;
-    use crate::ActionReceipt;
 
     fn make_sample_receipt(keypair: &Keypair, i: usize) -> SignedActionReceipt {
         let receipt = ActionReceipt {

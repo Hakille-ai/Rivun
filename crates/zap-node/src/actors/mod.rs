@@ -115,7 +115,8 @@ impl NodeActorChannels {
         let (udp_to_mesh_tx, udp_to_mesh_rx) = mpsc::channel(capacity);
         let (udp_to_execution_tx, udp_to_execution_rx) = mpsc::channel(capacity);
         let (consensus_to_execution_tx, consensus_to_execution_rx) = mpsc::channel(capacity);
-        let (mesh_to_execution_watch_tx, mesh_to_execution_watch_rx) = watch::channel(MeshHealthStatus::default());
+        let (mesh_to_execution_watch_tx, mesh_to_execution_watch_rx) =
+            watch::channel(MeshHealthStatus::default());
         let (shutdown_tx, _) = broadcast::channel(16);
 
         Self {

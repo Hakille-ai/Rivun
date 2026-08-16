@@ -3,7 +3,7 @@
 use anyhow::Result;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use zap_agent::SwarmCommitCertificateRef;
 use zap_net::consensus::{SwarmConsensusEngine, SwarmProposal, SwarmVote};
 
@@ -65,32 +65,36 @@ impl ConsensusActor {
         if let Some(engine) = &self.engine {
             if let Ok(proposal) = serde_json::from_slice::<SwarmProposal>(&pkt.payload) {
                 let _ = engine.handle_proposal(proposal);
-            } else if let Ok(vote) = serde_json::from_slice::<SwarmVote>(&pkt.payload) {
-                if let Ok(Some(cert)) = engine.handle_vote(vote) {
-                    info!(epoch = cert.epoch, round = cert.round, "Consensus commit certificate finalized");
-                    let cert_hash = hex::encode(cert.compute_hash());
-                    let cert_ref = SwarmCommitCertificateRef {
-                        certificate_hash: cert_hash,
-                        epoch: cert.epoch,
-                        view: cert.view,
-                        round: cert.round,
-                        block_height: cert.block_height,
-                        proposal_digest: cert.proposal_digest,
-                        threshold: cert.threshold,
-                        total_validators: cert.total_validators,
-                        signer_bitmask: cert.signer_bitmask.clone(),
-                        signatures_count: cert.signatures.len(),
-                    };
+            } else if let Ok(vote) = serde_json::from_slice::<SwarmVote>(&pkt.payload)
+                && let Ok(Some(cert)) = engine.handle_vote(vote)
+            {
+                info!(
+                    epoch = cert.epoch,
+                    round = cert.round,
+                    "Consensus commit certificate finalized"
+                );
+                let cert_hash = hex::encode(cert.compute_hash());
+                let cert_ref = SwarmCommitCertificateRef {
+                    certificate_hash: cert_hash,
+                    epoch: cert.epoch,
+                    view: cert.view,
+                    round: cert.round,
+                    block_height: cert.block_height,
+                    proposal_digest: cert.proposal_digest,
+                    threshold: cert.threshold,
+                    total_validators: cert.total_validators,
+                    signer_bitmask: cert.signer_bitmask.clone(),
+                    signatures_count: cert.signatures.len(),
+                };
 
-                    let finalized = ConsensusFinalizedBlock {
-                        epoch: cert.epoch,
-                        round: cert.round,
-                        block_height: cert.block_height,
-                        payload_digest: cert.proposal_digest,
-                        certificate: cert_ref,
-                    };
-                    let _ = self.finalized_tx.send(finalized).await;
-                }
+                let finalized = ConsensusFinalizedBlock {
+                    epoch: cert.epoch,
+                    round: cert.round,
+                    block_height: cert.block_height,
+                    payload_digest: cert.proposal_digest,
+                    certificate: cert_ref,
+                };
+                let _ = self.finalized_tx.send(finalized).await;
             }
         }
     }

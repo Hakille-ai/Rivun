@@ -1,7 +1,7 @@
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
-use crate::{DomainPackRegistry, DomainPackRegistryEntry, ZapStoreError, DriverVersion};
+use crate::{DomainPackRegistry, DomainPackRegistryEntry, DriverVersion, ZapStoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DomainPackDependencySpec {
@@ -34,7 +34,11 @@ fn parse_version(s: &str) -> Option<DriverVersion> {
     let minor = parts[1].parse::<u64>().ok()?;
     let patch_str = parts[2].split('-').next().unwrap_or(parts[2]);
     let patch = patch_str.parse::<u64>().ok()?;
-    Some(DriverVersion { major, minor, patch })
+    Some(DriverVersion {
+        major,
+        minor,
+        patch,
+    })
 }
 
 pub fn matches_version_req(version_str: &str, req_str: &str) -> bool {

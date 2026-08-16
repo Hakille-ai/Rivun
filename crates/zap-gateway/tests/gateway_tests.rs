@@ -5,14 +5,14 @@ use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
 
 use zap_agent::{
-    AGENT_PROTOCOL_SCHEMA_VERSION, AgentId, AgentIntent,
-    CapabilityNegotiationRequest, DelegationRequest, IntentKind,
+    AGENT_PROTOCOL_SCHEMA_VERSION, AgentId, AgentIntent, CapabilityNegotiationRequest,
+    DelegationRequest, IntentKind,
 };
 use zap_crypto::Keypair;
 use zap_gateway::{
     AgentGatewayServer, GatewayConfig, HttpAgentGateway, McpEngine, ProvenanceChainBuilder,
-    ProvenanceStage, SseBroker, WebSocketHandler, WsFrame,
-    compute_ws_accept, mcp_tools::ToolExecutionContext,
+    ProvenanceStage, SseBroker, WebSocketHandler, WsFrame, compute_ws_accept,
+    mcp_tools::ToolExecutionContext,
 };
 use zap_policy::PolicySet;
 
@@ -158,7 +158,12 @@ async fn test_mcp_resources_and_prompts() {
     let prompt_get_resp = engine.handle_jsonrpc_value(prompt_get_req).await;
     let prompt_get = prompt_get_resp.result.expect("prompts/get must succeed");
     let msgs = prompt_get["messages"].as_array().unwrap();
-    assert!(msgs[0]["content"]["text"].as_str().unwrap().contains("Deploy domain pack"));
+    assert!(
+        msgs[0]["content"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Deploy domain pack")
+    );
 }
 
 #[tokio::test]
@@ -213,7 +218,12 @@ async fn test_provenance_chain_6_stages_and_tamper_detection() {
         .unwrap()
         .with_policy("policy_hash_allow", "ALLOW", BTreeMap::new())
         .unwrap()
-        .with_driver("driver.motor.v1", "in_hash_1", "out_hash_1", BTreeMap::new())
+        .with_driver(
+            "driver.motor.v1",
+            "in_hash_1",
+            "out_hash_1",
+            BTreeMap::new(),
+        )
         .unwrap()
         .with_poa(&["sig1".to_string(), "sig2".to_string()], BTreeMap::new())
         .unwrap()
@@ -338,7 +348,9 @@ async fn test_http_rest_sessions_and_negotiate_and_delegate() {
     let payload_str = serde_json::to_string(&session_payload).unwrap();
     let req = format!(
         "POST /v1/agent/sessions HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, payload_str.len(), payload_str
+        addr,
+        payload_str.len(),
+        payload_str
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut buf = vec![0u8; 2048];
@@ -378,7 +390,9 @@ async fn test_http_rest_sessions_and_negotiate_and_delegate() {
     let del_str = serde_json::to_string(&del_req).unwrap();
     let req = format!(
         "POST /v1/agent/delegate HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, del_str.len(), del_str
+        addr,
+        del_str.len(),
+        del_str
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut buf = vec![0u8; 2048];
@@ -394,10 +408,9 @@ async fn test_http_rest_sessions_and_negotiate_and_delegate() {
         negotiation_id: Uuid::new_v4(),
         session_id,
         requester_agent: AgentId::new("planner_alpha").unwrap(),
-        required_capabilities: std::collections::BTreeSet::from([zap_capability::CapabilityId::new(
-            "driver.execute:test",
-        )
-        .unwrap()]),
+        required_capabilities: std::collections::BTreeSet::from([
+            zap_capability::CapabilityId::new("driver.execute:test").unwrap(),
+        ]),
         optional_capabilities: std::collections::BTreeSet::new(),
         desired_intents: std::collections::BTreeSet::from([IntentKind::Act]),
         metadata: BTreeMap::new(),
@@ -405,7 +418,9 @@ async fn test_http_rest_sessions_and_negotiate_and_delegate() {
     let neg_str = serde_json::to_string(&neg_req).unwrap();
     let req = format!(
         "POST /v1/agent/negotiate HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        addr, neg_str.len(), neg_str
+        addr,
+        neg_str.len(),
+        neg_str
     );
     stream.write_all(req.as_bytes()).await.unwrap();
     let mut buf = vec![0u8; 2048];
@@ -461,7 +476,10 @@ Sec-WebSocket-Version: 13\r\n\r\n",
     // Send a valid text frame
     let ws_handler = WebSocketHandler::new(1024);
     let text_frame = WsFrame::text(r#"{"action":"status_query"}"#);
-    ws_handler.write_frame(&mut stream, &text_frame).await.unwrap();
+    ws_handler
+        .write_frame(&mut stream, &text_frame)
+        .await
+        .unwrap();
 
     let reply_frame = ws_handler.read_frame(&mut stream).await.unwrap();
     let reply_text = String::from_utf8_lossy(&reply_frame.payload);

@@ -7,7 +7,7 @@
 //! - **Tier 2**: Boundary, Corner Cases & Negative Tests (75 tests across Features 1-15)
 //! - **Tier 3**: Cross-Feature Interactions & Combinations (15 tests)
 //! - **Tier 4**: Real-World Multi-Agent Workload Scenarios (8 tests)
-//! Total E2E Tests: 173+ tests.
+//! - Total E2E Tests: 173+ tests.
 
 pub mod tier1_feature_tests;
 pub mod tier2_boundary_tests;

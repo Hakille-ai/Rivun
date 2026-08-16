@@ -66,10 +66,7 @@ pub enum BufferError {
     },
 
     #[error("buffer capacity exceeded: requested {requested}, capacity {capacity}")]
-    CapacityExceeded {
-        requested: usize,
-        capacity: usize,
-    },
+    CapacityExceeded { requested: usize, capacity: usize },
 
     #[error("invalid pointer: ptr {ptr}, len {len}")]
     InvalidPointer { ptr: u32, len: u32 },

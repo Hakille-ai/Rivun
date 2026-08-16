@@ -343,7 +343,9 @@ impl JournalStore {
 
     pub fn rotate_and_seal(&self) -> Result<JournalSegmentManifest> {
         let segments = self.segments()?;
-        let last = segments.last().ok_or_else(|| ZapJournalError::MissingJournal(self.dir.clone()))?;
+        let last = segments
+            .last()
+            .ok_or_else(|| ZapJournalError::MissingJournal(self.dir.clone()))?;
         let manifest = self.seal_segment(last.sequence)?;
         if let Some(max_count) = self.options.max_segment_count {
             self.prune_old_segments(max_count)?;
@@ -366,11 +368,7 @@ impl JournalStore {
             return Err(ZapJournalError::MissingJournal(path));
         }
         let (_, _, id) = read_segment_header(&path)?;
-        let segment = SegmentInfo {
-            path,
-            sequence,
-            id,
-        };
+        let segment = SegmentInfo { path, sequence, id };
         self.load_segment_index(&segment)
     }
 
@@ -382,7 +380,10 @@ impl JournalStore {
                 let _ = fs::remove_file(&seg.path);
                 let _ = fs::remove_file(self.index_path(seg.sequence));
                 let _ = fs::remove_file(self.manifest_path(seg.sequence));
-                let _ = fs::remove_file(self.dir.join(format!("{:020}.zjmanifest.json.sig", seg.sequence)));
+                let _ = fs::remove_file(
+                    self.dir
+                        .join(format!("{:020}.zjmanifest.json.sig", seg.sequence)),
+                );
             }
         }
         Ok(())
@@ -399,24 +400,27 @@ impl JournalStore {
                     let _ = fs::remove_file(&seg.path);
                     let _ = fs::remove_file(self.index_path(seg.sequence));
                     let _ = fs::remove_file(self.manifest_path(seg.sequence));
-                    let _ = fs::remove_file(self.dir.join(format!("{:020}.zjmanifest.json.sig", seg.sequence)));
+                    let _ = fs::remove_file(
+                        self.dir
+                            .join(format!("{:020}.zjmanifest.json.sig", seg.sequence)),
+                    );
                 }
             }
         }
         Ok(())
     }
 
-    pub fn read_record_at(&self, sequence: u64, entry: &JournalIndexEntry) -> Result<JournalRecord> {
+    pub fn read_record_at(
+        &self,
+        sequence: u64,
+        entry: &JournalIndexEntry,
+    ) -> Result<JournalRecord> {
         let path = self.segment_path(sequence);
         if !path.exists() {
             return Err(ZapJournalError::MissingJournal(path));
         }
         let (_, _, id) = read_segment_header(&path)?;
-        let segment = SegmentInfo {
-            path,
-            sequence,
-            id,
-        };
+        let segment = SegmentInfo { path, sequence, id };
         self.read_record(&segment, entry)
     }
 
@@ -468,7 +472,10 @@ impl JournalStore {
         let mut candidate_segments = Vec::new();
         for segment in self.segments()? {
             if let Ok(manifest) = self.load_manifest(segment.sequence)
-                && let (Some(first_ts), Some(last_ts)) = (manifest.first_timestamp_micros, manifest.last_timestamp_micros)
+                && let (Some(first_ts), Some(last_ts)) = (
+                    manifest.first_timestamp_micros,
+                    manifest.last_timestamp_micros,
+                )
             {
                 if let Some(after) = query.after_timestamp_micros
                     && last_ts <= after
@@ -642,9 +649,16 @@ impl JournalStore {
         let segments = self.segments()?;
         if let Some(last) = segments.last() {
             let len = fs::metadata(&last.path)?.len();
-            let records_count = self.load_segment_index(last).map(|idx| idx.entries.len() as u64).unwrap_or(0);
-            let rotate_by_bytes = len > SEGMENT_HEADER_LEN && len.saturating_add(estimate) > self.options.max_segment_bytes;
-            let rotate_by_records = self.options.max_segment_records.is_some_and(|max_r| records_count >= max_r);
+            let records_count = self
+                .load_segment_index(last)
+                .map(|idx| idx.entries.len() as u64)
+                .unwrap_or(0);
+            let rotate_by_bytes = len > SEGMENT_HEADER_LEN
+                && len.saturating_add(estimate) > self.options.max_segment_bytes;
+            let rotate_by_records = self
+                .options
+                .max_segment_records
+                .is_some_and(|max_r| records_count >= max_r);
 
             if rotate_by_bytes || rotate_by_records {
                 let _ = self.seal_segment(last.sequence);
@@ -782,7 +796,9 @@ impl JournalStore {
                                 offset: record.offset,
                             });
                         }
-                    } else if segment.sequence == 0 && record.previous_entry_hash != hash_or_none(None) {
+                    } else if segment.sequence == 0
+                        && record.previous_entry_hash != hash_or_none(None)
+                    {
                         return Err(ZapJournalError::HashChainMismatch {
                             path: segment.path.clone(),
                             offset: record.offset,
@@ -1553,4 +1569,3 @@ mod tests {
         assert!(!manifest.segment_hash.is_empty());
     }
 }
-

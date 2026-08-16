@@ -40,14 +40,14 @@ impl PhiAccrualDetector {
     }
 
     pub fn record_heartbeat(&mut self, now_micros: u64) {
-        if let Some(prev) = self.last_heartbeat_micros {
-            if now_micros > prev {
-                let interval = (now_micros - prev) as f64;
-                if self.intervals.len() >= self.window_size {
-                    self.intervals.pop_front();
-                }
-                self.intervals.push_back(interval);
+        if let Some(prev) = self.last_heartbeat_micros
+            && now_micros > prev
+        {
+            let interval = (now_micros - prev) as f64;
+            if self.intervals.len() >= self.window_size {
+                self.intervals.pop_front();
             }
+            self.intervals.push_back(interval);
         }
         self.last_heartbeat_micros = Some(now_micros);
     }
@@ -69,7 +69,12 @@ impl PhiAccrualDetector {
         let elapsed = (now_micros - last) as f64;
         let count = self.intervals.len() as f64;
         let mean = self.intervals.iter().sum::<f64>() / count;
-        let variance = self.intervals.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / count;
+        let variance = self
+            .intervals
+            .iter()
+            .map(|&x| (x - mean).powi(2))
+            .sum::<f64>()
+            / count;
         let std_dev = variance.sqrt().max(MIN_STD_DEV_MICROS);
 
         let y = (elapsed - mean) / (std_dev * std::f64::consts::SQRT_2);

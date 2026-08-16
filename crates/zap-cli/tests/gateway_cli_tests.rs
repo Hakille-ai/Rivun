@@ -8,9 +8,7 @@ use uuid::Uuid;
 
 use zap_agent::{AgentId, AgentIntent, IntentKind};
 use zap_crypto::Keypair;
-use zap_gateway::{
-    AgentGatewayServer, GatewayConfig, ProvenanceChainBuilder,
-};
+use zap_gateway::{AgentGatewayServer, GatewayConfig, ProvenanceChainBuilder};
 use zap_ledger::ReceiptJournalStore;
 use zap_policy::PolicySet;
 

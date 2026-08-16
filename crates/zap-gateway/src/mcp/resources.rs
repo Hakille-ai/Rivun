@@ -1,12 +1,12 @@
 //! MCP Resource providers and handlers.
 
-use serde_json::json;
 use crate::error::{Result, ZapGatewayError};
 use crate::mcp::protocol::{
     ResourceContent, ResourceDescriptor, ResourceReadParams, ResourceReadResult,
     ResourcesListResult,
 };
 use crate::mcp::tools::ToolExecutionContext;
+use serde_json::json;
 
 pub fn list_resources() -> ResourcesListResult {
     ResourcesListResult {
@@ -154,5 +154,7 @@ pub async fn read_resource(
         });
     }
 
-    Err(ZapGatewayError::NotFound(format!("Resource not found: {uri}")))
+    Err(ZapGatewayError::NotFound(format!(
+        "Resource not found: {uri}"
+    )))
 }

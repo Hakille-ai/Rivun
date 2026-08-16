@@ -77,7 +77,9 @@ pub enum ZapAgentError {
     FailedResultMissingError,
     #[error("agent error cause nesting exceeds {max} levels")]
     ErrorCauseTooDeep { max: usize },
-    #[error("Provenance step verification failed for stage {stage:?}: expected {expected}, got {actual}")]
+    #[error(
+        "Provenance step verification failed for stage {stage:?}: expected {expected}, got {actual}"
+    )]
     StepVerificationFailed {
         stage: ProvenanceStage,
         expected: String,

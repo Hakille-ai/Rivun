@@ -15,14 +15,12 @@ pub mod vector_clock;
 pub use cache::GossipDeduplicationCache;
 pub use engine::{GossipReceipt, SwarmGossipDispatcher, SwarmGossipEngine};
 pub use envelope::{
-    GossipEnvelope, GossipMessageId, DEFAULT_MAX_HOPS, GOSSIP_ENVELOPE_MAGIC,
-    GOSSIP_ENVELOPE_VERSION, GOSSIP_SIGNING_DOMAIN,
+    DEFAULT_MAX_HOPS, GOSSIP_ENVELOPE_MAGIC, GOSSIP_ENVELOPE_VERSION, GOSSIP_SIGNING_DOMAIN,
+    GossipEnvelope, GossipMessageId,
 };
 pub use error::GossipError;
 pub use legacy::{GossipMesh, PeerHealth, QuorumProposal, SwarmPeer};
-pub use pex::{
-    xor_distance, DiscoveredPeerEntry, PeerExchangeRequest, PeerExchangeResponse,
-};
+pub use pex::{DiscoveredPeerEntry, PeerExchangeRequest, PeerExchangeResponse, xor_distance};
 pub use sync::{
     AntiEntropyBatchResponse, AntiEntropyDigestRequest, AntiEntropyDigestResponse, MissingRange,
     StateDigest,

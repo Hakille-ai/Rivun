@@ -1,10 +1,6 @@
 //! Adaptive Mesh Topology Health Engine and Dynamic Relay Route Selector.
 
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::Mutex,
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Mutex};
 use uuid::Uuid;
 
 use super::{

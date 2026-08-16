@@ -1,10 +1,11 @@
 use std::fs;
 use tempfile::tempdir;
 use zap_store::{
+    DomainPackCompatibility, DomainPackRegistry, DomainPackRegistryEntry, DomainPackRisk,
+    DomainPackStatus,
     bundle::{DomainPackBundle, DomainPackBundleManifest},
-    resolver::{matches_version_req, DomainPackDependencyResolver, DomainPackDependencySpec},
+    resolver::{DomainPackDependencyResolver, DomainPackDependencySpec, matches_version_req},
     validator::DomainPackPolicyValidator,
-    DomainPackCompatibility, DomainPackRegistry, DomainPackRegistryEntry, DomainPackRisk, DomainPackStatus,
 };
 
 #[test]

@@ -35,10 +35,10 @@ pub use consensus::{
 };
 pub use gossip::{
     AntiEntropyBatchResponse, AntiEntropyDigestRequest, AntiEntropyDigestResponse, Causality,
-    DiscoveredPeerEntry, GossipDeduplicationCache, GossipEnvelope, GossipError, GossipMessageId,
-    GossipMesh, GossipReceipt, MissingRange, PeerExchangeRequest, PeerExchangeResponse, PeerHealth,
-    QuorumProposal, StateDigest, SwarmGossipDispatcher, SwarmGossipEngine, SwarmPeer, VectorClock,
-    xor_distance,
+    DiscoveredPeerEntry, GossipDeduplicationCache, GossipEnvelope, GossipError, GossipMesh,
+    GossipMessageId, GossipReceipt, MissingRange, PeerExchangeRequest, PeerExchangeResponse,
+    PeerHealth, QuorumProposal, StateDigest, SwarmGossipDispatcher, SwarmGossipEngine, SwarmPeer,
+    VectorClock, xor_distance,
 };
 pub use mesh::{
     HeartbeatAck, HeartbeatPing, HeartbeatScheduler, MeshError, MeshTopology, PartitionStatus,
@@ -328,25 +328,24 @@ impl ZapEndpoint {
         let inbound_capacity = self.inbound_nonce_cache_capacity;
         let durable_path = self.durable_nonce_store_path.clone();
         let max_age = self.max_nonce_age_micros;
-        peers
-            .inbound_nonces
-            .entry(peer.node_id)
-            .or_insert_with(|| {
-                let mut cache = NonceReplayCache::new(inbound_capacity);
-                if let Some(base_path) = durable_path {
-                    let path = if base_path.extension().is_none() || base_path.is_dir() {
-                        base_path.join(format!("{}.nonce.wal", peer.node_id))
-                    } else {
-                        let stem = base_path.file_stem().unwrap_or_default().to_string_lossy();
-                        let ext = base_path.extension().unwrap_or_default().to_string_lossy();
-                        base_path.with_file_name(format!("{stem}.{}.{ext}", peer.node_id))
-                    };
-                    if let Ok(store) = durable_replay::DurableNonceStore::open(path, inbound_capacity, max_age) {
-                        cache.durable = Some(store);
-                    }
+        peers.inbound_nonces.entry(peer.node_id).or_insert_with(|| {
+            let mut cache = NonceReplayCache::new(inbound_capacity);
+            if let Some(base_path) = durable_path {
+                let path = if base_path.extension().is_none() || base_path.is_dir() {
+                    base_path.join(format!("{}.nonce.wal", peer.node_id))
+                } else {
+                    let stem = base_path.file_stem().unwrap_or_default().to_string_lossy();
+                    let ext = base_path.extension().unwrap_or_default().to_string_lossy();
+                    base_path.with_file_name(format!("{stem}.{}.{ext}", peer.node_id))
+                };
+                if let Ok(store) =
+                    durable_replay::DurableNonceStore::open(path, inbound_capacity, max_age)
+                {
+                    cache.durable = Some(store);
                 }
-                cache
-            });
+            }
+            cache
+        });
         peers.by_id.insert(peer.node_id, peer);
     }
 
@@ -1159,4 +1158,3 @@ mod tests {
         }
     }
 }
-

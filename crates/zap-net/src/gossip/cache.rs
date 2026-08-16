@@ -1,10 +1,10 @@
 //! Sliding-window LRU message deduplication cache with TTL pruning.
 
+use super::envelope::GossipMessageId;
 use std::{
     collections::{HashSet, VecDeque},
     time::{Duration, Instant},
 };
-use super::envelope::GossipMessageId;
 
 pub struct GossipDeduplicationCache {
     capacity: usize,
@@ -34,10 +34,10 @@ impl GossipDeduplicationCache {
         if self.seen.contains(&id) {
             return false;
         }
-        if self.order.len() >= self.capacity {
-            if let Some((old_id, _)) = self.order.pop_front() {
-                self.seen.remove(&old_id);
-            }
+        if self.order.len() >= self.capacity
+            && let Some((old_id, _)) = self.order.pop_front()
+        {
+            self.seen.remove(&old_id);
         }
         self.seen.insert(id);
         self.order.push_back((id, Instant::now()));

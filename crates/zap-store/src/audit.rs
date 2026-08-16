@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
 
-use crate::{DomainPackRisk, DomainPackStatus, ZapStoreError};
 use crate::bundle::DomainPackBundle;
+use crate::{DomainPackRisk, DomainPackStatus, ZapStoreError};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AuditIssue {
@@ -22,7 +22,10 @@ pub struct PackAuditReport {
     pub issues: Vec<AuditIssue>,
 }
 
-pub fn audit_pack_dir(pack_dir: &Path, max_risk: Option<DomainPackRisk>) -> Result<PackAuditReport, ZapStoreError> {
+pub fn audit_pack_dir(
+    pack_dir: &Path,
+    max_risk: Option<DomainPackRisk>,
+) -> Result<PackAuditReport, ZapStoreError> {
     let manifest_path = pack_dir.join("pack.toml");
     if !manifest_path.exists() {
         return Err(ZapStoreError::InvalidDomainPackBundleFormat(format!(
@@ -31,8 +34,8 @@ pub fn audit_pack_dir(pack_dir: &Path, max_risk: Option<DomainPackRisk>) -> Resu
         )));
     }
 
-    let manifest_str = fs::read_to_string(&manifest_path)
-        .map_err(|e| ZapStoreError::IoError(e.to_string()))?;
+    let manifest_str =
+        fs::read_to_string(&manifest_path).map_err(|e| ZapStoreError::IoError(e.to_string()))?;
     let pack_toml: serde_json::Value = toml::from_str(&manifest_str)
         .map_err(|e| ZapStoreError::InvalidDomainPackBundleFormat(e.to_string()))?;
 
@@ -120,7 +123,10 @@ pub fn audit_pack_dir(pack_dir: &Path, max_risk: Option<DomainPackRisk>) -> Resu
     })
 }
 
-pub fn audit_bundle(bundle: &DomainPackBundle, max_risk: Option<DomainPackRisk>) -> Result<PackAuditReport, ZapStoreError> {
+pub fn audit_bundle(
+    bundle: &DomainPackBundle,
+    max_risk: Option<DomainPackRisk>,
+) -> Result<PackAuditReport, ZapStoreError> {
     let mut issues = Vec::new();
     let mut highest_risk = DomainPackRisk::Low;
 

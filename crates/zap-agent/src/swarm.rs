@@ -10,8 +10,8 @@ use zap_core::now_micros;
 use zap_crypto::Keypair;
 
 use crate::{
-    AgentId, AgentIntent, AgentResult, ProvenanceChainBuilder,
-    ProvenanceChainDigest, Result, Validate, ZapAgentError,
+    AgentId, AgentIntent, AgentResult, ProvenanceChainBuilder, ProvenanceChainDigest, Result,
+    Validate, ZapAgentError,
 };
 
 pub const SWARM_PROTOCOL_SCHEMA_VERSION: u8 = 1;
@@ -67,10 +67,10 @@ pub struct SwarmPeerCapabilityScore {
     pub node_id: Uuid,
     pub agent_id: Option<AgentId>,
     pub capability: CapabilityId,
-    pub trust_score: f64,        // Range 0.0 to 1.0
-    pub latency_ms: f64,         // Measured RTT in milliseconds
-    pub load_factor: u8,         // Range 0 (idle) to 100 (saturated)
-    pub composite_score: f64,    // Computed composite ranking
+    pub trust_score: f64,     // Range 0.0 to 1.0
+    pub latency_ms: f64,      // Measured RTT in milliseconds
+    pub load_factor: u8,      // Range 0 (idle) to 100 (saturated)
+    pub composite_score: f64, // Computed composite ranking
     pub last_updated_micros: u64,
 }
 
@@ -87,6 +87,7 @@ impl SwarmCapabilityIndex {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn register_or_update(
         &mut self,
         node_id: Uuid,
@@ -128,7 +129,9 @@ impl SwarmCapabilityIndex {
 
     #[must_use]
     pub fn select_best_peer(&self, capability: &CapabilityId) -> Option<&SwarmPeerCapabilityScore> {
-        self.capabilities.get(capability).and_then(|scores| scores.first())
+        self.capabilities
+            .get(capability)
+            .and_then(|scores| scores.first())
     }
 }
 
@@ -162,14 +165,10 @@ impl SwarmAgentCoordinator {
         }
     }
 
-    pub fn submit_intent(
-        &mut self,
-        intent: AgentIntent,
-        deadline_micros: u64,
-    ) -> Result<Uuid> {
+    pub fn submit_intent(&mut self, intent: AgentIntent, deadline_micros: u64) -> Result<Uuid> {
         intent.validate()?;
-        let canonical_bytes = serde_json::to_vec(&intent)
-            .map_err(|e| ZapAgentError::InvalidIdentifier {
+        let canonical_bytes =
+            serde_json::to_vec(&intent).map_err(|e| ZapAgentError::InvalidIdentifier {
                 entity: "agent_intent",
                 field: "json",
                 value: e.to_string(),
@@ -209,14 +208,13 @@ impl SwarmAgentCoordinator {
     }
 
     pub fn mark_proposed(&mut self, proposal_id: Uuid) -> Result<&SwarmIntentProposal> {
-        let record = self
-            .active_intents
-            .get_mut(&proposal_id)
-            .ok_or_else(|| ZapAgentError::InvalidIdentifier {
+        let record = self.active_intents.get_mut(&proposal_id).ok_or_else(|| {
+            ZapAgentError::InvalidIdentifier {
                 entity: "swarm_intent",
                 field: "proposal_id",
                 value: proposal_id.to_string(),
-            })?;
+            }
+        })?;
         record.status = SwarmIntentStatus::Proposed;
         record.updated_at_micros = now_micros().unwrap_or(0);
         Ok(&record.proposal)
@@ -227,14 +225,13 @@ impl SwarmAgentCoordinator {
         proposal_id: Uuid,
         cert: SwarmCommitCertificateRef,
     ) -> Result<()> {
-        let record = self
-            .active_intents
-            .get_mut(&proposal_id)
-            .ok_or_else(|| ZapAgentError::InvalidIdentifier {
+        let record = self.active_intents.get_mut(&proposal_id).ok_or_else(|| {
+            ZapAgentError::InvalidIdentifier {
                 entity: "swarm_intent",
                 field: "proposal_id",
                 value: proposal_id.to_string(),
-            })?;
+            }
+        })?;
         record.commit_certificate = Some(cert);
         record.status = SwarmIntentStatus::Committed;
         record.updated_at_micros = now_micros().unwrap_or(0);
@@ -250,36 +247,40 @@ impl SwarmAgentCoordinator {
         keypair: &Keypair,
     ) -> Result<ProvenanceChainDigest> {
         result.validate()?;
-        let record = self
-            .active_intents
-            .get_mut(&proposal_id)
-            .ok_or_else(|| ZapAgentError::InvalidIdentifier {
+        let record = self.active_intents.get_mut(&proposal_id).ok_or_else(|| {
+            ZapAgentError::InvalidIdentifier {
                 entity: "swarm_intent",
                 field: "proposal_id",
                 value: proposal_id.to_string(),
-            })?;
+            }
+        })?;
 
-        let cert = record
-            .commit_certificate
-            .as_ref()
-            .ok_or_else(|| ZapAgentError::MissingStep(crate::provenance::ProvenanceStage::Consensus))?;
+        let cert = record.commit_certificate.as_ref().ok_or_else(|| {
+            ZapAgentError::MissingStep(crate::provenance::ProvenanceStage::Consensus)
+        })?;
 
-        let mut builder = ProvenanceChainBuilder::new(record.proposal.session_id, record.proposal.intent.intent_id)
-            .with_intent(&record.proposal.intent)?
-            .with_consensus(
-                &cert.certificate_hash,
-                cert.epoch,
-                cert.round,
-                cert.threshold,
-                cert.total_validators,
-                &cert.signer_bitmask,
-                cert.signatures_count,
-                BTreeMap::new(),
-            )?;
+        let mut builder = ProvenanceChainBuilder::new(
+            record.proposal.session_id,
+            record.proposal.intent.intent_id,
+        )
+        .with_intent(&record.proposal.intent)?
+        .with_consensus(
+            &cert.certificate_hash,
+            cert.epoch,
+            cert.round,
+            cert.threshold,
+            cert.total_validators,
+            &cert.signer_bitmask,
+            cert.signatures_count,
+            BTreeMap::new(),
+        )?;
 
         if let Some(err) = &result.error {
             let mut err_meta = BTreeMap::new();
-            err_meta.insert("error_code".to_string(), serde_json::Value::String(err.code.clone()));
+            err_meta.insert(
+                "error_code".to_string(),
+                serde_json::Value::String(err.code.clone()),
+            );
             builder = builder.with_receipt(receipt_id, processed_at_micros, err_meta)?;
         } else {
             builder = builder.with_receipt(receipt_id, processed_at_micros, BTreeMap::new())?;

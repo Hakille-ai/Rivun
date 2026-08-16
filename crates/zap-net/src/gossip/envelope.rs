@@ -78,12 +78,8 @@ impl GossipEnvelope {
         if self.magic != GOSSIP_ENVELOPE_MAGIC || self.version != GOSSIP_ENVELOPE_VERSION {
             return false;
         }
-        let expected_id = GossipMessageId::compute(
-            &self.topic,
-            &self.origin_node,
-            self.sequence,
-            &self.payload,
-        );
+        let expected_id =
+            GossipMessageId::compute(&self.topic, &self.origin_node, self.sequence, &self.payload);
         if self.message_id != expected_id {
             return false;
         }

@@ -45,7 +45,10 @@ impl ValidatorSet {
         self.validators.iter().find(|v| v.node_id == *node_id)
     }
 
-    pub fn resolve_bitmask_signers(&self, bitmask: &[u8]) -> Result<Vec<(Uuid, VerifyingKey)>, ConsensusError> {
+    pub fn resolve_bitmask_signers(
+        &self,
+        bitmask: &[u8],
+    ) -> Result<Vec<(Uuid, VerifyingKey)>, ConsensusError> {
         let mut signers = Vec::new();
         for (i, val) in self.validators.iter().enumerate() {
             let byte_idx = i / 8;
@@ -61,7 +64,7 @@ impl ValidatorSet {
 
     #[must_use]
     pub fn create_bitmask(&self, signer_ids: &[Uuid]) -> Vec<u8> {
-        let byte_len = (self.validators.len() + 7) / 8;
+        let byte_len = self.validators.len().div_ceil(8);
         let mut mask = vec![0_u8; byte_len];
         for id in signer_ids {
             if let Some(pos) = self.validators.iter().position(|v| v.node_id == *id) {

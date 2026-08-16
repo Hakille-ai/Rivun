@@ -491,16 +491,18 @@ impl ReceiptJournalStore {
     }
 
     pub fn signed_manifest_path(&self, sequence: u64) -> PathBuf {
-        self.dir().join(format!("{sequence:020}.{SIGNED_MANIFEST_EXTENSION}"))
+        self.dir()
+            .join(format!("{sequence:020}.{SIGNED_MANIFEST_EXTENSION}"))
     }
 
     pub fn rotate_and_seal_segment(&self, sequence: u64) -> Result<SignedReceiptSegmentManifest> {
-        let keypair = self.keypair.as_ref().ok_or_else(|| {
-            ZapLedgerError::InvalidReceiptField {
+        let keypair = self
+            .keypair
+            .as_ref()
+            .ok_or_else(|| ZapLedgerError::InvalidReceiptField {
                 field: "keypair",
                 reason: "node keypair is required to sign segment manifests",
-            }
-        })?;
+            })?;
         let receipts = self.read_segment_receipts(sequence)?;
         let previous_segment_hash = if sequence > 0 {
             if let Ok(prev_signed) = self.load_signed_manifest(sequence - 1) {
@@ -543,7 +545,11 @@ impl ReceiptJournalStore {
     }
 
     pub fn build_and_verify_segment_index(&self) -> Result<ReceiptSegmentIndex> {
-        let node_id = self.keypair.as_ref().map(|k| k.node_id()).unwrap_or_default();
+        let node_id = self
+            .keypair
+            .as_ref()
+            .map(|k| k.node_id())
+            .unwrap_or_default();
         let mut manifests = Vec::new();
         for segment in self.journal.segments()? {
             if self.signed_manifest_path(segment.sequence).exists() {
@@ -565,7 +571,10 @@ impl ReceiptJournalStore {
         Ok(receipts)
     }
 
-    pub fn query_fast(&self, request: &ReceiptReplicationRequest) -> Result<Vec<SignedActionReceipt>> {
+    pub fn query_fast(
+        &self,
+        request: &ReceiptReplicationRequest,
+    ) -> Result<Vec<SignedActionReceipt>> {
         request.validate()?;
         let limit = request.effective_limit()?;
 
@@ -573,39 +582,44 @@ impl ReceiptJournalStore {
             && !segment_index.entries.is_empty()
         {
             let candidates = segment_index.candidate_segments(request)?;
-                let candidate_sequences: HashSet<u64> = candidates.iter().map(|e| e.segment_sequence).collect();
+            let candidate_sequences: HashSet<u64> =
+                candidates.iter().map(|e| e.segment_sequence).collect();
 
-                let records = self.journal.query_filtered(
-                    &JournalQuery {
-                        kind: request.kind.clone(),
-                        subject: request.subject.clone(),
-                        source_node: request.source_node,
-                        target_node: request.target_node,
-                        after_timestamp_micros: request.after_processed_at_micros,
-                        until_timestamp_micros: request.until_processed_at_micros,
-                        limit: Some(limit),
-                        ..JournalQuery::default()
-                    },
-                    &candidate_sequences,
-                )?;
+            let records = self.journal.query_filtered(
+                &JournalQuery {
+                    kind: request.kind.clone(),
+                    subject: request.subject.clone(),
+                    source_node: request.source_node,
+                    target_node: request.target_node,
+                    after_timestamp_micros: request.after_processed_at_micros,
+                    until_timestamp_micros: request.until_processed_at_micros,
+                    limit: Some(limit),
+                    ..JournalQuery::default()
+                },
+                &candidate_sequences,
+            )?;
 
-                let mut receipts = Vec::new();
-                for record in records {
-                    let receipt: SignedActionReceipt = serde_json::from_slice(&record.payload)?;
-                    receipts.push(receipt);
-                }
-                verify_action_receipts(&receipts, None)?;
-                receipts.retain(|receipt| request.matches(receipt));
-                return Ok(receipts);
+            let mut receipts = Vec::new();
+            for record in records {
+                let receipt: SignedActionReceipt = serde_json::from_slice(&record.payload)?;
+                receipts.push(receipt);
+            }
+            verify_action_receipts(&receipts, None)?;
+            receipts.retain(|receipt| request.matches(receipt));
+            return Ok(receipts);
         }
 
         self.query_with_limit(request, limit)
     }
 
     pub fn ensure_sealed_segments_signed(&self) -> Result<()> {
-        let Some(_keypair) = &self.keypair else { return Ok(()); };
+        let Some(_keypair) = &self.keypair else {
+            return Ok(());
+        };
         let segments = self.journal.segments()?;
-        if segments.len() <= 1 { return Ok(()); }
+        if segments.len() <= 1 {
+            return Ok(());
+        }
         for segment in segments.iter().take(segments.len() - 1) {
             let seq = segment.sequence;
             if !self.signed_manifest_path(seq).exists() {
@@ -743,7 +757,8 @@ impl ReceiptJournalStore {
     }
 
     pub fn batch_seal_path(&self, sequence: u64) -> PathBuf {
-        self.dir().join(format!("{sequence:020}.{BATCH_SEAL_EXTENSION}"))
+        self.dir()
+            .join(format!("{sequence:020}.{BATCH_SEAL_EXTENSION}"))
     }
 
     pub fn zmmr_path(&self, sequence: u64) -> PathBuf {
@@ -870,7 +885,10 @@ impl ReceiptJournalStore {
     }
 
     /// Generate an O(log N) inclusion proof for the receipt at the given index.
-    pub fn prove_receipt_mmr_inclusion(&self, index: usize) -> Result<(MmrInclusionProof, MmrHash)> {
+    pub fn prove_receipt_mmr_inclusion(
+        &self,
+        index: usize,
+    ) -> Result<(MmrInclusionProof, MmrHash)> {
         let mut mmr = self.build_mmr_accumulator()?;
         let proof = mmr.prove_inclusion(index)?;
         let root = mmr.root();
@@ -2118,7 +2136,8 @@ mod tests {
             max_segment_records: Some(3),
         };
 
-        let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+        let store =
+            ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
 
         for i in 0..6 {
             let receipt = receipt_at(&node, &source, 1_000 + i * 100, "echo");
@@ -2160,7 +2179,8 @@ mod tests {
             max_segment_records: Some(4),
         };
 
-        let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+        let store =
+            ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
 
         for i in 0..8 {
             let receipt = receipt_at(&node, &source, 1_000 + i * 100, "tensor_calc");
@@ -2193,7 +2213,10 @@ mod tests {
         // Load segment .zmmr
         let mut loaded_zmmr = store.load_segment_zmmr(0).unwrap();
         assert_eq!(loaded_zmmr.leaf_count, 4);
-        assert_eq!(format!("{HASH_PREFIX}{}", loaded_zmmr.root_hex()), seal.mmr_root);
+        assert_eq!(
+            format!("{HASH_PREFIX}{}", loaded_zmmr.root_hex()),
+            seal.mmr_root
+        );
     }
 
     #[test]
@@ -2257,5 +2280,3 @@ mod tests {
         );
     }
 }
-
-

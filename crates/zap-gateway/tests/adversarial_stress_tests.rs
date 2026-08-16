@@ -17,8 +17,7 @@ use zap_agent::{AgentId, AgentIntent, IntentKind};
 use zap_crypto::Keypair;
 use zap_gateway::{
     GatewayConfig, HttpAgentGateway, McpEngine, ProvenanceChainBuilder, ProvenanceStage, SseBroker,
-    WebSocketHandler, WsFrame, compute_ws_accept, mcp_protocol::*,
-    mcp_tools::ToolExecutionContext,
+    WebSocketHandler, WsFrame, compute_ws_accept, mcp_protocol::*, mcp_tools::ToolExecutionContext,
 };
 use zap_policy::PolicySet;
 
@@ -55,8 +54,9 @@ async fn challenge_mcp_parse_error_32700() {
 
     for input in malformed_inputs {
         let resp_str = engine.handle_jsonrpc_str(input).await;
-        let resp: Value = serde_json::from_str(&resp_str)
-            .unwrap_or_else(|_| panic!("Response must be valid JSON even on parse error: '{resp_str}'"));
+        let resp: Value = serde_json::from_str(&resp_str).unwrap_or_else(|_| {
+            panic!("Response must be valid JSON even on parse error: '{resp_str}'")
+        });
 
         assert_eq!(resp["jsonrpc"], "2.0");
         assert_eq!(resp["error"]["code"], JSONRPC_PARSE_ERROR);
@@ -293,7 +293,10 @@ async fn challenge_http_rest_status_codes_matrix() {
     // 1. Unauthorized (401) on protected endpoint without token
     let (status, _) = send_http(
         addr,
-        &format!("GET /v1/agent/sessions HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", addr),
+        &format!(
+            "GET /v1/agent/sessions HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            addr
+        ),
     )
     .await;
     assert_eq!(status, 401, "Expected 401 Unauthorized for missing auth");
@@ -307,7 +310,10 @@ async fn challenge_http_rest_status_codes_matrix() {
         ),
     )
     .await;
-    assert_eq!(status, 401, "Expected 401 Unauthorized for incorrect bearer token");
+    assert_eq!(
+        status, 401,
+        "Expected 401 Unauthorized for incorrect bearer token"
+    );
 
     // 3. OK (200) on GET /v1/health with auth
     let (status, body) = send_http(
@@ -468,7 +474,10 @@ Sec-WebSocket-Version: 13\r\n\r\n",
     // 1. Send normal frame within 2KB limit -> should succeed
     let ws_client_handler = WebSocketHandler::new(10 * 1024 * 1024);
     let valid_frame = WsFrame::text("Hello ZAP Gateway within limit");
-    ws_client_handler.write_frame(&mut stream, &valid_frame).await.unwrap();
+    ws_client_handler
+        .write_frame(&mut stream, &valid_frame)
+        .await
+        .unwrap();
 
     let reply = ws_client_handler.read_frame(&mut stream).await.unwrap();
     let reply_str = String::from_utf8_lossy(&reply.payload);
@@ -477,13 +486,22 @@ Sec-WebSocket-Version: 13\r\n\r\n",
     // 2. Send oversized frame (4096 bytes > 2048 limit) -> server must send Close with 1009
     let oversized_payload = vec![b'X'; 4096];
     let oversized_frame = WsFrame::binary(oversized_payload);
-    ws_client_handler.write_frame(&mut stream, &oversized_frame).await.unwrap();
+    ws_client_handler
+        .write_frame(&mut stream, &oversized_frame)
+        .await
+        .unwrap();
 
     let close_reply = ws_client_handler.read_frame(&mut stream).await.unwrap();
-    assert_eq!(close_reply.opcode, zap_gateway::transports::ws::WS_OPCODE_CLOSE);
+    assert_eq!(
+        close_reply.opcode,
+        zap_gateway::transports::ws::WS_OPCODE_CLOSE
+    );
     assert!(close_reply.payload.len() >= 2);
     let close_code = u16::from_be_bytes([close_reply.payload[0], close_reply.payload[1]]);
-    assert_eq!(close_code, zap_gateway::transports::ws::WS_CLOSE_MESSAGE_TOO_BIG);
+    assert_eq!(
+        close_code,
+        zap_gateway::transports::ws::WS_CLOSE_MESSAGE_TOO_BIG
+    );
 }
 
 // ============================================================================
@@ -514,11 +532,23 @@ async fn challenge_provenance_full_6_stages_and_all_tamper_vectors() {
         .unwrap()
         .with_policy("policy_sha256_hash", "ALLOW", BTreeMap::new())
         .unwrap()
-        .with_driver("driver.matrix.v2", "hash_in_512", "hash_out_512", BTreeMap::new())
+        .with_driver(
+            "driver.matrix.v2",
+            "hash_in_512",
+            "hash_out_512",
+            BTreeMap::new(),
+        )
         .unwrap()
-        .with_poa(&["sig_node_1".to_string(), "sig_node_2".to_string()], BTreeMap::new())
+        .with_poa(
+            &["sig_node_1".to_string(), "sig_node_2".to_string()],
+            BTreeMap::new(),
+        )
         .unwrap()
-        .with_receipt("rcpt-provenance-001", 1_720_000_000_000_000, BTreeMap::new())
+        .with_receipt(
+            "rcpt-provenance-001",
+            1_720_000_000_000_000,
+            BTreeMap::new(),
+        )
         .unwrap()
         .build_and_sign(&keypair)
         .unwrap();
@@ -586,10 +616,16 @@ async fn challenge_provenance_full_6_stages_and_all_tamper_vectors() {
     // Vector 7: Tamper with Root Hash
     {
         let mut tampered = chain.clone();
-        tampered.root_hash = "0000000000000000000000000000000000000000000000000000000000000000".to_string();
+        tampered.root_hash =
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string();
         let report = tampered.verify(&keypair.verifying_key()).unwrap();
         assert!(!report.valid);
-        assert!(report.failure_reason.unwrap().contains("Merkle root mismatch"));
+        assert!(
+            report
+                .failure_reason
+                .unwrap()
+                .contains("Merkle root mismatch")
+        );
     }
 
     // Vector 8: Tamper with Signature
@@ -606,6 +642,11 @@ async fn challenge_provenance_full_6_stages_and_all_tamper_vectors() {
         let other_keypair = Keypair::generate();
         let report = chain.verify(&other_keypair.verifying_key()).unwrap();
         assert!(!report.valid);
-        assert!(report.failure_reason.unwrap().contains("Signer node ID mismatch"));
+        assert!(
+            report
+                .failure_reason
+                .unwrap()
+                .contains("Signer node ID mismatch")
+        );
     }
 }

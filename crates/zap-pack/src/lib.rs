@@ -1,10 +1,10 @@
 //! Signed Domain Pack lifecycle, packaging, verification, and offline resolution.
 
+pub use zap_store::ZapStoreError as ZapPackError;
+pub use zap_store::audit::*;
 pub use zap_store::bundle::*;
 pub use zap_store::resolver::*;
 pub use zap_store::validator::*;
-pub use zap_store::audit::*;
-pub use zap_store::ZapStoreError as ZapPackError;
 
 #[cfg(test)]
 mod tests {
@@ -38,7 +38,13 @@ risk = "low"
 
         // Sign
         let key = Keypair::generate();
-        let sig = DomainPackBundleSignature::sign(&bundle.manifest.pack_id, &bundle.manifest.version, &bundle.bundle_sha256, &key).unwrap();
+        let sig = DomainPackBundleSignature::sign(
+            &bundle.manifest.pack_id,
+            &bundle.manifest.version,
+            &bundle.bundle_sha256,
+            &key,
+        )
+        .unwrap();
 
         // Verify
         sig.verify(&bundle.bundle_sha256).unwrap();

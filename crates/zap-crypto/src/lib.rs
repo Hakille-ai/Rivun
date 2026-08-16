@@ -266,7 +266,12 @@ impl BlindedCommitment {
     }
 
     /// Verifies a blinded commitment against expected domain, payload, and blinding factor.
-    pub fn verify(commitment: &[u8; 32], domain: &[u8], payload: &[u8], blinding: &[u8; 32]) -> bool {
+    pub fn verify(
+        commitment: &[u8; 32],
+        domain: &[u8],
+        payload: &[u8],
+        blinding: &[u8; 32],
+    ) -> bool {
         let expected = Self::commit(domain, payload, blinding);
         expected == *commitment
     }
@@ -276,8 +281,8 @@ impl BlindedCommitment {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BlindedReceiptCommitment {
     pub schema_version: u8,
-    pub commitment: String, // hex encoded
-    pub payload_hash: String, // hex encoded
+    pub commitment: String,          // hex encoded
+    pub payload_hash: String,        // hex encoded
     pub blinded_fields_hash: String, // hex encoded
 }
 
@@ -1202,17 +1207,37 @@ mod tests {
         let commitment = BlindedCommitment::commit(BLINDED_COMMITMENT_DOMAIN, payload, &blinding);
 
         // Verification with correct arguments should succeed
-        assert!(BlindedCommitment::verify(&commitment, BLINDED_COMMITMENT_DOMAIN, payload, &blinding));
+        assert!(BlindedCommitment::verify(
+            &commitment,
+            BLINDED_COMMITMENT_DOMAIN,
+            payload,
+            &blinding
+        ));
 
         // Verification with wrong blinding must fail
         let wrong_blinding = BlindedCommitment::generate_blinding_factor();
-        assert!(!BlindedCommitment::verify(&commitment, BLINDED_COMMITMENT_DOMAIN, payload, &wrong_blinding));
+        assert!(!BlindedCommitment::verify(
+            &commitment,
+            BLINDED_COMMITMENT_DOMAIN,
+            payload,
+            &wrong_blinding
+        ));
 
         // Verification with wrong payload must fail
-        assert!(!BlindedCommitment::verify(&commitment, BLINDED_COMMITMENT_DOMAIN, b"tampered payload", &blinding));
+        assert!(!BlindedCommitment::verify(
+            &commitment,
+            BLINDED_COMMITMENT_DOMAIN,
+            b"tampered payload",
+            &blinding
+        ));
 
         // Verification with wrong domain must fail
-        assert!(!BlindedCommitment::verify(&commitment, b"WRONG-DOMAIN", payload, &blinding));
+        assert!(!BlindedCommitment::verify(
+            &commitment,
+            b"WRONG-DOMAIN",
+            payload,
+            &blinding
+        ));
     }
 
     #[test]
@@ -1290,4 +1315,3 @@ mod tests {
         ));
     }
 }
-

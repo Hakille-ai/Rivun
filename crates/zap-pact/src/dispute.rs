@@ -128,7 +128,10 @@ impl DisputeEngine {
 
     /// Settle pact normally upon verified execution receipt.
     pub fn settle_normal(&mut self, pact_id: Uuid, caller: Uuid) -> Result<(), DisputeError> {
-        let pact = self.pacts.get_mut(&pact_id).ok_or(DisputeError::PactNotFound(pact_id))?;
+        let pact = self
+            .pacts
+            .get_mut(&pact_id)
+            .ok_or(DisputeError::PactNotFound(pact_id))?;
 
         if pact.state != PactState::Locked {
             return Err(DisputeError::InvalidStateTransition {
@@ -153,7 +156,10 @@ impl DisputeEngine {
         pact_id: Uuid,
         now_micros: u64,
     ) -> Result<(), DisputeError> {
-        let pact = self.pacts.get_mut(&pact_id).ok_or(DisputeError::PactNotFound(pact_id))?;
+        let pact = self
+            .pacts
+            .get_mut(&pact_id)
+            .ok_or(DisputeError::PactNotFound(pact_id))?;
 
         if pact.state != PactState::Locked {
             return Err(DisputeError::InvalidStateTransition {
@@ -183,7 +189,10 @@ impl DisputeEngine {
         initial_evidence: DisputeEvidence,
         now_micros: u64,
     ) -> Result<(), DisputeError> {
-        let pact = self.pacts.get_mut(&pact_id).ok_or(DisputeError::PactNotFound(pact_id))?;
+        let pact = self
+            .pacts
+            .get_mut(&pact_id)
+            .ok_or(DisputeError::PactNotFound(pact_id))?;
 
         if pact.state != PactState::Locked {
             return Err(DisputeError::InvalidStateTransition {
@@ -215,7 +224,10 @@ impl DisputeEngine {
         outcome: RulingOutcome,
         signature: impl Into<String>,
     ) -> Result<Option<RulingOutcome>, DisputeError> {
-        let pact = self.pacts.get(&pact_id).ok_or(DisputeError::PactNotFound(pact_id))?;
+        let pact = self
+            .pacts
+            .get(&pact_id)
+            .ok_or(DisputeError::PactNotFound(pact_id))?;
 
         if !pact.arbitration_nodes.contains(&arbitrator_id) {
             return Err(DisputeError::Unauthorized(arbitrator_id));
@@ -230,10 +242,15 @@ impl DisputeEngine {
             .ok_or(DisputeError::PactNotFound(pact_id))?;
 
         if dispute.votes.contains_key(&arbitrator_id) {
-            return Err(DisputeError::DuplicateArbitrationVote(arbitrator_id, pact_id));
+            return Err(DisputeError::DuplicateArbitrationVote(
+                arbitrator_id,
+                pact_id,
+            ));
         }
 
-        dispute.votes.insert(arbitrator_id, (outcome, signature.into()));
+        dispute
+            .votes
+            .insert(arbitrator_id, (outcome, signature.into()));
 
         // Count votes per outcome
         let mut outcome_counts: HashMap<RulingOutcome, usize> = HashMap::new();
@@ -369,17 +386,30 @@ mod tests {
         };
 
         engine.open_dispute(pact_id, sender, ev, 1000).unwrap();
-        assert_eq!(engine.pacts.get(&pact_id).unwrap().state, PactState::Disputed);
+        assert_eq!(
+            engine.pacts.get(&pact_id).unwrap().state,
+            PactState::Disputed
+        );
 
         // Arb1 votes SlashRefundToSender
         let r1 = engine
-            .submit_arbitration_vote(pact_id, arb1, RulingOutcome::SlashRefundToSender, "sig_arb1")
+            .submit_arbitration_vote(
+                pact_id,
+                arb1,
+                RulingOutcome::SlashRefundToSender,
+                "sig_arb1",
+            )
             .unwrap();
         assert_eq!(r1, None);
 
         // Arb2 votes SlashRefundToSender -> Quorum reached (2-of-3)
         let r2 = engine
-            .submit_arbitration_vote(pact_id, arb2, RulingOutcome::SlashRefundToSender, "sig_arb2")
+            .submit_arbitration_vote(
+                pact_id,
+                arb2,
+                RulingOutcome::SlashRefundToSender,
+                "sig_arb2",
+            )
             .unwrap();
         assert_eq!(r2, Some(RulingOutcome::SlashRefundToSender));
 

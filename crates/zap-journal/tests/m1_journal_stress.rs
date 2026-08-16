@@ -2,13 +2,16 @@ use std::fs;
 use tempfile::tempdir;
 use uuid::Uuid;
 use zap_journal::{
-    JournalOptions, JournalProfile, JournalQuery, JournalRecordInput, JournalStore,
-    ZapJournalError,
+    JournalOptions, JournalProfile, JournalQuery, JournalRecordInput, JournalStore, ZapJournalError,
 };
 
 fn record_input(i: u64) -> JournalRecordInput {
     JournalRecordInput {
-        kind: if i.is_multiple_of(2) { "alpha".to_string() } else { "beta".to_string() },
+        kind: if i.is_multiple_of(2) {
+            "alpha".to_string()
+        } else {
+            "beta".to_string()
+        },
         schema_version: 1,
         timestamp_micros: 100_000 + i * 10,
         id: Some(Uuid::new_v4()),
@@ -147,7 +150,8 @@ fn test_journal_partial_tail_recovery() {
     // Append partial unclosed record header
     let mut file = fs::OpenOptions::new().append(true).open(&seg_path).unwrap();
     use std::io::Write;
-    file.write_all(b"ZJRC\x01\x00incomplete header bytes").unwrap();
+    file.write_all(b"ZJRC\x01\x00incomplete header bytes")
+        .unwrap();
     drop(file);
 
     let tail = store.recover_partial_tail().unwrap();

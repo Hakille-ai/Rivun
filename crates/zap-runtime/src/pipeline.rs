@@ -3,10 +3,7 @@
 //! Enables deterministic chaining of multiple WASM drivers in a zero-copy pipeline,
 //! with aggregated fuel tracking, causal intermediate step hashing, and stream buffering.
 
-use crate::{
-    async_engine::AsyncWasmExecutor,
-    DriverPermissions, ExecutionLimits, WasmExecutor,
-};
+use crate::{DriverPermissions, ExecutionLimits, WasmExecutor, async_engine::AsyncWasmExecutor};
 use serde::{Deserialize, Serialize};
 use std::{fmt, time::Instant};
 use thiserror::Error;
@@ -23,7 +20,9 @@ pub enum PipelineError {
     },
     #[error("pipeline fuel limit exceeded: consumed {consumed}, limit {limit}")]
     FuelLimitExceeded { consumed: u64, limit: u64 },
-    #[error("pipeline fuel exhausted at stage {stage_index} (`{driver_name}`): consumed {consumed}, limit {limit}")]
+    #[error(
+        "pipeline fuel exhausted at stage {stage_index} (`{driver_name}`): consumed {consumed}, limit {limit}"
+    )]
     PipelineFuelExhausted {
         stage_index: usize,
         driver_name: String,
@@ -126,16 +125,20 @@ impl DriverPipeline {
     }
 
     /// Asynchronously execute the pipeline sequentially across all stages on Tokio tasks.
-    pub async fn execute_async(&self, initial_payload: &[u8]) -> Result<PipelineExecutionReport, PipelineError> {
+    pub async fn execute_async(
+        &self,
+        initial_payload: &[u8],
+    ) -> Result<PipelineExecutionReport, PipelineError> {
         if self.stages.is_empty() {
             return Err(PipelineError::EmptyPipeline);
         }
 
-        let executor = AsyncWasmExecutor::new().map_err(|e| PipelineError::StageExecutionFailed {
-            stage_index: 0,
-            driver_name: "async_executor_init".to_string(),
-            error: e.to_string(),
-        })?;
+        let executor =
+            AsyncWasmExecutor::new().map_err(|e| PipelineError::StageExecutionFailed {
+                stage_index: 0,
+                driver_name: "async_executor_init".to_string(),
+                error: e.to_string(),
+            })?;
 
         let pipeline_start = Instant::now();
         let mut current_payload = initial_payload.to_vec();
@@ -231,7 +234,10 @@ impl DriverPipeline {
     }
 
     /// Synchronously execute the pipeline sequentially (backward-compatible).
-    pub fn execute(&self, initial_payload: &[u8]) -> Result<PipelineExecutionReport, PipelineError> {
+    pub fn execute(
+        &self,
+        initial_payload: &[u8],
+    ) -> Result<PipelineExecutionReport, PipelineError> {
         if self.stages.is_empty() {
             return Err(PipelineError::EmptyPipeline);
         }
@@ -272,7 +278,10 @@ impl DriverPipeline {
                 });
             }
 
-            let fuel = stage.fuel_limit.unwrap_or(remaining_budget).min(remaining_budget);
+            let fuel = stage
+                .fuel_limit
+                .unwrap_or(remaining_budget)
+                .min(remaining_budget);
             let limits = ExecutionLimits {
                 fuel,
                 timeout_ms: stage.timeout_ms.unwrap_or(self.total_timeout_ms),
@@ -413,7 +422,10 @@ mod tests {
             );
 
         let input = b"async_vision_frame_data";
-        let report = pipeline.execute_async(input).await.expect("async pipeline executes cleanly");
+        let report = pipeline
+            .execute_async(input)
+            .await
+            .expect("async pipeline executes cleanly");
 
         assert_eq!(report.pipeline_id, "async_perception_actuation_pipe");
         assert_eq!(report.stages.len(), 2);
@@ -439,13 +451,7 @@ mod tests {
         .expect("valid wat");
         let pipeline = DriverPipeline::new("infinite_loop_pipe")
             .with_max_fuel(1_000)
-            .add_stage(
-                "loop_stage",
-                "loop",
-                wasm,
-                DriverPermissions::none(),
-                None,
-            );
+            .add_stage("loop_stage", "loop", wasm, DriverPermissions::none(), None);
 
         let err = pipeline.execute_async(b"test").await.unwrap_err();
         assert!(matches!(

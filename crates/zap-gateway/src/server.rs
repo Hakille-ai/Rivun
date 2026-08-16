@@ -11,8 +11,8 @@ use zap_policy::PolicySet;
 
 use crate::config::GatewayConfig;
 use crate::error::Result;
-use crate::mcp::stdio::McpStdioTransport;
 use crate::mcp::McpEngine;
+use crate::mcp::stdio::McpStdioTransport;
 use crate::transports::http::HttpAgentGateway;
 use crate::transports::sse::SseBroker;
 

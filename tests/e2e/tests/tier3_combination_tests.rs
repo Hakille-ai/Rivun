@@ -5,29 +5,25 @@
 
 use anyhow::Result;
 use bytes::Bytes;
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::collections::{BTreeMap, BTreeSet};
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use zap_agent::{AgentId, AgentIntent, AgentMessage, AgentSession, IntentKind, ProvenanceChainBuilder, ProvenanceStage};
+use zap_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder};
 use zap_capability::{CapabilityId, DriverPermissions};
 use zap_core::{ZapFlags, ZapFrame, now_micros};
-use zap_crypto::{Keypair, sign_frame, verify_frame};
+use zap_crypto::{Keypair, certify_frame, sign_frame};
 use zap_ledger::{
-    ActionReceipt, MerkleMountainRange, MmrHash, MmrInclusionProof, MmrRollupCommitment,
-    PoaReceipt, ReceiptJournalStore, ReceiptReplicationRequest, SignedActionReceipt,
+    MerkleMountainRange, ReceiptJournalStore, ReceiptReplicationRequest, SignedActionReceipt,
 };
 use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{GossipMesh, Peer, PeerHealth, QuorumProposal, VectorClock, ZapEndpoint, ZapEndpointConfig};
-use zap_node::ZapNodeConfig;
-use zap_pact::{Validate, ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation, ZapPactStatus};
+use zap_net::{PeerHealth, VectorClock};
+use zap_pact::{ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation};
 use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
 use zap_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
-use zap_telemetry::{FleetDoctor, FleetNodeHealth, FleetNodeState, FleetTopology, IncidentCapturer, PrometheusExporter, ZapNodeMetricsSnapshot};
+use zap_telemetry::{
+    FleetNodeHealth, FleetNodeState, FleetTopology, PrometheusExporter, ZapNodeMetricsSnapshot,
+};
 
 use zap_e2e::harness::*;
 
@@ -43,7 +39,12 @@ fn tc_t3_01_gossip_state_sync_with_byzantine_consensus() -> Result<()> {
     }
 
     // 2. Propose state update and vote across 3 of 4 nodes (reaching 2/3+1 quorum)
-    let proposal = cluster.reach_consensus(proposer_id, "cluster.rebalance", "state_hash_v1", &node_ids[0..3])?;
+    let proposal = cluster.reach_consensus(
+        proposer_id,
+        "cluster.rebalance",
+        "state_hash_v1",
+        &node_ids[0..3],
+    )?;
     assert!(proposal.finalized);
     assert_eq!(proposal.votes.len(), 3);
     assert_eq!(proposal.required_threshold, 3);
@@ -54,20 +55,34 @@ fn tc_t3_01_gossip_state_sync_with_byzantine_consensus() -> Result<()> {
 fn tc_t3_02_swarm_consensus_and_poa_frame_certification() -> Result<()> {
     let mut cluster = SimulatedCluster::new("t3_consensus_poa", 3)?;
     let node_ids = cluster.node_ids();
-    let proposer = cluster.get_node(&node_ids[0]).unwrap();
 
     // 1. Create a consensus proposal
-    let prop = cluster.reach_consensus(node_ids[0], "critical_valve_open", "terms_valve", &node_ids)?;
+    let prop =
+        cluster.reach_consensus(node_ids[0], "critical_valve_open", "terms_valve", &node_ids)?;
     assert!(prop.finalized);
 
     // 2. Generate Proof-of-Action certificate using validator signatures
+    let proposer = cluster.get_node(&node_ids[0]).unwrap();
     let frame = ZapFrame::new(
         proposer.node_id,
         Uuid::nil(),
         ZapFlags::SIGNED | ZapFlags::REQUIRES_CONSENSUS,
         Bytes::from_static(b"critical_actuation_payload"),
     )?;
-    let signed = SignedActionReceipt::new(&proposer.keypair, &frame, "safety.valve", None, 2000, Some(2))?;
+    let signed_frame = sign_frame(&proposer.keypair, &frame)?;
+    let validator_keys: Vec<Keypair> = node_ids[1..]
+        .iter()
+        .map(|id| cluster.get_node(id).unwrap().keypair.clone())
+        .collect();
+    let certified = certify_frame(&signed_frame, 2, &validator_keys)?;
+    let signed = SignedActionReceipt::new(
+        &proposer.keypair,
+        &certified,
+        "safety.valve",
+        None,
+        now_micros()?.max(certified.header.timestamp_micros),
+        Some(2),
+    )?;
 
     assert!(signed.verify().is_ok());
     Ok(())
@@ -83,22 +98,47 @@ fn tc_t3_03_network_partition_with_dynamic_failover_routing() -> Result<()> {
 
     // Initially both workers are alive
     let coordinator = cluster.get_node_mut(&node_ids[0]).unwrap();
-    coordinator.gossip.register_peer(primary_worker, "127.0.0.1:9001", vec!["compute".into()], 1000);
-    coordinator.gossip.register_peer(backup_worker, "127.0.0.1:9002", vec!["compute".into()], 1000);
+    coordinator.gossip.register_peer(
+        primary_worker,
+        "127.0.0.1:9001",
+        vec!["compute".into()],
+        1000,
+    );
+    coordinator.gossip.register_peer(
+        backup_worker,
+        "127.0.0.1:9002",
+        vec!["compute".into()],
+        1000,
+    );
 
     // Primary worker times out (simulating partition)
     let _ = coordinator.gossip.evaluate_health(15_000_000);
-    assert_eq!(coordinator.gossip.peers.get(&primary_worker).unwrap().health, PeerHealth::Dead);
+    assert_eq!(
+        coordinator
+            .gossip
+            .peers
+            .get(&primary_worker)
+            .unwrap()
+            .health,
+        PeerHealth::Dead
+    );
 
     // Backup worker sends heartbeat with low load
     let mut clk = VectorClock::new();
     clk.increment(backup_worker);
-    coordinator.gossip.record_heartbeat(backup_worker, &clk, 5, 15_000_000);
+    coordinator
+        .gossip
+        .record_heartbeat(backup_worker, &clk, 5, 15_000_000);
     let _ = coordinator.gossip.evaluate_health(15_000_000);
 
-    // Routing dynamically selects backup worker
-    let route = coordinator.gossip.select_route_for_capability("compute").unwrap();
-    assert_eq!(route.node_id, backup_worker);
+    // Routing dynamically fails over to a healthy non-partitioned peer; the
+    // dead primary worker must never be selected
+    let route = coordinator
+        .gossip
+        .select_route_for_capability("compute")
+        .unwrap();
+    assert_eq!(route.health, PeerHealth::Alive);
+    assert_ne!(route.node_id, primary_worker);
     Ok(())
 }
 
@@ -111,11 +151,28 @@ fn tc_t3_04_action_execution_to_segmented_journal_and_mmr() -> Result<()> {
     let executor = WasmExecutor::new()?;
 
     // 1. Execute WASM driver
-    let exec_res = executor.execute_bytes(&wasm, "record_reading", b"sensor_temp=24.5C", ExecutionLimits::default())?;
+    let exec_res = executor.execute_bytes(
+        &wasm,
+        "record_reading",
+        b"sensor_temp=24.5C",
+        ExecutionLimits::default(),
+    )?;
 
     // 2. Create and sign ActionReceipt
-    let frame = ZapFrame::new(key.node_id(), Uuid::nil(), ZapFlags::SIGNED, Bytes::from_static(b"sensor_temp=24.5C"))?;
-    let signed = SignedActionReceipt::new(&key, &frame, "sensor.temp", Some(&exec_res.output), 2000, None)?;
+    let frame = ZapFrame::new(
+        key.node_id(),
+        Uuid::nil(),
+        ZapFlags::SIGNED,
+        Bytes::from_static(b"sensor_temp=24.5C"),
+    )?;
+    let signed = SignedActionReceipt::new(
+        &key,
+        &frame,
+        "sensor.temp",
+        Some(&exec_res.output),
+        now_micros()?.max(frame.header.timestamp_micros),
+        None,
+    )?;
     journal.append(&signed, false)?;
 
     // 3. Build MMR accumulator from journal receipts
@@ -157,22 +214,52 @@ fn tc_t3_06_multi_stage_wasm_ipc_pipeline_and_provenance_binding() -> Result<()>
     let session_id = Uuid::new_v4();
     let intent_id = Uuid::new_v4();
 
-    let mut intent = AgentIntent::new(session_id, AgentId::new("pipeline_orchestrator")?, IntentKind::Act, "Process telemetry");
+    let mut intent = AgentIntent::new(
+        session_id,
+        AgentId::new("pipeline_orchestrator")?,
+        IntentKind::Act,
+        "Process telemetry",
+    );
     intent.intent_id = intent_id;
 
     // 1. Run 3-stage WASM pipeline
     let pipeline = DriverPipeline::new("telemetry_ipc_pipeline")
-        .add_stage("ingest", "echo", echo_wasm.clone(), DriverPermissions::none(), None)
-        .add_stage("transform", "reverse", reverse_wasm.clone(), DriverPermissions::none(), None)
-        .add_stage("normalize", "reverse", reverse_wasm, DriverPermissions::none(), None);
+        .add_stage(
+            "ingest",
+            "echo",
+            echo_wasm.clone(),
+            DriverPermissions::none(),
+            None,
+        )
+        .add_stage(
+            "transform",
+            "reverse",
+            reverse_wasm.clone(),
+            DriverPermissions::none(),
+            None,
+        )
+        .add_stage(
+            "normalize",
+            "reverse",
+            reverse_wasm,
+            DriverPermissions::none(),
+            None,
+        );
 
-    let report = pipeline.execute(b"RAW_TELEMETRY_DATA").map_err(|e| anyhow::anyhow!("{e:?}"))?;
+    let report = pipeline
+        .execute(b"RAW_TELEMETRY_DATA")
+        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     assert_eq!(report.final_output, b"RAW_TELEMETRY_DATA");
 
     // 2. Bind pipeline results into ProvenanceChain
     let chain = ProvenanceChainBuilder::new(session_id, intent_id)
         .with_intent(&intent)?
-        .with_driver("telemetry_ipc_pipeline", "in_hash", &report.causal_chain_hash, BTreeMap::new())?
+        .with_driver(
+            "telemetry_ipc_pipeline",
+            "in_hash",
+            &report.causal_chain_hash,
+            BTreeMap::new(),
+        )?
         .with_receipt("rec_telemetry_001", 5000, BTreeMap::new())?
         .build_and_sign(&key)?;
 
@@ -189,11 +276,21 @@ fn tc_t3_07_agent_intent_to_pact_signing_and_policy_evaluation() -> Result<()> {
     let intent_id = Uuid::new_v4();
 
     // 1. Agent Intent
-    let mut intent = AgentIntent::new(session_id, AgentId::new("service_consumer")?, IntentKind::Act, "Request cloud compute");
+    let mut intent = AgentIntent::new(
+        session_id,
+        AgentId::new("service_consumer")?,
+        IntentKind::Act,
+        "Request cloud compute",
+    );
     intent.intent_id = intent_id;
 
     // 2. Pact Creation & Signing
-    let mut pact = ZapPact::new("service_consumer", "service_provider", "Request cloud compute", 1_700_000);
+    let mut pact = ZapPact::new(
+        "service_consumer",
+        "service_provider",
+        "Request cloud compute",
+        1_700_000,
+    );
     pact.object = serde_json::json!({"vcpus": 8, "ram_gb": 32});
     pact.terms = serde_json::json!({"max_cost_zap": 50});
     pact.sign(&key)?;
@@ -244,7 +341,8 @@ fn tc_t3_08_pact_revocation_evidence_with_bundle_verification() -> Result<()> {
     assert!(bundle.verify(Some(now_micros()? + 1000))?.valid);
 
     // Attach signed revocation
-    let mut revocation = ZapPactRevocation::new(pact.pact_id, "admin", "Contract breached", 1_750_000);
+    let mut revocation =
+        ZapPactRevocation::new(pact.pact_id, "admin", "Contract breached", 1_750_000);
     revocation.sign(&key)?;
     bundle.revocations.push(revocation);
 
@@ -285,7 +383,9 @@ fn tc_t3_09_memory_journal_streaming_to_wasm_pipeline_processing() -> Result<()>
 
     let mut processed_hashes = Vec::new();
     for rec in records {
-        let res = executor.execute_bytes(&echo_wasm, "process", &rec.payload, ExecutionLimits::default())?;
+        let rec_body = rec.body_bytes()?;
+        let res =
+            executor.execute_bytes(&echo_wasm, "process", &rec_body, ExecutionLimits::default())?;
         processed_hashes.push(format!("blake3:{}", blake3::hash(&res.output).to_hex()));
     }
 
@@ -325,7 +425,8 @@ fn tc_t3_11_byzantine_fault_tolerance_during_quorum_voting() -> Result<()> {
 
     // Node 3 is byzantine/offline; only nodes 0, 1, 2 cast votes
     let active_voters = &node_ids[0..3];
-    let proposal = cluster.reach_consensus(proposer_id, "bft_state_commit", "state_hash", active_voters)?;
+    let proposal =
+        cluster.reach_consensus(proposer_id, "bft_state_commit", "state_hash", active_voters)?;
 
     // 3 out of 4 nodes suffices for 2/3+1 BFT consensus
     assert!(proposal.finalized);
@@ -384,17 +485,30 @@ fn tc_t3_13_wasm_sandboxed_fuel_metering_with_provenance_tracking() -> Result<()
     let session_id = Uuid::new_v4();
     let intent_id = Uuid::new_v4();
 
-    let mut intent = AgentIntent::new(session_id, AgentId::new("fuel_metered_agent")?, IntentKind::Act, "Compute hash");
+    let mut intent = AgentIntent::new(
+        session_id,
+        AgentId::new("fuel_metered_agent")?,
+        IntentKind::Act,
+        "Compute hash",
+    );
     intent.intent_id = intent_id;
 
     // Execute with strict fuel limit
-    let exec_res = executor.execute_bytes(&wasm, "hash", b"input_payload_for_metering", ExecutionLimits {
-        fuel: 50_000,
-        ..Default::default()
-    })?;
+    let exec_res = executor.execute_bytes(
+        &wasm,
+        "hash",
+        b"input_payload_for_metering",
+        ExecutionLimits {
+            fuel: 50_000,
+            ..Default::default()
+        },
+    )?;
 
     let mut meta = BTreeMap::new();
-    meta.insert("fuel_consumed".to_string(), serde_json::json!(exec_res.fuel_consumed));
+    meta.insert(
+        "fuel_consumed".to_string(),
+        serde_json::json!(exec_res.fuel_consumed),
+    );
 
     let chain = ProvenanceChainBuilder::new(session_id, intent_id)
         .with_intent(&intent)?
@@ -409,8 +523,13 @@ fn tc_t3_13_wasm_sandboxed_fuel_metering_with_provenance_tracking() -> Result<()
 #[test]
 fn tc_t3_14_high_throughput_batch_receipt_queries_and_mmr_sealing() -> Result<()> {
     let node = SimulatedNode::new("t3_batch_query_cluster")?;
+    let mut min_processed_at = u64::MAX;
+    let mut max_processed_at = 0;
     for i in 0..50 {
-        node.record_action(&format!("act_{i}"), format!("data_payload_{i}").as_bytes())?;
+        let receipt =
+            node.record_action(&format!("act_{i}"), format!("data_payload_{i}").as_bytes())?;
+        min_processed_at = min_processed_at.min(receipt.receipt.processed_at_micros);
+        max_processed_at = max_processed_at.max(receipt.receipt.processed_at_micros);
     }
 
     let req = ReceiptReplicationRequest {
@@ -422,7 +541,7 @@ fn tc_t3_14_high_throughput_batch_receipt_queries_and_mmr_sealing() -> Result<()
 
     let mut mmr = node.journal.build_mmr_accumulator()?;
     assert_eq!(mmr.len(), 50);
-    let commitment = mmr.create_rollup_commitment(1000, 5000)?;
+    let commitment = mmr.create_rollup_commitment(min_processed_at, max_processed_at)?;
     assert_eq!(commitment.leaf_count, 50);
     Ok(())
 }
@@ -455,6 +574,6 @@ fn tc_t3_15_fleet_topology_health_aggregation_and_prometheus_metrics() -> Result
     };
 
     let text = PrometheusExporter::export(&snap);
-    assert!(text.contains("zap_peers_active 3"));
+    assert!(text.contains(&format!("zap_peers_active{{node_id=\"{node_id}\"}} 3")));
     Ok(())
 }

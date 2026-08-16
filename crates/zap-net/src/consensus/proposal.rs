@@ -23,6 +23,7 @@ pub struct SwarmProposal {
 
 impl SwarmProposal {
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new_signed(
         epoch: u64,
         view: u64,
@@ -62,6 +63,7 @@ impl SwarmProposal {
     }
 
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn compute_digest(
         epoch: u64,
         view: u64,

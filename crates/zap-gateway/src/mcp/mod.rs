@@ -23,9 +23,7 @@ pub struct McpEngine {
 
 impl McpEngine {
     pub fn new(ctx: ToolExecutionContext) -> Self {
-        Self {
-            ctx: Arc::new(ctx),
-        }
+        Self { ctx: Arc::new(ctx) }
     }
 
     pub fn context(&self) -> &ToolExecutionContext {
@@ -83,7 +81,9 @@ impl McpEngine {
                 };
                 match serde_json::to_value(init_res) {
                     Ok(val) => JsonRpcResponse::success(id, val),
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 
@@ -93,7 +93,9 @@ impl McpEngine {
                 };
                 match serde_json::to_value(tools_list) {
                     Ok(val) => JsonRpcResponse::success(id, val),
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 
@@ -104,7 +106,9 @@ impl McpEngine {
                         Err(e) => {
                             return JsonRpcResponse::error(
                                 id,
-                                JsonRpcError::invalid_params(format!("Invalid tool call params: {e}")),
+                                JsonRpcError::invalid_params(format!(
+                                    "Invalid tool call params: {e}"
+                                )),
                             );
                         }
                     },
@@ -119,12 +123,16 @@ impl McpEngine {
                 match tools::execute_tool(params, &self.ctx).await {
                     Ok(result) => match serde_json::to_value(result) {
                         Ok(val) => JsonRpcResponse::success(id, val),
-                        Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                        Err(e) => {
+                            JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                        }
                     },
                     Err(ZapGatewayError::JsonRpc { code, message, .. }) => {
                         JsonRpcResponse::error(id, JsonRpcError::new(code, message))
                     }
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 
@@ -132,7 +140,9 @@ impl McpEngine {
                 let resources_list = resources::list_resources();
                 match serde_json::to_value(resources_list) {
                     Ok(val) => JsonRpcResponse::success(id, val),
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 
@@ -143,14 +153,18 @@ impl McpEngine {
                         Err(e) => {
                             return JsonRpcResponse::error(
                                 id,
-                                JsonRpcError::invalid_params(format!("Invalid resource read params: {e}")),
+                                JsonRpcError::invalid_params(format!(
+                                    "Invalid resource read params: {e}"
+                                )),
                             );
                         }
                     },
                     None => {
                         return JsonRpcResponse::error(
                             id,
-                            JsonRpcError::invalid_params("Missing params object for resources/read"),
+                            JsonRpcError::invalid_params(
+                                "Missing params object for resources/read",
+                            ),
                         );
                     }
                 };
@@ -158,12 +172,16 @@ impl McpEngine {
                 match resources::read_resource(params, &self.ctx).await {
                     Ok(result) => match serde_json::to_value(result) {
                         Ok(val) => JsonRpcResponse::success(id, val),
-                        Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                        Err(e) => {
+                            JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                        }
                     },
                     Err(ZapGatewayError::NotFound(msg)) => {
                         JsonRpcResponse::error(id, JsonRpcError::invalid_params(msg))
                     }
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 
@@ -171,7 +189,9 @@ impl McpEngine {
                 let prompts_list = prompts::list_prompts();
                 match serde_json::to_value(prompts_list) {
                     Ok(val) => JsonRpcResponse::success(id, val),
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 
@@ -182,7 +202,9 @@ impl McpEngine {
                         Err(e) => {
                             return JsonRpcResponse::error(
                                 id,
-                                JsonRpcError::invalid_params(format!("Invalid prompt get params: {e}")),
+                                JsonRpcError::invalid_params(format!(
+                                    "Invalid prompt get params: {e}"
+                                )),
                             );
                         }
                     },
@@ -197,12 +219,16 @@ impl McpEngine {
                 match prompts::get_prompt(params) {
                     Ok(result) => match serde_json::to_value(result) {
                         Ok(val) => JsonRpcResponse::success(id, val),
-                        Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                        Err(e) => {
+                            JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                        }
                     },
                     Err(ZapGatewayError::NotFound(msg)) => {
                         JsonRpcResponse::error(id, JsonRpcError::invalid_params(msg))
                     }
-                    Err(e) => JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string())),
+                    Err(e) => {
+                        JsonRpcResponse::error(id, JsonRpcError::internal_error(e.to_string()))
+                    }
                 }
             }
 

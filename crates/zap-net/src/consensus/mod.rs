@@ -10,9 +10,7 @@ pub mod validator_set;
 pub mod vote;
 
 pub use batch_verify::verify_threshold_signatures;
-pub use certificate::{
-    CONSENSUS_TRAILER_MAGIC, CONSENSUS_TRAILER_VERSION, SwarmCommitCertificate,
-};
+pub use certificate::{CONSENSUS_TRAILER_MAGIC, CONSENSUS_TRAILER_VERSION, SwarmCommitCertificate};
 pub use engine::{BftConsensusEngine, SwarmConsensusEngine};
 pub use equivocation::EquivocationProof;
 pub use mod_types::ConsensusError;
@@ -34,18 +32,8 @@ mod tests {
         let payload = [42_u8; 32];
         let root = [1_u8; 32];
 
-        let proposal = SwarmProposal::new_signed(
-            1,
-            0,
-            0,
-            1,
-            node_id,
-            payload,
-            root,
-            None,
-            1_000_000,
-            &key,
-        );
+        let proposal =
+            SwarmProposal::new_signed(1, 0, 0, 1, node_id, payload, root, None, 1_000_000, &key);
         assert!(proposal.verify_signature(&key.verifying_key()));
 
         let vote = SwarmVote::new_signed(

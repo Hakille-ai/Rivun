@@ -47,7 +47,9 @@ pub enum ZapGatewayError {
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
-    #[error("Provenance step verification failed for stage {stage:?}: expected {expected}, got {actual}")]
+    #[error(
+        "Provenance step verification failed for stage {stage:?}: expected {expected}, got {actual}"
+    )]
     StepVerificationFailed {
         stage: ProvenanceStage,
         expected: String,

@@ -28,6 +28,7 @@ pub struct SwarmVote {
 
 impl SwarmVote {
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new_signed(
         epoch: u64,
         view: u64,

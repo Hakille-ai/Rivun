@@ -1,7 +1,6 @@
 //! UdpRxActor: Inbound UDP datagram reception and fast sub-microsecond packet classifier.
 
 use anyhow::Result;
-use bytes::Bytes;
 use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, warn};
 use uuid::Uuid;
@@ -65,21 +64,29 @@ impl UdpRxActor {
         if let Ok(env) = ZapEnvelope::decode(&frame.payload) {
             let subject = env.subject();
             if subject.starts_with("zap.gossip.") {
-                let _ = self.gossip_tx.send(InboundGossipPacket {
-                    peer,
-                    topic: subject.to_string(),
-                    raw_envelope: frame.payload.clone(),
-                    received_at_micros: now_micros,
-                }).await;
+                let _ = self
+                    .gossip_tx
+                    .send(InboundGossipPacket {
+                        peer,
+                        topic: subject.to_string(),
+                        raw_envelope: frame.payload.clone(),
+                        received_at_micros: now_micros,
+                    })
+                    .await;
                 return;
-            } else if subject.starts_with("zap.consensus.") || frame.header.flags.contains(ZapFlags::REQUIRES_CONSENSUS) {
-                let _ = self.consensus_tx.send(InboundConsensusPacket {
-                    peer,
-                    epoch: 1,
-                    view: 0,
-                    round: 0,
-                    payload: frame.payload.clone(),
-                }).await;
+            } else if subject.starts_with("zap.consensus.")
+                || frame.header.flags.contains(ZapFlags::REQUIRES_CONSENSUS)
+            {
+                let _ = self
+                    .consensus_tx
+                    .send(InboundConsensusPacket {
+                        peer,
+                        epoch: 1,
+                        view: 0,
+                        round: 0,
+                        payload: frame.payload.clone(),
+                    })
+                    .await;
                 return;
             } else if subject.starts_with("zap.p2p.heartbeat") {
                 let kind = if subject.ends_with(".ack") {
@@ -87,37 +94,49 @@ impl UdpRxActor {
                 } else {
                     MeshPacketKind::HeartbeatProbe
                 };
-                let _ = self.mesh_tx.send(InboundMeshPacket {
-                    peer,
-                    kind,
-                    timestamp_micros: now_micros,
-                    echo_rtt_micros: None,
-                }).await;
+                let _ = self
+                    .mesh_tx
+                    .send(InboundMeshPacket {
+                        peer,
+                        kind,
+                        timestamp_micros: now_micros,
+                        echo_rtt_micros: None,
+                    })
+                    .await;
                 return;
             }
 
-            let _ = self.execution_tx.send(InboundExecutionPacket {
-                peer,
-                frame,
-                message: env,
-            }).await;
+            let _ = self
+                .execution_tx
+                .send(InboundExecutionPacket {
+                    peer,
+                    frame,
+                    message: env,
+                })
+                .await;
         } else {
             // Check raw frame flags
             if frame.header.flags.contains(ZapFlags::BROADCAST) {
-                let _ = self.gossip_tx.send(InboundGossipPacket {
-                    peer,
-                    topic: "zap.broadcast".to_string(),
-                    raw_envelope: frame.payload.clone(),
-                    received_at_micros: now_micros,
-                }).await;
+                let _ = self
+                    .gossip_tx
+                    .send(InboundGossipPacket {
+                        peer,
+                        topic: "zap.broadcast".to_string(),
+                        raw_envelope: frame.payload.clone(),
+                        received_at_micros: now_micros,
+                    })
+                    .await;
             } else if frame.header.flags.contains(ZapFlags::REQUIRES_CONSENSUS) {
-                let _ = self.consensus_tx.send(InboundConsensusPacket {
-                    peer,
-                    epoch: 1,
-                    view: 0,
-                    round: 0,
-                    payload: frame.payload.clone(),
-                }).await;
+                let _ = self
+                    .consensus_tx
+                    .send(InboundConsensusPacket {
+                        peer,
+                        epoch: 1,
+                        view: 0,
+                        round: 0,
+                        payload: frame.payload.clone(),
+                    })
+                    .await;
             } else {
                 warn!(%peer, "Unclassified raw frame received");
             }

@@ -1,10 +1,10 @@
 //! Asynchronous driver traits, lifecycle context, and streaming I/O abstractions.
 
 use crate::{
+    DriverInput, ZapDriver,
     buffer::{BufferSlice, PinnedBuffer},
     error::DriverError,
     ipc::IpcMessage,
-    DriverInput, ZapDriver,
 };
 use std::{collections::HashMap, future::Future, pin::Pin};
 use zap_capability::DriverPermissions;
@@ -413,12 +413,19 @@ mod tests {
 
         let slice = BufferSlice::new(b"zero_copy_chunk");
         let mut out_buf = PinnedBuffer::with_capacity(64);
-        let written = adapter.process_stream(&mut ctx, &slice, &mut out_buf).await.unwrap();
+        let written = adapter
+            .process_stream(&mut ctx, &slice, &mut out_buf)
+            .await
+            .unwrap();
         assert_eq!(written, 15);
         assert_eq!(out_buf.as_slice(), b"zero_copy_chunk");
 
         let event = IpcMessage::new(1, 10, 100, 0, b"ping_data".to_vec());
-        let resp = adapter.handle_event(&mut ctx, &event).await.unwrap().unwrap();
+        let resp = adapter
+            .handle_event(&mut ctx, &event)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(resp.channel_id, 1);
         assert_eq!(resp.sequence, 11);
         assert_eq!(resp.payload, b"ping_data");
@@ -428,8 +435,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_driver_context_fuel_accounting() {
-        let mut ctx = DriverContext::new("test_ctx", 1, DriverPermissions::none())
-            .with_fuel_limit(1000);
+        let mut ctx =
+            DriverContext::new("test_ctx", 1, DriverPermissions::none()).with_fuel_limit(1000);
 
         assert_eq!(ctx.remaining_fuel(), 1000);
         ctx.consume_fuel(300).unwrap();

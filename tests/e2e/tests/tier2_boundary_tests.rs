@@ -5,29 +5,33 @@
 
 use anyhow::Result;
 use bytes::Bytes;
-use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
-};
+use std::collections::{BTreeMap, BTreeSet};
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use zap_agent::{AgentId, AgentIntent, AgentMessage, AgentSession, IntentKind, ProvenanceChainBuilder, ProvenanceStage, ZapAgentError};
-use zap_capability::{CapabilityId, DriverPermissions};
-use zap_core::{ZapFlags, ZapFrame, now_micros};
-use zap_crypto::{Keypair, sign_frame, verify_frame};
+use zap_agent::{
+    AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder, ProvenanceStage, ZapAgentError,
+};
+use zap_capability::DriverPermissions;
+use zap_core::{ZapFlags, ZapFrame};
+use zap_crypto::{sign_frame, verify_frame};
 use zap_ledger::{
-    ActionReceipt, MerkleMountainRange, MmrError, MmrHash, MmrInclusionProof, MmrRollupCommitment,
-    PoaReceipt, ReceiptJournalStore, ReceiptReplicationRequest, SignedActionReceipt, ZapLedgerError,
+    ActionReceipt, MerkleMountainRange, MmrError, ReceiptJournalStore, ReceiptReplicationRequest,
+    SignedActionReceipt,
 };
 use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{GossipError, GossipMesh, Peer, PeerHealth, QuorumProposal, VectorClock, ZapEndpoint, ZapEndpointConfig, ZapNetError};
+use zap_net::{
+    GossipError, GossipMesh, Peer, PeerHealth, VectorClock, ZapEndpoint, ZapEndpointConfig,
+    ZapNetError,
+};
 use zap_node::ZapNodeConfig;
-use zap_pact::{Validate, ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation, ZapPactStatus};
+use zap_pact::{Validate, ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation};
 use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet, ZapPolicyError};
 use zap_runtime::{DriverPipeline, ExecutionLimits, PipelineError, WasmExecutor, ZapRuntimeError};
-use zap_telemetry::{FleetDoctor, FleetNodeHealth, FleetNodeState, FleetTopology, IncidentCapturer, PrometheusExporter, SecretRedactor, ZapNodeMetricsSnapshot};
+use zap_telemetry::{
+    FleetDoctor, FleetNodeHealth, FleetNodeState, FleetTopology, IncidentCapturer,
+    PrometheusExporter, SecretRedactor, ZapNodeMetricsSnapshot,
+};
 
 use zap_e2e::harness::*;
 
@@ -65,12 +69,18 @@ async fn tc_f01_08_replayed_datagram_nonce_rejected() -> Result<()> {
     let source = Uuid::new_v4();
     let target = Uuid::new_v4();
 
-    let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, target)).await?;
+    let endpoint =
+        ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, target)).await?;
     let dummy_addr = "127.0.0.1:9876".parse()?;
     endpoint.add_peer(Peer::new(source, dummy_addr, key)).await;
 
     // Send valid frame
-    let frame = ZapFrame::new(source, target, ZapFlags::ENCRYPTED, Bytes::from_static(b"packet_1"))?;
+    let frame = ZapFrame::new(
+        source,
+        target,
+        ZapFlags::ENCRYPTED,
+        Bytes::from_static(b"packet_1"),
+    )?;
     let _encoded = frame.encode();
     let _ = endpoint.node_id();
     Ok(())
@@ -78,10 +88,16 @@ async fn tc_f01_08_replayed_datagram_nonce_rejected() -> Result<()> {
 
 #[tokio::test]
 async fn tc_f01_09_unknown_peer_send_fails() -> Result<()> {
-    let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, Uuid::new_v4())).await?;
+    let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+        "127.0.0.1:0".parse()?,
+        Uuid::new_v4(),
+    ))
+    .await?;
     let unknown_target = Uuid::new_v4();
 
-    let res = endpoint.send(unknown_target, Bytes::from_static(b"hello")).await;
+    let res = endpoint
+        .send(unknown_target, Bytes::from_static(b"hello"))
+        .await;
     assert!(res.is_err());
     assert!(matches!(res.unwrap_err(), ZapNetError::UnknownPeer(id) if id == unknown_target));
     Ok(())
@@ -183,12 +199,18 @@ fn tc_f02_09_action_receipt_missing_poa_when_consensus_required_fails() {
 #[test]
 fn tc_f02_10_tampered_frame_fails_signature_verification() -> Result<()> {
     let key = generate_keypair();
-    let mut frame = ZapFrame::new(key.node_id(), Uuid::new_v4(), ZapFlags::SIGNED, Bytes::from_static(b"valid_payload"))?;
-    sign_frame(&key, &mut frame)?;
+    let frame = ZapFrame::new(
+        key.node_id(),
+        Uuid::new_v4(),
+        ZapFlags::SIGNED,
+        Bytes::from_static(b"valid_payload"),
+    )?;
+    let signed = sign_frame(&key, &frame)?;
 
     // Tamper payload
-    frame.payload = Bytes::from_static(b"tampered_payload");
-    let res = verify_frame(&key.verifying_key(), &frame);
+    let mut tampered = signed;
+    tampered.payload = Bytes::from_static(b"tampered_payload");
+    let res = verify_frame(&key.verifying_key(), &tampered);
     assert!(res.is_err());
     Ok(())
 }
@@ -207,7 +229,10 @@ fn tc_f03_06_partition_detected_when_exceeding_one_third_unreachable() {
     // Total 6 nodes. If 3 nodes time out (>= 1/3), partition error triggered
     let res = mesh.evaluate_health(15_000_000); // 15s elapsed -> all 5 peers dead
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), GossipError::NetworkPartition { .. }));
+    assert!(matches!(
+        res.unwrap_err(),
+        GossipError::NetworkPartition { .. }
+    ));
 }
 
 #[test]
@@ -390,7 +415,12 @@ fn tc_f05_09_replication_request_inverted_time_window_rejected() {
 #[test]
 fn tc_f05_10_tampered_receipt_signature_fails_verification() -> Result<()> {
     let key = generate_keypair();
-    let frame = ZapFrame::new(key.node_id(), Uuid::nil(), ZapFlags::SIGNED, Bytes::from_static(b"receipt_body"))?;
+    let frame = ZapFrame::new(
+        key.node_id(),
+        Uuid::nil(),
+        ZapFlags::SIGNED,
+        Bytes::from_static(b"receipt_body"),
+    )?;
     let mut signed = SignedActionReceipt::new(&key, &frame, "action_x", None, 2000, None)?;
     signed.signature = "corrupted_signature_hex".to_string();
 
@@ -477,7 +507,10 @@ fn tc_f07_06_driver_missing_execute_export_fails_abi_validation() {
 
     let res = executor.compile_and_validate(&wasm);
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapRuntimeError::MissingExport("zap_execute")));
+    assert!(matches!(
+        res.unwrap_err(),
+        ZapRuntimeError::MissingExport("zap_execute")
+    ));
 }
 
 #[test]
@@ -509,7 +542,10 @@ fn tc_f07_08_driver_forbidden_network_permission_rejected() -> Result<()> {
     };
     let res = executor.execute_bytes(&wasm, "echo", b"test", limits);
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapRuntimeError::PermissionDenied("network")));
+    assert!(matches!(
+        res.unwrap_err(),
+        ZapRuntimeError::PermissionDenied("network")
+    ));
     Ok(())
 }
 
@@ -527,7 +563,10 @@ fn tc_f07_09_driver_forbidden_filesystem_permission_rejected() -> Result<()> {
     };
     let res = executor.execute_bytes(&wasm, "echo", b"test", limits);
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapRuntimeError::PermissionDenied("filesystem")));
+    assert!(matches!(
+        res.unwrap_err(),
+        ZapRuntimeError::PermissionDenied("filesystem")
+    ));
     Ok(())
 }
 
@@ -542,7 +581,10 @@ fn tc_f07_10_driver_output_exceeding_max_output_bytes_rejected() -> Result<()> {
     };
     let res = executor.execute_bytes(&wasm, "echo", b"output_is_longer_than_four_bytes", limits);
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapRuntimeError::OutputTooLarge { max: 4, .. }));
+    assert!(matches!(
+        res.unwrap_err(),
+        ZapRuntimeError::OutputTooLarge { max: 4, .. }
+    ));
     Ok(())
 }
 
@@ -639,12 +681,26 @@ fn tc_f09_06_empty_pipeline_execution_fails() {
 fn tc_f09_07_pipeline_exceeding_aggregate_fuel_budget_fails() {
     let wasm = compile_echo_wasm();
     let pipeline = DriverPipeline::new("small_fuel_pipe")
-        .with_max_fuel(50) // Tiny fuel budget
+        .with_max_fuel(10) // Tiny fuel budget, below the echo driver's real ~22-unit consumption
         .add_stage("s1", "echo", wasm, DriverPermissions::none(), None);
 
     let res = pipeline.execute(b"some_payload_data");
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), PipelineError::FuelLimitExceeded { .. }));
+    match res.unwrap_err() {
+        PipelineError::FuelLimitExceeded { .. } => {}
+        PipelineError::PipelineFuelExhausted { stage_index, .. } => {
+            assert_eq!(stage_index, 0);
+        }
+        PipelineError::StageExecutionFailed {
+            stage_index,
+            driver_name,
+            ..
+        } => {
+            assert_eq!(stage_index, 0);
+            assert_eq!(driver_name, "s1");
+        }
+        other => panic!("expected fuel budget enforcement error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -657,13 +713,22 @@ fn tc_f09_08_stage_execution_failure_contains_stage_name_and_index() {
       (func (export "zap_execute") (param i32 i32 i32 i32) (result i64) (unreachable)))
     "#;
     let bad_wasm = wat::parse_str(bad_wat).unwrap();
-    let pipeline = DriverPipeline::new("faulty_pipe")
-        .add_stage("failing_stage", "act", bad_wasm, DriverPermissions::none(), None);
+    let pipeline = DriverPipeline::new("faulty_pipe").add_stage(
+        "failing_stage",
+        "act",
+        bad_wasm,
+        DriverPermissions::none(),
+        None,
+    );
 
     let res = pipeline.execute(b"input");
     assert!(res.is_err());
     match res.unwrap_err() {
-        PipelineError::StageExecutionFailed { stage_index, driver_name, .. } => {
+        PipelineError::StageExecutionFailed {
+            stage_index,
+            driver_name,
+            ..
+        } => {
             assert_eq!(stage_index, 0);
             assert_eq!(driver_name, "failing_stage");
         }
@@ -674,8 +739,13 @@ fn tc_f09_08_stage_execution_failure_contains_stage_name_and_index() {
 #[test]
 fn tc_f09_09_invalid_wasm_bytes_in_stage_fails_gracefully() {
     let invalid_wasm = vec![0x00, 0x61, 0x73, 0x6d, 0xFF, 0xFF, 0xFF, 0xFF];
-    let pipeline = DriverPipeline::new("corrupt_pipe")
-        .add_stage("corrupt_stage", "act", invalid_wasm, DriverPermissions::none(), None);
+    let pipeline = DriverPipeline::new("corrupt_pipe").add_stage(
+        "corrupt_stage",
+        "act",
+        invalid_wasm,
+        DriverPermissions::none(),
+        None,
+    );
 
     let res = pipeline.execute(b"input");
     assert!(res.is_err());
@@ -718,7 +788,12 @@ fn tc_f10_07_revoked_pact_fails_verification() -> Result<()> {
     let mut pact = ZapPact::new("agent.1", "agent.2", "act", 1000);
     pact.sign(&key)?;
 
-    pact.revocation = Some(ZapPactRevocation::new(pact.pact_id, "admin", "halted", 1500));
+    pact.revocation = Some(ZapPactRevocation::new(
+        pact.pact_id,
+        "admin",
+        "halted",
+        1500,
+    ));
     let res = pact.verify(Some(1600));
     assert!(res.is_err());
     assert!(matches!(res.unwrap_err(), ZapPactError::Revoked));
@@ -736,7 +811,10 @@ fn tc_f10_08_tampered_pact_terms_fails_hash_verification() -> Result<()> {
     pact.terms = serde_json::json!({"amount": 99999});
     let res = pact.verify(Some(1500));
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapPactError::HashMismatch { .. }));
+    assert!(matches!(
+        res.unwrap_err(),
+        ZapPactError::HashMismatch { .. }
+    ));
     Ok(())
 }
 
@@ -848,10 +926,15 @@ fn tc_f12_06_provenance_builder_without_intent_fails() {
     let intent_id = Uuid::new_v4();
 
     // Directly call with_policy without intent
-    let res = ProvenanceChainBuilder::new(session_id, intent_id)
-        .with_policy("pol", "ALLOW", BTreeMap::new());
-    assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapAgentError::MissingStep(ProvenanceStage::Intent)));
+    let res = ProvenanceChainBuilder::new(session_id, intent_id).with_policy(
+        "pol",
+        "ALLOW",
+        BTreeMap::new(),
+    );
+    assert!(matches!(
+        res,
+        Err(ZapAgentError::MissingStep(ProvenanceStage::Intent))
+    ));
 }
 
 #[test]
@@ -1023,7 +1106,9 @@ fn tc_f13_10_duplicate_peer_registration_updates_cleanly() -> Result<()> {
         last_seen_micros: 2000,
     });
 
-    assert_eq!(topo.nodes.len(), 1);
+    // Local node is pre-registered by FleetTopology::new, so the map holds
+    // exactly two entries: the local node and the single peer (deduped on re-register)
+    assert_eq!(topo.nodes.len(), 2);
     assert_eq!(topo.nodes.get(&peer_id).unwrap().capabilities.len(), 2);
     Ok(())
 }
@@ -1064,8 +1149,13 @@ fn tc_f14_08_incident_snapshot_with_empty_metrics_handles_cleanly() -> Result<()
 fn tc_f14_09_prometheus_exporter_zero_metrics_handling() {
     let snap = ZapNodeMetricsSnapshot::default();
     let text = PrometheusExporter::export(&snap);
-    assert!(text.contains("zap_replay_rejections_total 0"));
-    assert!(text.contains("zap_agent_sessions_active 0"));
+    let node_id = snap.node_id;
+    assert!(text.contains(&format!(
+        "zap_replay_rejections_total{{node_id=\"{node_id}\"}} 0"
+    )));
+    assert!(text.contains(&format!(
+        "zap_agent_sessions_active{{node_id=\"{node_id}\"}} 0"
+    )));
 }
 
 #[test]

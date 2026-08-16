@@ -9,11 +9,10 @@ use std::{
     time::Duration,
 };
 use uuid::Uuid;
-use zap_crypto::Keypair;
 use zap_net::gossip::{
-    Causality, DiscoveredPeerEntry, GossipDeduplicationCache, GossipEnvelope,
-    GossipError, GossipMessageId, GossipMesh, PeerExchangeRequest, PeerExchangeResponse,
-    SwarmGossipDispatcher, SwarmGossipEngine, VectorClock, xor_distance,
+    Causality, DiscoveredPeerEntry, GossipDeduplicationCache, GossipEnvelope, GossipMesh,
+    GossipMessageId, PeerExchangeRequest, PeerExchangeResponse, SwarmGossipDispatcher,
+    SwarmGossipEngine, xor_distance,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -86,7 +85,7 @@ async fn test_k_fanout_epidemic_convergence() {
         dispatchers.push(SwarmGossipDispatcher::new(
             id,
             key,
-            3, // fanout
+            3,  // fanout
             16, // max hops
             1000,
             Duration::from_secs(60),
@@ -94,10 +93,10 @@ async fn test_k_fanout_epidemic_convergence() {
     }
 
     // Fully connect mesh peers in active view
-    for i in 0..num_nodes {
-        for j in 0..num_nodes {
+    for (i, dispatcher) in dispatchers.iter().enumerate() {
+        for (j, peer_id) in node_ids.iter().enumerate() {
             if i != j {
-                dispatchers[i].register_peer(node_ids[j], node_keys[j].verifying_key());
+                dispatcher.register_peer(*peer_id, node_keys[j].verifying_key());
             }
         }
     }
@@ -111,15 +110,8 @@ async fn test_k_fanout_epidemic_convergence() {
     assert_eq!(receipt.fanout_peers, 3);
 
     // Simulate hop dissemination
-    let env = GossipEnvelope::new_signed(
-        node_ids[0],
-        topic,
-        1,
-        16,
-        1_000_000,
-        payload,
-        &node_keys[0],
-    );
+    let env =
+        GossipEnvelope::new_signed(node_ids[0], topic, 1, 16, 1_000_000, payload, &node_keys[0]);
 
     let mut delivered = HashSet::new();
     delivered.insert(node_ids[0]);
@@ -130,12 +122,12 @@ async fn test_k_fanout_epidemic_convergence() {
     while let Some((sender, current_env)) = queue.pop_front() {
         for (i, dispatcher) in dispatchers.iter().enumerate() {
             let receiver_id = node_ids[i];
-            if receiver_id != sender {
-                if let Ok(Some(forwarded)) = dispatcher.handle_inbound_envelope(current_env.clone()) {
-                    delivered.insert(receiver_id);
-                    if forwarded.current_hop < 4 {
-                        queue.push_back((receiver_id, forwarded));
-                    }
+            if receiver_id != sender
+                && let Ok(Some(forwarded)) = dispatcher.handle_inbound_envelope(current_env.clone())
+            {
+                delivered.insert(receiver_id);
+                if forwarded.current_hop < 4 {
+                    queue.push_back((receiver_id, forwarded));
                 }
             }
         }
@@ -221,8 +213,10 @@ fn test_pex_neighbor_discovery_convergence() {
 
 #[tokio::test]
 async fn test_anti_entropy_sync_under_packet_drops() {
-    let mut chaos = ChaosConfig::default();
-    chaos.drop_rate = 0.30;
+    let chaos = ChaosConfig {
+        drop_rate: 0.30,
+        ..ChaosConfig::default()
+    };
     let router = MockSwarmRouter::new(chaos);
 
     let node_a = Uuid::new_v4();

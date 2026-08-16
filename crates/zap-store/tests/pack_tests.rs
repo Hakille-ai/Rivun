@@ -2,10 +2,9 @@ use std::fs;
 use tempfile::tempdir;
 use zap_crypto::Keypair;
 use zap_store::{
-    audit_pack_dir, DomainPackBundle, DomainPackBundleSignature,
-    DomainPackCompatibility, DomainPackDependencyResolver, DomainPackDependencySpec,
-    DomainPackPolicyValidator, DomainPackRegistry, DomainPackRegistryEntry,
-    DomainPackRisk, DomainPackStatus,
+    DomainPackBundle, DomainPackBundleSignature, DomainPackCompatibility,
+    DomainPackDependencyResolver, DomainPackDependencySpec, DomainPackPolicyValidator,
+    DomainPackRegistry, DomainPackRegistryEntry, DomainPackRisk, DomainPackStatus, audit_pack_dir,
 };
 
 #[test]
@@ -66,9 +65,10 @@ action = "finance.transfer"
 
     // 4. Untrusted signer fails
     let wrong_key = hex::encode(Keypair::generate().verifying_key().to_bytes());
-    assert!(sig
-        .verify_against_trusted_keys(&bundle.bundle_sha256, &[wrong_key])
-        .is_err());
+    assert!(
+        sig.verify_against_trusted_keys(&bundle.bundle_sha256, &[wrong_key])
+            .is_err()
+    );
 
     // 5. Test Roundtrip encode/decode
     let zpack_file = tmp.path().join("finance-1.2.3.zpack");

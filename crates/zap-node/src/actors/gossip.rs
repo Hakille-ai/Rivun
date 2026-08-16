@@ -3,7 +3,7 @@
 use anyhow::Result;
 use std::{sync::Arc, time::Duration};
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, warn};
+use tracing::debug;
 use zap_net::gossip::{GossipDeduplicationCache, GossipEnvelope, SwarmGossipEngine};
 
 use super::InboundGossipPacket;

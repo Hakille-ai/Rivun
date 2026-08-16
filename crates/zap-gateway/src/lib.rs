@@ -14,12 +14,12 @@ pub mod transports;
 
 pub use config::GatewayConfig;
 pub use error::{GatewayErrorResponse, Result, ZapGatewayError};
+pub use mcp::McpEngine;
 pub use mcp::prompts as mcp_prompts;
 pub use mcp::protocol as mcp_protocol;
 pub use mcp::resources as mcp_resources;
 pub use mcp::stdio::McpStdioTransport;
 pub use mcp::tools as mcp_tools;
-pub use mcp::McpEngine;
 pub use provenance::{
     ProvenanceChainBuilder, ProvenanceChainDigest, ProvenanceStage, ProvenanceStep,
     ProvenanceVerificationReport, compute_root_hash,

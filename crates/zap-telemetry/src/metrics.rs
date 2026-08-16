@@ -116,7 +116,8 @@ impl ZapNodeMetricsSnapshot {
         }
 
         // 3. zap_frames_rejected_total
-        output.push_str("# HELP zap_frames_rejected_total ZAP inbound frames rejected by reason.\n");
+        output
+            .push_str("# HELP zap_frames_rejected_total ZAP inbound frames rejected by reason.\n");
         output.push_str("# TYPE zap_frames_rejected_total counter\n");
         for counter in &self.frames_rejected_total {
             output.push_str(&format!(
@@ -142,7 +143,8 @@ impl ZapNodeMetricsSnapshot {
         }
 
         // 5. zap_peer_trust_status
-        output.push_str("# HELP zap_peer_trust_status Peer trust status gauge by peer and status.\n");
+        output
+            .push_str("# HELP zap_peer_trust_status Peer trust status gauge by peer and status.\n");
         output.push_str("# TYPE zap_peer_trust_status gauge\n");
         for gauge in &self.peer_trust_status {
             output.push_str(&format!(
@@ -194,7 +196,9 @@ impl ZapNodeMetricsSnapshot {
         ));
 
         // 10. zap_replay_rejections_total & zap_replay_drops_total
-        output.push_str("# HELP zap_replay_rejections_total Total replay rejections across node execution.\n");
+        output.push_str(
+            "# HELP zap_replay_rejections_total Total replay rejections across node execution.\n",
+        );
         output.push_str("# TYPE zap_replay_rejections_total counter\n");
         output.push_str(&format!(
             "zap_replay_rejections_total{{node_id=\"{}\"}} {}\n",
@@ -238,7 +242,9 @@ impl ZapNodeMetricsSnapshot {
         ));
 
         // 14. zap_agent_gateway_requests_total
-        output.push_str("# HELP zap_agent_gateway_requests_total Total requests handled by AI agent gateway.\n");
+        output.push_str(
+            "# HELP zap_agent_gateway_requests_total Total requests handled by AI agent gateway.\n",
+        );
         output.push_str("# TYPE zap_agent_gateway_requests_total counter\n");
         for counter in &self.agent_gateway_requests_total {
             output.push_str(&format!(
@@ -267,7 +273,9 @@ impl ZapNodeMetricsSnapshot {
         ));
 
         // 17. zap_peers_active
-        output.push_str("# HELP zap_peers_active Number of active reachable peers in the fleet mesh.\n");
+        output.push_str(
+            "# HELP zap_peers_active Number of active reachable peers in the fleet mesh.\n",
+        );
         output.push_str("# TYPE zap_peers_active gauge\n");
         output.push_str(&format!(
             "zap_peers_active{{node_id=\"{}\"}} {}\n",

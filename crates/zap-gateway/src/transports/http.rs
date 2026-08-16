@@ -15,9 +15,9 @@ use tokio::{
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 use zap_agent::{
-    AGENT_PROTOCOL_SCHEMA_VERSION, AgentId, AgentIntent, AgentSession, CapabilityNegotiationRequest,
-    CapabilityNegotiationResponse, DelegationDecision, DelegationRequest, DelegationResponse,
-    Validate,
+    AGENT_PROTOCOL_SCHEMA_VERSION, AgentId, AgentIntent, AgentSession,
+    CapabilityNegotiationRequest, CapabilityNegotiationResponse, DelegationDecision,
+    DelegationRequest, DelegationResponse, Validate,
 };
 use zap_core::{ZapFlags, ZapFrame, now_micros};
 use zap_crypto::{Keypair, PublicKey};
@@ -408,7 +408,11 @@ impl HttpAgentGateway {
         }
     }
 
-    async fn handle_get_receipts(&self, stream: &mut TcpStream, _path_and_query: &str) -> Result<()> {
+    async fn handle_get_receipts(
+        &self,
+        stream: &mut TcpStream,
+        _path_and_query: &str,
+    ) -> Result<()> {
         let receipts_resp = if let Some(journal_lock) = &self.journal {
             let journal = journal_lock
                 .lock()
@@ -425,19 +429,26 @@ impl HttpAgentGateway {
             };
             let receipts = journal.query(&req).unwrap_or_default();
             ReceiptReplicationResponse::new(
-                self.keypair.as_ref().map(|k| k.node_id()).unwrap_or_else(Uuid::new_v4),
+                self.keypair
+                    .as_ref()
+                    .map(|k| k.node_id())
+                    .unwrap_or_else(Uuid::new_v4),
                 receipts,
                 false,
             )
         } else {
             ReceiptReplicationResponse::new(
-                self.keypair.as_ref().map(|k| k.node_id()).unwrap_or_else(Uuid::new_v4),
+                self.keypair
+                    .as_ref()
+                    .map(|k| k.node_id())
+                    .unwrap_or_else(Uuid::new_v4),
                 vec![],
                 false,
             )
         };
 
-        self.send_json_response(stream, 200, "OK", &json!(receipts_resp)).await
+        self.send_json_response(stream, 200, "OK", &json!(receipts_resp))
+            .await
     }
 
     async fn handle_post_intent(&self, stream: &mut TcpStream, body: &[u8]) -> Result<()> {
@@ -652,7 +663,9 @@ impl HttpAgentGateway {
                 .clone()
                 .unwrap_or_else(|| AgentId::new("agent.delegate").unwrap()),
             decision: DelegationDecision::Accepted,
-            assigned_agent: req.to_agent.or_else(|| Some(AgentId::new("agent.worker").unwrap())),
+            assigned_agent: req
+                .to_agent
+                .or_else(|| Some(AgentId::new("agent.worker").unwrap())),
             accepted_capabilities: req.required_capabilities,
             reason: None,
             estimated_completion_unix_micros: Some(now_micros().unwrap_or(0) + 10_000_000),

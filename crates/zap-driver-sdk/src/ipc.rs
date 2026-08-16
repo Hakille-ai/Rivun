@@ -1,9 +1,6 @@
 //! Inter-driver IPC channel endpoints, topologies, and message passing primitives.
 
-use crate::{
-    buffer::IpcBufferView,
-    error::IpcError,
-};
+use crate::{buffer::IpcBufferView, error::IpcError};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
@@ -282,12 +279,18 @@ impl IpcChannel {
                 max: self.config.max_payload_bytes,
             });
         }
-        let mut guard = self.inner.lock().map_err(|_| IpcError::Custom("lock poisoned".to_string()))?;
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| IpcError::Custom("lock poisoned".to_string()))?;
         guard.push(msg, self.config.backpressure)
     }
 
     pub fn recv(&self) -> Result<Option<IpcMessage>, IpcError> {
-        let mut guard = self.inner.lock().map_err(|_| IpcError::Custom("lock poisoned".to_string()))?;
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| IpcError::Custom("lock poisoned".to_string()))?;
         Ok(guard.pop())
     }
 
@@ -308,13 +311,22 @@ impl IpcChannel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IpcTopology {
     /// Point-to-point 1:1 pipe between two stages.
-    PointToPoint { source_stage: u32, target_stage: u32 },
+    PointToPoint {
+        source_stage: u32,
+        target_stage: u32,
+    },
     /// Sequential linear chain (e.g. 0 -> 1 -> 2 -> ...).
     PipelineChain { stages: Vec<u32> },
     /// 1-to-N fan-out broadcasting from one source to multiple targets.
-    FanOut { source_stage: u32, target_stages: Vec<u32> },
+    FanOut {
+        source_stage: u32,
+        target_stages: Vec<u32>,
+    },
     /// N-to-1 fan-in merging from multiple sources to one target.
-    FanIn { source_stages: Vec<u32>, target_stage: u32 },
+    FanIn {
+        source_stages: Vec<u32>,
+        target_stage: u32,
+    },
 }
 
 #[cfg(test)]
@@ -348,12 +360,22 @@ mod tests {
         let m2 = IpcMessage::new(1, 2, 200, 0, b"m2");
         let m3 = IpcMessage::new(1, 3, 300, 0, b"m3");
 
-        assert!(ring.push(m1.clone(), BackpressurePolicy::DropOldest).unwrap().is_none());
-        assert!(ring.push(m2.clone(), BackpressurePolicy::DropOldest).unwrap().is_none());
+        assert!(
+            ring.push(m1.clone(), BackpressurePolicy::DropOldest)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            ring.push(m2.clone(), BackpressurePolicy::DropOldest)
+                .unwrap()
+                .is_none()
+        );
         assert!(ring.is_full());
 
         // Pushing 3rd message drops m1
-        let dropped = ring.push(m3.clone(), BackpressurePolicy::DropOldest).unwrap();
+        let dropped = ring
+            .push(m3.clone(), BackpressurePolicy::DropOldest)
+            .unwrap();
         assert_eq!(dropped.unwrap().payload, b"m1");
         assert_eq!(ring.dropped_count(), 1);
         assert_eq!(ring.len(), 2);
@@ -403,8 +425,12 @@ mod tests {
         };
         let channel = IpcChannel::new(config);
 
-        channel.send(IpcMessage::new(10, 1, 100, 0, b"stage1_output")).unwrap();
-        channel.send(IpcMessage::new(10, 2, 200, 0, b"stage2_output")).unwrap();
+        channel
+            .send(IpcMessage::new(10, 1, 100, 0, b"stage1_output"))
+            .unwrap();
+        channel
+            .send(IpcMessage::new(10, 2, 200, 0, b"stage2_output"))
+            .unwrap();
 
         assert_eq!(channel.len(), 2);
         let rec1 = channel.recv().unwrap().unwrap();
