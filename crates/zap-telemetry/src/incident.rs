@@ -44,14 +44,13 @@ impl ProcessState {
                         if let Some(val_kb) = parse_proc_kb_val(line) {
                             vms_bytes = val_kb * 1024;
                         }
-                    } else if line.starts_with("Threads:") {
-                        if let Some(threads) = line
+                    } else if line.starts_with("Threads:")
+                        && let Some(threads) = line
                             .split_whitespace()
                             .nth(1)
                             .and_then(|s| s.parse::<usize>().ok())
-                        {
-                            thread_count = threads;
-                        }
+                    {
+                        thread_count = threads;
                     }
                 }
             }
