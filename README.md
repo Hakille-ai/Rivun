@@ -29,8 +29,8 @@ gateways.
 - **WASM sandboxing.** Untrusted drivers run inside Wasmtime with fuel, memory,
   time, output, and host-call bounds.
 - **Auditable by design.** Append-only binary journals, signed action receipts,
-  MMR accumulators, and ZK rollup commitments make execution history verifiable
-  offline.
+  MMR accumulators, and blinded rollup commitments make execution history
+  verifiable offline.
 - **Multiple transports & integration surfaces.** Native HTTP, SSE, and
   WebSocket servers with a Model Context Protocol (MCP) gateway for agent
   integrations.
@@ -154,8 +154,8 @@ cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry 
 │  │ Wasmtime │ │ driver & │ │  (zap-net)    │ │   (zap-ledger) │            │
 │  │ fuel/mem │ │ pack     │ │  ChaCha20     │ │   receipts     │            │
 │  │ time/out │ │ registry │ │  Noise ·      │ │   MMR · batch  │            │
-│  │ async    │ │ signed   │ │  replay       │ │   ZK rollups   │            │
-│  │ pipeline │ │ bundles  │ │  BFT ·        │ │   (zap-journal)│            │
+│  │ async    │ │ signed   │ │  replay       │ │   blinded      │            │
+│  │ pipeline │ │ bundles  │ │  BFT ·        │ │   rollup cmts  │            │
 │  │          │ │          │ │  gossip ·     │ │                │            │
 │  │          │ │          │ │  mesh · PEX   │ │                │            │
 │  └──────────┘ └──────────┘ └───────────────┘ └────────────────┘            │
@@ -198,7 +198,7 @@ cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry 
 | `zap-agent` | Agent protocol contracts: intents, sessions, delegation, negotiation, provenance chain, swarm |
 | **Audit & storage** | |
 | `zap-journal` | Append-only binary journal segments: hash chaining, sealing, indexes, crash recovery |
-| `zap-ledger` | Signed action receipts, batch seals, incremental MMR, blinded ZK rollups |
+| `zap-ledger` | Signed action receipts, batch seals, incremental MMR, blinded rollup commitments |
 | `zap-memory` | Append-only binary journal memory: body hashes, entries, tombstones, compaction |
 | `zap-store` | Driver manifests, registry index, migrations, publications, install plans, bundles |
 | `zap-pack` | Domain pack lifecycle: build, sign, verify, install, audit (shared with `zap-store`) |
@@ -340,7 +340,7 @@ Benchmark history is published to
 - **Sandboxing:** drivers start with no host capabilities; ABI v2 host imports
   are permissioned, bounded, and audited.
 - **Audit:** signed receipts in hash-chained binary journals; batch seals, MMR
-  inclusion/exclusion proofs, and ZK rollup commitments for offline
+  inclusion/exclusion proofs, and blinded rollup commitments for offline
   verification.
 
 See [Security Model](docs/security.md) and report vulnerabilities through
@@ -373,7 +373,7 @@ See [Roadmap](docs/roadmap.md) and
 | [Security Model](docs/security.md) | Threat model, crypto choices, defense-in-depth |
 | [Gateway](docs/gateway.md) | MCP server, HTTP/SSE/WebSocket transports, provenance chain |
 | [Network](docs/network.md) | BFT consensus, gossip, adaptive mesh, durable replay |
-| [Ledger](docs/ledger.md) | Journals, batch seals, MMR, ZK rollup commitments |
+| [Ledger](docs/ledger.md) | Journals, batch seals, MMR, blinded rollup commitments |
 | [Telemetry](docs/telemetry.md) | Fleet doctor, incident snapshots, Prometheus metrics, topology |
 | [Swarm](docs/swarm.md) | Cluster simulation, swarm benchmarking, provenance verification |
 | [Operations](docs/operations.md) | Operator workflows: doctor, receipts, incident runbooks |

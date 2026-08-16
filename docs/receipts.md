@@ -122,7 +122,7 @@ receipt stream into verifiable commitments:
   binary format) with `prove_inclusion`, `prove_batch_inclusion`, and
   **exclusion proofs** (non-membership), buildable from the journal via
   `ReceiptJournalStore::build_incremental_mmr`.
-- **ZK rollups** — `ZkReceiptBatchProof` commits to blinded receipt hashes
+- **Blinded rollups** — `ZkReceiptBatchProof` commits to blinded receipt hashes
   (`BLAKE3(domain || node_id || frame_hash || payload_hash || output_hash ||
   salt)`), enabling confidential auditability: hash-level evidence without
   exposing payload bytes.

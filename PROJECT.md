@@ -1,5 +1,10 @@
 # Project: ZAP Next-Gen Frontier
 
+> **Status tracking moved to [`docs/roadmap-status.md`](docs/roadmap-status.md)** (evidence-based per item).
+> This file keeps the original planning milestones and the feature inventory referenced by
+> `tests/e2e` and `TEST_INFRA.md`; milestone statuses below are maintained against the current
+> repository state.
+
 ## Architecture
 ZAP Next-Gen Frontier transforms the ZAP architecture into an autonomous, hyper-scalable, cross-cluster decentralized execution and verification fabric.
 
@@ -29,10 +34,10 @@ ZAP Next-Gen Frontier transforms the ZAP architecture into an autonomous, hyper-
                                                 v
                                      +---------------------+
                                      | zap-ledger & crypto |
-                                     | - Incremental MMR   |
-                                     | - Batch seal/proof  |
-                                     | - ZK receipt rollup |
-                                     | - Threshold sigs    |
+                                     | · Incremental MMR   |
+                                     | · Batch seal/proof  |
+| · Blinded rollups   |
+                                      | · Threshold sigs    |
                                      +---------------------+
 ```
 
@@ -58,13 +63,13 @@ ZAP Next-Gen Frontier transforms the ZAP architecture into an autonomous, hyper-
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| E2E | E2E Testing Track | Independent opaque-box test suite (Tiers 1-4) covering all 15 features | none | IN_PROGRESS |
-| M1 | R1: P2P Swarm Gossip & Quorum Mesh | `crates/zap-net`, `crates/zap-agent`, `crates/zap-node` | none | PLANNED |
-| M2 | R2: MMR & Compact Cryptographic Receipts | `crates/zap-ledger`, `crates/zap-crypto` | none | PLANNED |
-| M3 | R3: Async WASM Driver Pipeline & IPC | `crates/zap-runtime`, `crates/zap-driver-sdk` | none | PLANNED |
-| M4 | R4: Decentralized Agent Pact & Dispute Engine | `crates/zap-pact`, `crates/zap-policy`, `crates/zap-agent` | M1, M2 | PLANNED |
-| M5 | R5: Cluster Simulator & Swarm Tooling | `crates/zap-cli`, `crates/zap-telemetry`, `benches/`, `tests/` | M1, M2, M3, M4 | PLANNED |
-| M6 | Final: E2E Verification & Adversarial Hardening | Full workspace validation, 100% test pass, Tier 5 hardening, clippy zero warnings | E2E, M1, M2, M3, M4, M5 | PLANNED |
+| E2E | E2E Testing Track | Independent opaque-box test suite (Tiers 1-4) covering all 15 features | none | DONE — 174 tests green in CI (see `TEST_READY.md`) |
+| M1 | R1: P2P Swarm Gossip & Quorum Mesh | `crates/zap-net`, `crates/zap-agent`, `crates/zap-node` | none | PARTIAL — gossip/mesh implemented and tested; BFT engine happy path works, but view-change/timeout liveness and transport integration are pending (see `docs/roadmap-status.md`) |
+| M2 | R2: MMR & Compact Cryptographic Receipts | `crates/zap-ledger`, `crates/zap-crypto` | none | DONE — MMR, batch proofs, blinded commitments implemented (`docs/ledger.md`; note: "ZK" items are blinded Blake3 commitments, not zero-knowledge proofs) |
+| M3 | R3: Async WASM Driver Pipeline & IPC | `crates/zap-runtime`, `crates/zap-driver-sdk` | none | PARTIAL — async/ipc/pipeline/streaming modules exist in `zap-runtime`+`zap-driver-sdk`; node dispatch still executes through the synchronous `WasmExecutor` |
+| M4 | R4: Decentralized Agent Pact & Dispute Engine | `crates/zap-pact`, `crates/zap-policy`, `crates/zap-agent` | M1, M2 | PARTIAL — pact types/signing real; dispute engine is in-memory only (no persistence or multi-party signature flow yet) |
+| M5 | R5: Cluster Simulator & Swarm Tooling | `crates/zap-cli`, `crates/zap-telemetry`, `benches/`, `tests/` | M1, M2, M3, M4 | PARTIAL — `zap cluster`/`zap swarm bench` exist but simulate in-memory topologies (no real multi-process nodes, no crypto-backed votes) |
+| M6 | Final: E2E Verification & Adversarial Hardening | Full workspace validation, 100% test pass, Tier 5 hardening, clippy zero warnings | E2E, M1, M2, M3, M4, M5 | IN_PROGRESS — fmt/clippy (`-D warnings`)/tests/bench gates green in CI; external security audit and fuzzing planned |
 
 ## Code Layout & Write Boundaries
 - `crates/zap-net/`: Owned exclusively by M1 worker (Gossip, Consensus, Mesh modules)

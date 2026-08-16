@@ -7,9 +7,9 @@ ways:
    entry hash chaining and signed segment sealing;
 2. **Signed receipts + batch seals** (`zap-ledger`) — per-action Ed25519
    receipts, batch root commitments, and validator quorum seals;
-3. **MMR and ZK rollups** (`zap-ledger::mmr`, `zap-ledger::zk`) — cryptographic
-   accumulation for inclusion/exclusion proofs and confidential audit
-   commitments.
+3. **MMR and blinded rollups** (`zap-ledger::mmr`, `zap-ledger::zk`) —
+   cryptographic accumulation for inclusion/exclusion proofs and confidential
+   audit commitments.
 
 Receipts are **audit records, not financial records**. ZAP has no ledger in the
 payment sense of the word.
@@ -76,7 +76,7 @@ supporting:
 
 Domains: `MMR_LEAF_DOMAIN`, `MMR_NODE_DOMAIN`, `MMR_PEAK_BAG_DOMAIN`.
 
-## ZK rollups (`zap-ledger::zk`)
+## Blinded rollup commitments (`zap-ledger::zk`)
 
 `BlindedReceiptCommitment` hides receipt payloads while committing to them:
 
