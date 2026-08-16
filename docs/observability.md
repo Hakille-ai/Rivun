@@ -14,6 +14,11 @@ Reference assets live under `crates/zap-ops/config`:
 - `otel/collector.yml`: OpenTelemetry Collector pipeline;
 - `grafana/zap-production-dashboard.json`: dashboard import.
 
+The `zap-telemetry` crate implements the runtime side: `FleetDoctor` checks,
+`IncidentCapturer` snapshots, `PrometheusExporter` rendering, and
+`FleetTopology`. See [Telemetry](telemetry.md) for its surface; this document
+defines the stable operator contract those features must satisfy.
+
 ## Required Labels
 
 Every metric and span should include:
@@ -56,6 +61,11 @@ incident id in logs and receipt metadata rather than metric labels.
 Prometheus `up{job="zap-node"}` is the scrapeability signal used by the
 production rules. Driver latency histograms are not emitted yet; use driver
 error rate and receipt/PoA failures for production paging.
+
+Additional counters collected by `zap-telemetry` include replay rejections and
+drops, journal rotations, segment manifest errors, pack verification failures,
+and gateway requests (`ZapNodeMetricsSnapshot`). Keep the contract above as
+the deployment-facing stability boundary.
 
 `zap-node` exposes this contract as an in-process readiness surface through
 `ZapNode::metrics_snapshot()`, `ZapNode::metrics_prometheus_text()`,

@@ -92,12 +92,16 @@ impl JournalProfile {
 #[derive(Debug, Clone)]
 pub struct JournalOptions {
     pub max_segment_bytes: u64,
+    pub max_segment_count: Option<usize>,
+    pub max_segment_records: Option<u64>,
 }
 
 impl Default for JournalOptions {
     fn default() -> Self {
         Self {
             max_segment_bytes: DEFAULT_MAX_SEGMENT_BYTES,
+            max_segment_count: None,
+            max_segment_records: None,
         }
     }
 }
@@ -235,10 +239,10 @@ pub struct PartialTail {
 }
 
 #[derive(Debug, Clone)]
-struct SegmentInfo {
-    path: PathBuf,
-    sequence: u64,
-    id: Uuid,
+pub struct SegmentInfo {
+    pub path: PathBuf,
+    pub sequence: u64,
+    pub id: Uuid,
 }
 
 impl JournalStore {
@@ -301,13 +305,187 @@ impl JournalStore {
         Ok(records)
     }
 
-    pub fn query(&self, query: &JournalQuery) -> Result<Vec<JournalRecord>> {
+    pub fn seal_segment(&self, sequence: u64) -> Result<JournalSegmentManifest> {
+        let segment_path = self.segment_path(sequence);
+        if !segment_path.exists() {
+            return Err(ZapJournalError::MissingJournal(segment_path));
+        }
+
+        let segment_bytes = fs::metadata(&segment_path)?.len();
+        let raw = fs::read(&segment_path)?;
+        let segment_hash = hash_bytes(&raw);
+
+        let index = self.load_segment_index_by_sequence(sequence)?;
+        let first_entry_hash = index.entries.first().map(|e| e.entry_hash.clone());
+        let last_entry_hash = index.entries.last().map(|e| e.entry_hash.clone());
+        let first_timestamp_micros = index.entries.first().map(|e| e.timestamp_micros);
+        let last_timestamp_micros = index.entries.last().map(|e| e.timestamp_micros);
+
+        let manifest = JournalSegmentManifest {
+            schema_version: 1,
+            profile: self.profile,
+            segment_id: index.segment_id,
+            segment_sequence: sequence,
+            entries: index.entries.len() as u64,
+            segment_bytes,
+            segment_hash,
+            first_entry_hash,
+            last_entry_hash,
+            first_timestamp_micros,
+            last_timestamp_micros,
+            compression: "none".to_string(),
+        };
+
+        let json = serde_json::to_string_pretty(&manifest)?;
+        fs::write(self.manifest_path(sequence), json)?;
+        Ok(manifest)
+    }
+
+    pub fn rotate_and_seal(&self) -> Result<JournalSegmentManifest> {
+        let segments = self.segments()?;
+        let last = segments.last().ok_or_else(|| ZapJournalError::MissingJournal(self.dir.clone()))?;
+        let manifest = self.seal_segment(last.sequence)?;
+        if let Some(max_count) = self.options.max_segment_count {
+            self.prune_old_segments(max_count)?;
+        }
+        Ok(manifest)
+    }
+
+    pub fn load_manifest(&self, sequence: u64) -> Result<JournalSegmentManifest> {
+        let path = self.manifest_path(sequence);
+        if !path.exists() {
+            return Err(ZapJournalError::MissingJournal(path));
+        }
+        let content = fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&content)?)
+    }
+
+    pub fn load_segment_index_by_sequence(&self, sequence: u64) -> Result<JournalSegmentIndex> {
+        let path = self.segment_path(sequence);
+        if !path.exists() {
+            return Err(ZapJournalError::MissingJournal(path));
+        }
+        let (_, _, id) = read_segment_header(&path)?;
+        let segment = SegmentInfo {
+            path,
+            sequence,
+            id,
+        };
+        self.load_segment_index(&segment)
+    }
+
+    pub fn prune_old_segments(&self, max_count: usize) -> Result<()> {
+        let segments = self.segments()?;
+        if segments.len() > max_count {
+            let to_remove = segments.len() - max_count;
+            for seg in segments.iter().take(to_remove) {
+                let _ = fs::remove_file(&seg.path);
+                let _ = fs::remove_file(self.index_path(seg.sequence));
+                let _ = fs::remove_file(self.manifest_path(seg.sequence));
+                let _ = fs::remove_file(self.dir.join(format!("{:020}.zjmanifest.json.sig", seg.sequence)));
+            }
+        }
+        Ok(())
+    }
+
+    fn prepare_for_new_segment(&self, max_count: Option<usize>) -> Result<()> {
+        if let Some(max_count) = max_count
+            && max_count > 0
+        {
+            let segments = self.segments()?;
+            if segments.len() >= max_count {
+                let to_remove = (segments.len() + 1) - max_count;
+                for seg in segments.iter().take(to_remove) {
+                    let _ = fs::remove_file(&seg.path);
+                    let _ = fs::remove_file(self.index_path(seg.sequence));
+                    let _ = fs::remove_file(self.manifest_path(seg.sequence));
+                    let _ = fs::remove_file(self.dir.join(format!("{:020}.zjmanifest.json.sig", seg.sequence)));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn read_record_at(&self, sequence: u64, entry: &JournalIndexEntry) -> Result<JournalRecord> {
+        let path = self.segment_path(sequence);
+        if !path.exists() {
+            return Err(ZapJournalError::MissingJournal(path));
+        }
+        let (_, _, id) = read_segment_header(&path)?;
+        let segment = SegmentInfo {
+            path,
+            sequence,
+            id,
+        };
+        self.read_record(&segment, entry)
+    }
+
+    pub fn query_filtered(
+        &self,
+        query: &JournalQuery,
+        allowed_sequences: &std::collections::HashSet<u64>,
+    ) -> Result<Vec<JournalRecord>> {
         if !self.dir.exists() {
             return Ok(Vec::new());
         }
         self.rebuild_missing_indexes()?;
         let mut candidates = Vec::new();
         for segment in self.segments()? {
+            if !allowed_sequences.is_empty() && !allowed_sequences.contains(&segment.sequence) {
+                continue;
+            }
+            let index = self.load_segment_index(&segment)?;
+            for entry in index.entries {
+                if entry_matches_query(&entry, query) {
+                    candidates.push((segment.clone(), entry));
+                }
+            }
+        }
+        candidates.sort_by(|a, b| {
+            a.1.timestamp_micros
+                .cmp(&b.1.timestamp_micros)
+                .then_with(|| a.0.sequence.cmp(&b.0.sequence))
+                .then_with(|| a.1.offset.cmp(&b.1.offset))
+        });
+        let mut records = Vec::new();
+        for (segment, entry) in candidates {
+            let record = self.read_record(&segment, &entry)?;
+            records.push(record);
+            if let Some(limit) = query.limit
+                && records.len() >= limit
+            {
+                break;
+            }
+        }
+        Ok(records)
+    }
+
+    pub fn query(&self, query: &JournalQuery) -> Result<Vec<JournalRecord>> {
+        if !self.dir.exists() {
+            return Ok(Vec::new());
+        }
+        self.rebuild_missing_indexes()?;
+        let mut candidate_segments = Vec::new();
+        for segment in self.segments()? {
+            if let Ok(manifest) = self.load_manifest(segment.sequence)
+                && let (Some(first_ts), Some(last_ts)) = (manifest.first_timestamp_micros, manifest.last_timestamp_micros)
+            {
+                if let Some(after) = query.after_timestamp_micros
+                    && last_ts <= after
+                {
+                    continue;
+                }
+                if let Some(until) = query.until_timestamp_micros
+                    && first_ts > until
+                {
+                    continue;
+                }
+            }
+            candidate_segments.push(segment);
+        }
+
+        let mut candidates = Vec::new();
+        for segment in candidate_segments {
             let index = self.load_segment_index(&segment)?;
             for entry in index.entries {
                 if entry_matches_query(&entry, query) {
@@ -464,9 +642,13 @@ impl JournalStore {
         let segments = self.segments()?;
         if let Some(last) = segments.last() {
             let len = fs::metadata(&last.path)?.len();
-            if len > SEGMENT_HEADER_LEN
-                && len.saturating_add(estimate) > self.options.max_segment_bytes
-            {
+            let records_count = self.load_segment_index(last).map(|idx| idx.entries.len() as u64).unwrap_or(0);
+            let rotate_by_bytes = len > SEGMENT_HEADER_LEN && len.saturating_add(estimate) > self.options.max_segment_bytes;
+            let rotate_by_records = self.options.max_segment_records.is_some_and(|max_r| records_count >= max_r);
+
+            if rotate_by_bytes || rotate_by_records {
+                let _ = self.seal_segment(last.sequence);
+                let _ = self.prepare_for_new_segment(self.options.max_segment_count);
                 return Ok(SegmentInfo {
                     path: self.segment_path(last.sequence + 1),
                     sequence: last.sequence + 1,
@@ -482,7 +664,7 @@ impl JournalStore {
         })
     }
 
-    fn segments(&self) -> Result<Vec<SegmentInfo>> {
+    pub fn segments(&self) -> Result<Vec<SegmentInfo>> {
         if !self.dir.exists() {
             return Ok(Vec::new());
         }
@@ -593,7 +775,14 @@ impl JournalStore {
                 None,
                 allow_partial_tail,
                 &mut |record| {
-                    if record.previous_entry_hash != hash_or_none(previous_hash.as_deref()) {
+                    if let Some(prev) = previous_hash.as_deref() {
+                        if record.previous_entry_hash != hash_or_none(Some(prev)) {
+                            return Err(ZapJournalError::HashChainMismatch {
+                                path: segment.path.clone(),
+                                offset: record.offset,
+                            });
+                        }
+                    } else if segment.sequence == 0 && record.previous_entry_hash != hash_or_none(None) {
                         return Err(ZapJournalError::HashChainMismatch {
                             path: segment.path.clone(),
                             offset: record.offset,
@@ -1339,4 +1528,29 @@ mod tests {
             Err(ZapJournalError::InvalidEntryHash { .. })
         ));
     }
+
+    #[test]
+    fn journal_rotates_and_seals_segments() {
+        let temp = tempfile::tempdir().unwrap();
+        let options = JournalOptions {
+            max_segment_bytes: 512,
+            max_segment_count: Some(3),
+            max_segment_records: Some(5),
+        };
+        let store = JournalStore::open(temp.path(), JournalProfile::Receipts).with_options(options);
+
+        for i in 0..15 {
+            store.append(input(i), false).unwrap();
+        }
+
+        // Verify segment rotation happened
+        let segments = store.segments().unwrap();
+        assert!(segments.len() <= 3);
+
+        // Explicitly seal current segment
+        let manifest = store.rotate_and_seal().unwrap();
+        assert_eq!(manifest.profile, JournalProfile::Receipts);
+        assert!(!manifest.segment_hash.is_empty());
+    }
 }
+

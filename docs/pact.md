@@ -132,6 +132,28 @@ Export the JSON schema:
 cargo run -p zap-cli -- pact schema --out pact.schema.json
 ```
 
+## Dispute and Escrow
+
+`zap-pact::dispute` adds a deterministic mediation layer over signed PACT
+records for multi-party workflows:
+
+- `EscrowPact` — a PACT locked in escrow with `PactState` transitions
+  (`Locked → Settled / Disputed / Slashed`);
+- `DisputeCase` — an opened dispute with evidence (`DisputeEvidence`) and
+  arbitration votes;
+- `DisputeEngine` — `create_escrow_pact`, `settle_normal`,
+  `execute_timeout_slash`, `open_dispute`, `submit_arbitration_vote`;
+- `RulingOutcome` — `ReleaseToRecipient`, `SlashRefundToSender`,
+  `SplitEqual`.
+
+Quorum counting is explicit (`verify_quorum`), so a 2-of-3 arbitration panel
+can settle an escrow deterministically and offline. Slashing is applied
+automatically when an enforced timeout expires.
+
+Escrow and disputes are **protocol evidence**, not a payment rail: the ruling
+outcome is recorded in the signed PACT timeline and can be referenced by
+receipts, but no value moves through ZAP itself.
+
 ## Receipts
 
 When a node processes a signed `zap.pact.record` with

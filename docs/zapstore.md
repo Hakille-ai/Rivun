@@ -49,7 +49,8 @@ not grant host access by itself.
 
 ## CLI
 
-Generate a signed manifest:
+Generate a signed manifest. The manifest file is written by this command; it
+is not part of the source checkout:
 
 ```bash
 cargo run -p zap-cli -- driver-manifest create \

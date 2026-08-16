@@ -7,9 +7,17 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
+bitflags.workspace = true
+blake3.workspace = true
+bytes.workspace = true
+hex.workspace = true
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+zap-capability.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [[bench]]
 name = "sdk"

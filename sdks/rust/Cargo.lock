@@ -78,6 +78,9 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cc"
@@ -124,6 +127,31 @@ checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "crossbeam-deque"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb"
+dependencies = [
+ "crossbeam-epoch",
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-epoch"
+version = "0.9.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
 
 [[package]]
 name = "crypto-common"
@@ -207,6 +235,12 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "either"
+version = "1.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e5e8f6c15a24b9a3ee5efec809ccd006d3b30e8b3bb63c39af737c7f87daa1d"
 
 [[package]]
 name = "equivalent"
@@ -386,6 +420,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
+name = "memmap2"
+version = "0.9.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "merlin"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -460,6 +503,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.17",
+]
+
+[[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -954,6 +1017,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-journal"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "memmap2",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "zap-ledger"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "ed25519-dalek",
+ "hex",
+ "rayon",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+ "zap-core",
+ "zap-crypto",
+ "zap-journal",
+]
+
+[[package]]
 name = "zap-pact"
 version = "0.1.0"
 dependencies = [
@@ -968,6 +1061,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "toml",
+ "uuid",
+ "zap-capability",
+]
+
+[[package]]
+name = "zap-router"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
+ "uuid",
+ "zap-capability",
+]
+
+[[package]]
 name = "zap-sdk"
 version = "0.1.0"
 dependencies = [
@@ -977,6 +1091,7 @@ dependencies = [
  "uuid",
  "zap-core",
  "zap-envelope",
+ "zap-ledger",
  "zap-pact",
  "zap-store",
 ]
@@ -988,13 +1103,17 @@ dependencies = [
  "base64",
  "blake3",
  "ed25519-dalek",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror",
  "toml",
  "uuid",
  "zap-capability",
  "zap-crypto",
+ "zap-policy",
+ "zap-router",
 ]
 
 [[package]]

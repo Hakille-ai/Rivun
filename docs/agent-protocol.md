@@ -110,6 +110,48 @@ The crate performs basic local validation:
 These checks are intentionally local. Node policy, peer trust, PoA, signed
 receipts, and driver/runtime enforcement remain separate layers.
 
+## Swarm Coordination
+
+`zap-agent::swarm` extends the agent protocol with consensus-tracked intents
+for multi-agent coordination. Subjects:
+
+| Subject | Payload |
+| --- | --- |
+| `zap.swarm.intent.propose` | `SwarmIntentProposal` — an intent submitted to the swarm |
+| `zap.swarm.intent.commit` | `SwarmCommitCertificateRef` — a BFT commit certificate |
+
+Intent lifecycle: `Submitted → Proposed → Prevoting → Precommitting →
+Committed → Executing → Finalized`, with `Rejected` and `TimedOut` terminal
+states. Commit certificates reference the consensus coordinate
+`{epoch, view, round, block_height}`. The engine side lives in
+`zap-net::consensus` (see [Network](network.md)).
+
+## Provenance Chain
+
+`zap-agent::provenance` defines a root-signed, 7-step cryptographic chain that
+crosses the whole execution path:
+
+```text
+intent → negotiation → policy → driver → poa → receipt → root
+```
+
+- Each stage hashes its canonical payload with the previous stage digest
+  (SHA-256, domain `ZAP-PROVENANCE-CHAIN-v1`).
+- The root stage signs the full chain with the node Ed25519 identity, so a
+  modification at any stage invalidates the root signature.
+- `ProvenanceChainBuilder` assembles stages incrementally; the gateway can
+  emit a `ProvenanceChainDigest` for offline verification.
+
+Verify a chain digest:
+
+```bash
+cargo run -p zap-cli -- provenance verify --chain chain.json --key .zap/node.key --json
+```
+
+Receipt journals can also be checked with their provenance digests:
+`zap receipts verify --dir logs/receipts --provenance`. See
+[Gateway](gateway.md) and [Swarm](swarm.md).
+
 ## Integration Notes
 
 Future CLI or node integrations should wrap these JSON messages in `ZENV`
@@ -120,8 +162,12 @@ dispatch.
 
 The CLI can construct common agent messages locally without sending them:
 `zap agent intent`, `zap agent status`, and `zap agent result` print validated
-JSON to stdout or write it with `--out`. These builders are useful for fixtures,
-operator handoffs, and preparing payloads that a later step can wrap in `ZENV`.
+JSON to stdout or write it with `--out`. `zap agent delegate` and
+`zap agent negotiate` build delegation requests/responses and capability
+negotiation messages; `zap agent validate` checks any agent message against
+the contract, and `zap agent schema` exports the JSON schema. These builders
+are useful for fixtures, operator handoffs, and preparing payloads that a
+later step can wrap in `ZENV`.
 
 Agent capabilities reuse `zap-capability::CapabilityId`. A negotiated
 capability is descriptive until existing node policy, manifest, registry, and

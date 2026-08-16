@@ -1,0 +1,46 @@
+[package]
+name = "zap-e2e"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[test]]
+name = "e2e"
+path = "tests/e2e_suite.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bytes.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+toml.workspace = true
+uuid.workspace = true
+zap-agent.workspace = true
+zap-capability.workspace = true
+zap-core = { path = "../../crates/zap-core" }
+zap-crypto = { path = "../../crates/zap-crypto" }
+zap-driver-sdk = { path = "../../crates/zap-driver-sdk" }
+zap-envelope = { path = "../../crates/zap-envelope" }
+zap-gateway = { path = "../../crates/zap-gateway" }
+zap-journal = { path = "../../crates/zap-journal" }
+zap-ledger = { path = "../../crates/zap-ledger" }
+zap-memory.workspace = true
+zap-net = { path = "../../crates/zap-net" }
+zap-node = { path = "../../crates/zap-node" }
+zap-ops = { path = "../../crates/zap-ops" }
+zap-pact.workspace = true
+zap-policy.workspace = true
+zap-router.workspace = true
+zap-runtime = { path = "../../crates/zap-runtime" }
+zap-schema.workspace = true
+zap-store = { path = "../../crates/zap-store" }
+zap-telemetry = { path = "../../crates/zap-telemetry" }
+blake3.workspace = true
+wat.workspace = true

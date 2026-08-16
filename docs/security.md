@@ -14,7 +14,17 @@ Each node has an Ed25519 keypair. The node UUID is deterministically derived fro
 
 Transport nonces are 96 bits: a random 32-bit prefix generated when an endpoint binds, followed by a monotonic 64-bit counter. This prevents nonce reuse across normal process restarts even when a static transport key is reused. If the counter is ever exhausted, sending fails and the transport key must be rotated.
 
-Receivers keep a bounded in-memory nonce cache per peer and reject repeated datagram nonces before returning inbound frames to higher layers. `zap-node` sizes this cache with `security.replay_cache_capacity`.
+Receivers keep a bounded in-memory nonce cache per peer and reject repeated
+datagram nonces before returning inbound frames to higher layers. `zap-node`
+sizes this cache with `security.replay_cache_capacity`.
+
+Anti-replay can survive restarts:
+
+- `zap-net::durable_replay::DurableNonceStore` persists transport nonces in a
+  write-ahead log (`ZAPNONC1` records), compacted atomically, closing the
+  restart replay window for datagrams;
+- `zap-node::durable_replay::DurableReplayStore` persists frame fingerprints
+  (with clock-skew checks) across restarts at the daemon level.
 
 The crate also includes a Noise `NN_25519_ChaChaPoly_BLAKE2s` helper for future dynamic session bootstrap.
 
@@ -126,6 +136,27 @@ the response signature verifies, and the response digest equals the requested
 signed-frame digest. The sender waits up to `--poa-timeout-ms` for the required
 threshold; the default is 2000 ms.
 
+## Swarm, Gossip, and BFT Consensus
+
+When deployments enable the swarm subsystems (`zap-net::consensus`,
+`zap-net::gossip`, `zap-net::mesh`), the trust model extends as follows:
+
+- **BFT consensus** — `BftConsensusEngine` requires `2n/3 + 1` quorum; pre-votes
+  and pre-commits are Ed25519-signed; equivocation produces a proof and slashes
+  the offender; commit certificates are compact binary (`ZSC1`) with signer
+  bitmasks. This is a domain-specific coordination mechanism, not a blockchain.
+- **Gossip** — `GossipEnvelope` (`ZGSP`) messages are signed; message ids are
+  BLAKE3 digests; hop damping (max 16) bounds amplification; PEX and
+  anti-entropy sync carry only hashes and ranges until verified.
+- **Mesh** — `ZapRelayEnvelope` (`ZRLY`) relays are encrypted and hop-limited
+  (max 2) so partitions cannot be used to bypass peer trust.
+- **Partition safety** — phi-accrual failure detection and `PartitionStatus`
+  classify `Normal`/`DegradedMinority`/`Isolated`; the 2/3 quorum rule means a
+  minority subset can never commit.
+
+The swarm protocol subjects are `zap.swarm.intent.propose` and
+`zap.swarm.intent.commit` (see [Network](network.md)).
+
 ## Signed Receipts
 
 When `[receipts].dir` is configured, `zap-node` appends one Ed25519-signed receipt after each processed action to the binary receipt journal. Receipts contain hashes, action metadata, and optional PoA summaries. They are audit records only, not financial records.
@@ -192,6 +223,21 @@ BLAKE3 body hashes, entry-to-entry hash chaining, disk indexes, and tombstones.
 `zap memory verify` recalculates stored hashes, validates the append-only chain,
 and rejects orphaned tombstones. The v1 memory store is local audit data, not a
 remote database and not a hidden model state channel.
+
+## Gateway Security
+
+`zap-gateway` exposes the node through MCP (stdio/HTTP), REST, SSE, and
+WebSocket transports. The trust boundary is preserved:
+
+- optional bearer-token authentication on HTTP endpoints (`--auth-token`);
+- every mutation is executed through the node pipeline: signatures, freshness,
+  replay checks, policy, PoA, and receipts still apply;
+- frame/payload size limits are enforced on every transport (4 MB default);
+- the provenance chain is root-signed; `MissingStep` or
+  `StepVerificationFailed` rejects digests and surfaces as gateway errors;
+- MCP stdio mode is intended for trusted local agent runtimes.
+
+See [Gateway](gateway.md) for the transports and the provenance chain.
 
 ## Runtime Isolation
 

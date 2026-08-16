@@ -77,9 +77,29 @@ pub enum ZapAgentError {
     FailedResultMissingError,
     #[error("agent error cause nesting exceeds {max} levels")]
     ErrorCauseTooDeep { max: usize },
+    #[error("Provenance step verification failed for stage {stage:?}: expected {expected}, got {actual}")]
+    StepVerificationFailed {
+        stage: ProvenanceStage,
+        expected: String,
+        actual: String,
+    },
+    #[error("Provenance missing required step: {0:?}")]
+    MissingStep(ProvenanceStage),
+    #[error("Provenance root signature verification failed")]
+    InvalidProvenanceSignature,
+    #[error("Provenance chain is empty or invalid: {0}")]
+    InvalidProvenanceChain(String),
+    #[error("Crypto error: {0}")]
+    Crypto(#[from] zap_crypto::ZapCryptoError),
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 }
+
+pub mod provenance;
+pub use provenance::*;
+
+pub mod swarm;
+pub use swarm::*;
 
 pub trait Validate {
     fn validate(&self) -> Result<()>;

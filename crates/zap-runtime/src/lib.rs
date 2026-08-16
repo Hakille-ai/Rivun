@@ -25,22 +25,40 @@ use wasmtime::{
 };
 pub use zap_capability::{DEFAULT_MAX_HOST_CALL_BYTES, DriverPermissions};
 
-const SHARED_EPOCH_TICK_MS: u64 = 1;
-const MEMORY_EXPORT: &str = "memory";
-const ALLOC_EXPORT: &str = "zap_alloc";
-const DEALLOC_EXPORT: &str = "zap_dealloc";
-const EXECUTE_EXPORT: &str = "zap_execute";
-const HOST_MODULE: &str = "zap";
-const HOST_EMIT_EVENT: &str = "emit_event";
-const HOST_MEMORY_READ: &str = "memory_read";
-const HOST_MEMORY_WRITE: &str = "memory_write";
-const HOST_DEVICE_CALL: &str = "device_call";
-const HOST_DENIED: i32 = -1;
-const HOST_NOT_CONFIGURED: i32 = -2;
-const HOST_BAD_POINTER: i32 = -3;
-const HOST_TOO_LARGE: i32 = -4;
-const HOST_MEMORY_ERROR: i32 = -5;
-const DEFAULT_WASM_MODULE_CACHE_ENTRIES: usize = 64;
+pub mod async_engine;
+pub mod ipc;
+pub mod pipeline;
+pub mod streaming;
+
+pub use async_engine::{
+    AsyncCompiledDriver, AsyncStoreState, AsyncWasmExecutionResult, AsyncWasmExecutor,
+    AsyncWasmModuleCache,
+};
+pub use ipc::{IpcPipe, IpcRouter, RuntimeIpcError};
+pub use pipeline::{
+    DriverPipeline, PipelineError, PipelineExecutionReport, PipelineStage, PipelineStageResult,
+};
+pub use streaming::{
+    AsyncModbusConnection, SpscRingBuffer, StreamBackpressurePolicy, StreamTransport,
+    StreamingBufferPool, StreamingError,
+};
+
+pub(crate) const SHARED_EPOCH_TICK_MS: u64 = 1;
+pub(crate) const MEMORY_EXPORT: &str = "memory";
+pub(crate) const ALLOC_EXPORT: &str = "zap_alloc";
+pub(crate) const DEALLOC_EXPORT: &str = "zap_dealloc";
+pub(crate) const EXECUTE_EXPORT: &str = "zap_execute";
+pub(crate) const HOST_MODULE: &str = "zap";
+pub(crate) const HOST_EMIT_EVENT: &str = "emit_event";
+pub(crate) const HOST_MEMORY_READ: &str = "memory_read";
+pub(crate) const HOST_MEMORY_WRITE: &str = "memory_write";
+pub(crate) const HOST_DEVICE_CALL: &str = "device_call";
+pub(crate) const HOST_DENIED: i32 = -1;
+pub(crate) const HOST_NOT_CONFIGURED: i32 = -2;
+pub(crate) const HOST_BAD_POINTER: i32 = -3;
+pub(crate) const HOST_TOO_LARGE: i32 = -4;
+pub(crate) const HOST_MEMORY_ERROR: i32 = -5;
+pub(crate) const DEFAULT_WASM_MODULE_CACHE_ENTRIES: usize = 64;
 
 #[derive(Debug, Error)]
 pub enum ZapRuntimeError {
@@ -288,7 +306,7 @@ impl Default for WasmExecutor {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WasmDriver {
     module: Module,
 }
@@ -424,7 +442,7 @@ fn wall_clock_exceeded(started: Instant, timeout_ms: u64) -> bool {
     timeout_ms > 0 && started.elapsed() >= Duration::from_millis(timeout_ms)
 }
 
-fn expect_memory(module: &Module, export: &'static str) -> Result<()> {
+pub(crate) fn expect_memory(module: &Module, export: &'static str) -> Result<()> {
     match module
         .get_export(export)
         .ok_or(ZapRuntimeError::MissingExport(export))?
@@ -438,7 +456,7 @@ fn expect_memory(module: &Module, export: &'static str) -> Result<()> {
     }
 }
 
-fn expect_func(
+pub(crate) fn expect_func(
     module: &Module,
     export: &'static str,
     expected_params: &[ValType],
@@ -729,14 +747,14 @@ fn read_memory(
     Ok(out)
 }
 
-fn ensure_i32_len(len: usize) -> Result<()> {
+pub(crate) fn ensure_i32_len(len: usize) -> Result<()> {
     if len > i32::MAX as usize {
         return Err(ZapRuntimeError::InputTooLarge(len));
     }
     Ok(())
 }
 
-fn validate_permissions(permissions: DriverPermissions) -> Result<()> {
+pub(crate) fn validate_permissions(permissions: DriverPermissions) -> Result<()> {
     if permissions.max_host_call_bytes == 0 {
         return Err(ZapRuntimeError::InvalidHostCallLimit);
     }

@@ -15,10 +15,34 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
+};
+
+pub mod consensus;
+pub mod durable_replay;
+pub mod gossip;
+pub mod mesh;
+pub mod serde_helpers;
+
+pub use consensus::{
+    BftConsensusEngine, ConsensusError, EquivocationProof, SwarmCommitCertificate,
+    SwarmConsensusEngine, SwarmProposal, SwarmVote, ValidatorEntry, ValidatorSet, VoteKind,
+    verify_threshold_signatures,
+};
+pub use gossip::{
+    AntiEntropyBatchResponse, AntiEntropyDigestRequest, AntiEntropyDigestResponse, Causality,
+    DiscoveredPeerEntry, GossipDeduplicationCache, GossipEnvelope, GossipError, GossipMessageId,
+    GossipMesh, GossipReceipt, MissingRange, PeerExchangeRequest, PeerExchangeResponse, PeerHealth,
+    QuorumProposal, StateDigest, SwarmGossipDispatcher, SwarmGossipEngine, SwarmPeer, VectorClock,
+    xor_distance,
+};
+pub use mesh::{
+    HeartbeatAck, HeartbeatPing, HeartbeatScheduler, MeshError, MeshTopology, PartitionStatus,
+    PeerHealthState, PeerMeshInfo, PhiAccrualDetector, SwarmMeshTopology, ZapRelayEnvelope,
 };
 use thiserror::Error;
 use tokio::{net::UdpSocket, sync::RwLock};
@@ -108,6 +132,12 @@ const KEY_LEN: usize = 32;
 
 #[derive(Debug, Error)]
 pub enum ZapNetError {
+    #[error("gossip error: {0}")]
+    Gossip(#[from] GossipError),
+    #[error("consensus error: {0}")]
+    Consensus(#[from] ConsensusError),
+    #[error("mesh error: {0}")]
+    Mesh(#[from] MeshError),
     #[error(transparent)]
     Core(#[from] CoreError),
     #[error("I/O error: {0}")]
@@ -199,6 +229,8 @@ pub struct ZapEndpointConfig {
     pub peers: Vec<Peer>,
     pub max_datagram_size: usize,
     pub inbound_nonce_cache_capacity: usize,
+    pub durable_nonce_store_path: Option<PathBuf>,
+    pub max_nonce_age_micros: u64,
     nonce_prefix: Option<[u8; NONCE_PREFIX_LEN]>,
 }
 
@@ -210,6 +242,8 @@ impl ZapEndpointConfig {
             peers: Vec::new(),
             max_datagram_size: DEFAULT_MAX_DATAGRAM_SIZE,
             inbound_nonce_cache_capacity: DEFAULT_INBOUND_NONCE_CACHE_CAPACITY,
+            durable_nonce_store_path: None,
+            max_nonce_age_micros: 300_000_000,
             nonce_prefix: None,
         }
     }
@@ -244,6 +278,8 @@ pub struct ZapEndpoint {
     next_nonce: AtomicU64,
     max_datagram_size: usize,
     inbound_nonce_cache_capacity: usize,
+    durable_nonce_store_path: Option<PathBuf>,
+    max_nonce_age_micros: u64,
 }
 
 impl ZapEndpoint {
@@ -263,6 +299,8 @@ impl ZapEndpoint {
             next_nonce: AtomicU64::new(random_nonce_counter()),
             max_datagram_size: config.max_datagram_size.max(DATAGRAM_HEADER_LEN + 16),
             inbound_nonce_cache_capacity: config.inbound_nonce_cache_capacity,
+            durable_nonce_store_path: config.durable_nonce_store_path,
+            max_nonce_age_micros: config.max_nonce_age_micros,
         };
 
         for peer in config.peers {
@@ -287,10 +325,28 @@ impl ZapEndpoint {
     pub async fn add_peer(&self, peer: Peer) {
         let mut peers = self.peers.write().await;
         peers.by_addr.insert(peer.addr, peer.node_id);
+        let inbound_capacity = self.inbound_nonce_cache_capacity;
+        let durable_path = self.durable_nonce_store_path.clone();
+        let max_age = self.max_nonce_age_micros;
         peers
             .inbound_nonces
             .entry(peer.node_id)
-            .or_insert_with(|| NonceReplayCache::new(self.inbound_nonce_cache_capacity));
+            .or_insert_with(|| {
+                let mut cache = NonceReplayCache::new(inbound_capacity);
+                if let Some(base_path) = durable_path {
+                    let path = if base_path.extension().is_none() || base_path.is_dir() {
+                        base_path.join(format!("{}.nonce.wal", peer.node_id))
+                    } else {
+                        let stem = base_path.file_stem().unwrap_or_default().to_string_lossy();
+                        let ext = base_path.extension().unwrap_or_default().to_string_lossy();
+                        base_path.with_file_name(format!("{stem}.{}.{ext}", peer.node_id))
+                    };
+                    if let Ok(store) = durable_replay::DurableNonceStore::open(path, inbound_capacity, max_age) {
+                        cache.durable = Some(store);
+                    }
+                }
+                cache
+            });
         peers.by_id.insert(peer.node_id, peer);
     }
 
@@ -493,6 +549,7 @@ struct NonceReplayCache {
     capacity: usize,
     seen: HashSet<[u8; NONCE_LEN]>,
     order: VecDeque<[u8; NONCE_LEN]>,
+    durable: Option<durable_replay::DurableNonceStore>,
 }
 
 impl NonceReplayCache {
@@ -501,6 +558,7 @@ impl NonceReplayCache {
             capacity,
             seen: HashSet::with_capacity(capacity.min(DEFAULT_INBOUND_NONCE_CACHE_CAPACITY)),
             order: VecDeque::with_capacity(capacity.min(DEFAULT_INBOUND_NONCE_CACHE_CAPACITY)),
+            durable: None,
         }
     }
 
@@ -508,7 +566,14 @@ impl NonceReplayCache {
         if self.capacity == 0 {
             return Ok(());
         }
-        if self.seen.contains(&nonce) {
+        let now_micros = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
+
+        if let Some(durable) = &mut self.durable {
+            durable.remember(node_id, nonce, now_micros)?;
+        } else if self.seen.contains(&nonce) {
             return Err(ZapNetError::ReplayedDatagramNonce { node_id });
         }
 
@@ -1042,4 +1107,56 @@ mod tests {
         assert_ne!(initiator_key, [0_u8; 32]);
         assert_ne!(responder_key, [0_u8; 32]);
     }
+
+    #[tokio::test]
+    async fn endpoint_persists_replay_cache_across_restart() {
+        use tempfile::tempdir;
+
+        let key = TransportKey([42_u8; 32]);
+        let source = id(1);
+        let target = id(2);
+        let peer_addr = "127.0.0.1:9001".parse().unwrap();
+        let temp = tempdir().unwrap();
+        let wal_path = temp.path().join("endpoint_nonces.wal");
+
+        let frame = ZapFrame::with_timestamp(
+            source,
+            target,
+            ZapFlags::ENCRYPTED,
+            42,
+            Bytes::from_static(b"ping"),
+        )
+        .unwrap();
+        let datagram = encrypt_datagram(
+            source,
+            target,
+            [0xAA, 0xBB, 0xCC, 0xDD],
+            7,
+            &key,
+            &frame.encode(),
+        )
+        .unwrap();
+
+        // 1st instance processes datagram
+        {
+            let mut config = ZapEndpointConfig::new("127.0.0.1:0".parse().unwrap(), target);
+            config.durable_nonce_store_path = Some(wal_path.clone());
+            let endpoint = ZapEndpoint::bind(config).await.unwrap();
+            endpoint.add_peer(Peer::new(source, peer_addr, key.0)).await;
+            endpoint.decode_inbound(&datagram, peer_addr).await.unwrap();
+        }
+
+        // 2nd instance (restarted node) attempts to process same datagram
+        {
+            let mut config = ZapEndpointConfig::new("127.0.0.1:0".parse().unwrap(), target);
+            config.durable_nonce_store_path = Some(wal_path.clone());
+            let endpoint = ZapEndpoint::bind(config).await.unwrap();
+            endpoint.add_peer(Peer::new(source, peer_addr, key.0)).await;
+            assert!(matches!(
+                endpoint.decode_inbound(&datagram, peer_addr).await,
+                Err(ZapNetError::ReplayedDatagramNonce { node_id }) if node_id == source
+            ));
+        }
+    }
 }
+

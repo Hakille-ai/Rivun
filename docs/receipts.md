@@ -109,4 +109,26 @@ source of truth:
 Corrupt indexes can be rebuilt from segments; corrupt segments fail
 verification.
 
+## Cryptographic accumulation
+
+Beyond plain verification, the ledger layer (`zap-ledger`) accumulates the
+receipt stream into verifiable commitments:
+
+- **Batch seals** — `SignedReceiptBatch` commits to a contiguous receipt
+  range (sequence range, MMR root, state transitions) with validator quorum
+  signatures, so auditors can validate a range without re-verifying every
+  signature.
+- **Incremental MMR** — an append-only Merkle Mountain Range (`ZAPMMR01`
+  binary format) with `prove_inclusion`, `prove_batch_inclusion`, and
+  **exclusion proofs** (non-membership), buildable from the journal via
+  `ReceiptJournalStore::build_incremental_mmr`.
+- **ZK rollups** — `ZkReceiptBatchProof` commits to blinded receipt hashes
+  (`BLAKE3(domain || node_id || frame_hash || payload_hash || output_hash ||
+  salt)`), enabling confidential auditability: hash-level evidence without
+  exposing payload bytes.
+
+`ReceiptJournalStore` can seal segment batches (`*.zjseal.json`) during
+rotation. See [Ledger](ledger.md) for the full API surface and threat
+properties.
+
 Receipts make local and future distributed operation auditable without creating financial semantics.

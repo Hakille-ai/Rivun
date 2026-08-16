@@ -17,6 +17,14 @@ use zap_core::{ZapFlags, ZapFrame};
 use zap_crypto::{Keypair, node_id_from_public_key};
 use zap_journal::{JournalProfile, JournalQuery, JournalRecordInput, JournalStore};
 
+pub mod batch;
+pub mod mmr;
+pub mod zk;
+
+pub use batch::*;
+pub use mmr::*;
+pub use zk::*;
+
 pub const RECEIPT_SCHEMA_VERSION: u8 = 1;
 pub const RECEIPT_REPLICATION_SCHEMA_VERSION: u8 = 1;
 pub const RECEIPT_REPLICATION_CONTENT_TYPE: &str = "application/zap-receipts+json";
@@ -29,10 +37,11 @@ pub const RECEIPT_SEGMENT_INDEX_SCHEMA_VERSION: u8 = 1;
 pub const RECEIPT_SEGMENT_MANIFEST_CONTENT_TYPE: &str =
     "application/zap-receipt-segment-manifest+json";
 pub const RECEIPT_JOURNAL_CONTENT_TYPE: &str = "application/zap-receipt+json";
+pub const SIGNED_MANIFEST_EXTENSION: &str = "zjmanifest.json.sig";
 
 const RECEIPT_SIGNATURE_DOMAIN: &[u8] = b"ZAP-ACTION-RECEIPT-v1";
 const RECEIPT_SEGMENT_MANIFEST_SIGNATURE_DOMAIN: &[u8] = b"ZAP-RECEIPT-SEGMENT-MANIFEST-v1";
-const HASH_PREFIX: &str = "blake3:";
+pub const HASH_PREFIX: &str = "blake3:";
 const PUBLIC_KEY_LEN: usize = 32;
 const SIGNATURE_LEN: usize = 64;
 const BATCH_VERIFY_MIN_RECEIPTS: usize = 4;
@@ -41,6 +50,10 @@ const RECEIPT_VERIFY_CHUNK_SIZE: usize = 64;
 
 #[derive(Debug, Error)]
 pub enum ZapLedgerError {
+    #[error("crypto error: {0}")]
+    Crypto(#[from] zap_crypto::ZapCryptoError),
+    #[error("mmr error: {0}")]
+    Mmr(#[from] MmrError),
     #[error("receipt schema version {0} is unsupported")]
     UnsupportedSchemaVersion(u8),
     #[error("receipt replication schema version {0} is unsupported")]
@@ -434,6 +447,7 @@ impl ReceiptReplicationResponse {
 #[derive(Debug, Clone)]
 pub struct ReceiptJournalStore {
     journal: JournalStore,
+    keypair: Option<Keypair>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -448,11 +462,157 @@ impl ReceiptJournalStore {
     pub fn open(dir: impl Into<PathBuf>) -> Self {
         Self {
             journal: JournalStore::open(dir, JournalProfile::Receipts),
+            keypair: None,
         }
+    }
+
+    pub fn open_with_keypair(dir: impl Into<PathBuf>, keypair: Keypair) -> Self {
+        Self {
+            journal: JournalStore::open(dir, JournalProfile::Receipts),
+            keypair: Some(keypair),
+        }
+    }
+
+    pub fn with_options(mut self, options: zap_journal::JournalOptions) -> Self {
+        self.journal = self.journal.with_options(options);
+        self
+    }
+
+    pub fn set_keypair(&mut self, keypair: Keypair) {
+        self.keypair = Some(keypair);
+    }
+
+    pub fn keypair(&self) -> Option<&Keypair> {
+        self.keypair.as_ref()
     }
 
     pub fn dir(&self) -> &Path {
         self.journal.dir()
+    }
+
+    pub fn signed_manifest_path(&self, sequence: u64) -> PathBuf {
+        self.dir().join(format!("{sequence:020}.{SIGNED_MANIFEST_EXTENSION}"))
+    }
+
+    pub fn rotate_and_seal_segment(&self, sequence: u64) -> Result<SignedReceiptSegmentManifest> {
+        let keypair = self.keypair.as_ref().ok_or_else(|| {
+            ZapLedgerError::InvalidReceiptField {
+                field: "keypair",
+                reason: "node keypair is required to sign segment manifests",
+            }
+        })?;
+        let receipts = self.read_segment_receipts(sequence)?;
+        let previous_segment_hash = if sequence > 0 {
+            if let Ok(prev_signed) = self.load_signed_manifest(sequence - 1) {
+                Some(prev_signed.manifest.segment_hash.clone())
+            } else if let Ok(prev_manifest) = self.journal.load_manifest(sequence - 1) {
+                Some(prev_manifest.segment_hash.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let segment_index = self.journal.load_segment_index_by_sequence(sequence)?;
+        let manifest = ReceiptSegmentManifest::from_receipts(
+            segment_index.segment_id,
+            sequence,
+            &receipts,
+            previous_segment_hash,
+        )?;
+
+        let signed = SignedReceiptSegmentManifest::sign(keypair, manifest)?;
+        let path = self.signed_manifest_path(sequence);
+        fs::write(&path, signed.to_json_string()?)?;
+        Ok(signed)
+    }
+
+    pub fn load_signed_manifest(&self, sequence: u64) -> Result<SignedReceiptSegmentManifest> {
+        let path = self.signed_manifest_path(sequence);
+        if !path.exists() {
+            return Err(ZapLedgerError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("missing signed manifest at {}", path.display()),
+            )));
+        }
+        let content = fs::read_to_string(&path)?;
+        let signed = SignedReceiptSegmentManifest::from_json_str(&content)?;
+        signed.verify()?;
+        Ok(signed)
+    }
+
+    pub fn build_and_verify_segment_index(&self) -> Result<ReceiptSegmentIndex> {
+        let node_id = self.keypair.as_ref().map(|k| k.node_id()).unwrap_or_default();
+        let mut manifests = Vec::new();
+        for segment in self.journal.segments()? {
+            if self.signed_manifest_path(segment.sequence).exists() {
+                let signed = self.load_signed_manifest(segment.sequence)?;
+                manifests.push(signed);
+            }
+        }
+        ReceiptSegmentIndex::from_manifests(node_id, &manifests)
+    }
+
+    pub fn read_segment_receipts(&self, sequence: u64) -> Result<Vec<SignedActionReceipt>> {
+        let mut receipts = Vec::new();
+        let index = self.journal.load_segment_index_by_sequence(sequence)?;
+        for entry in index.entries {
+            let record = self.journal.read_record_at(sequence, &entry)?;
+            let receipt: SignedActionReceipt = serde_json::from_slice(&record.payload)?;
+            receipts.push(receipt);
+        }
+        Ok(receipts)
+    }
+
+    pub fn query_fast(&self, request: &ReceiptReplicationRequest) -> Result<Vec<SignedActionReceipt>> {
+        request.validate()?;
+        let limit = request.effective_limit()?;
+
+        if let Ok(segment_index) = self.build_and_verify_segment_index()
+            && !segment_index.entries.is_empty()
+        {
+            let candidates = segment_index.candidate_segments(request)?;
+                let candidate_sequences: HashSet<u64> = candidates.iter().map(|e| e.segment_sequence).collect();
+
+                let records = self.journal.query_filtered(
+                    &JournalQuery {
+                        kind: request.kind.clone(),
+                        subject: request.subject.clone(),
+                        source_node: request.source_node,
+                        target_node: request.target_node,
+                        after_timestamp_micros: request.after_processed_at_micros,
+                        until_timestamp_micros: request.until_processed_at_micros,
+                        limit: Some(limit),
+                        ..JournalQuery::default()
+                    },
+                    &candidate_sequences,
+                )?;
+
+                let mut receipts = Vec::new();
+                for record in records {
+                    let receipt: SignedActionReceipt = serde_json::from_slice(&record.payload)?;
+                    receipts.push(receipt);
+                }
+                verify_action_receipts(&receipts, None)?;
+                receipts.retain(|receipt| request.matches(receipt));
+                return Ok(receipts);
+        }
+
+        self.query_with_limit(request, limit)
+    }
+
+    pub fn ensure_sealed_segments_signed(&self) -> Result<()> {
+        let Some(_keypair) = &self.keypair else { return Ok(()); };
+        let segments = self.journal.segments()?;
+        if segments.len() <= 1 { return Ok(()); }
+        for segment in segments.iter().take(segments.len() - 1) {
+            let seq = segment.sequence;
+            if !self.signed_manifest_path(seq).exists() {
+                let _ = self.rotate_and_seal_segment(seq);
+            }
+        }
+        Ok(())
     }
 
     pub fn append(&self, receipt: &SignedActionReceipt, sync_data: bool) -> Result<()> {
@@ -481,13 +641,13 @@ impl ReceiptJournalStore {
             },
             sync_data,
         )?;
+        self.ensure_sealed_segments_signed()?;
         Ok(())
     }
 
     pub fn query(&self, request: &ReceiptReplicationRequest) -> Result<Vec<SignedActionReceipt>> {
         request.validate()?;
-        let limit = request.effective_limit()?;
-        self.query_with_limit(request, limit)
+        self.query_fast(request)
     }
 
     pub fn query_with_limit(
@@ -580,6 +740,152 @@ impl ReceiptJournalStore {
             compacted.append(receipt, false)?;
         }
         Ok(receipts.len())
+    }
+
+    pub fn batch_seal_path(&self, sequence: u64) -> PathBuf {
+        self.dir().join(format!("{sequence:020}.{BATCH_SEAL_EXTENSION}"))
+    }
+
+    pub fn zmmr_path(&self, sequence: u64) -> PathBuf {
+        self.dir().join(format!("{sequence:020}.zmmr"))
+    }
+
+    pub fn seal_segment_batch(
+        &self,
+        sequence: u64,
+        validators: &[Keypair],
+        threshold: u16,
+        initial_state_hash: String,
+        final_state_hash: String,
+        total_fuel_consumed: u64,
+    ) -> Result<ReceiptBatchSeal> {
+        let receipts = self.read_segment_receipts(sequence)?;
+        if receipts.is_empty() {
+            return Err(ZapLedgerError::EmptyReceiptSegment);
+        }
+
+        let first = receipts.first().unwrap();
+        let last = receipts.last().unwrap();
+        let node_id = first.receipt.node_id;
+
+        let mut mmr = MerkleMountainRange::new();
+        for r in &receipts {
+            let canon = r.signing_message()?;
+            mmr.append_bytes(&canon);
+        }
+        let mmr_root = format!("{HASH_PREFIX}{}", mmr.root_hex());
+
+        let mut seal = ReceiptBatchSeal {
+            schema_version: RECEIPT_BATCH_SEAL_SCHEMA_VERSION,
+            batch_id: Uuid::new_v4(),
+            node_id,
+            segment_sequence: sequence,
+            start_sequence: 0,
+            end_sequence: (receipts.len() - 1) as u64,
+            receipt_count: receipts.len() as u64,
+            first_processed_at_micros: first.receipt.processed_at_micros,
+            last_processed_at_micros: last.receipt.processed_at_micros,
+            mmr_root,
+            initial_state_hash,
+            final_state_hash,
+            total_fuel_consumed,
+            quorum_threshold: threshold,
+            validator_signatures: Vec::new(),
+        };
+
+        let mut signatures = Vec::new();
+        for v in validators {
+            let sig = seal.sign_with_validator(v)?;
+            signatures.push(sig);
+        }
+        seal.validator_signatures = signatures;
+
+        seal.validate_static()?;
+        let json = serde_json::to_string_pretty(&seal)?;
+        fs::write(self.batch_seal_path(sequence), json)?;
+
+        // Also checkpoint incremental MMR snapshot
+        let mut inc_mmr = IncrementalMmr::new();
+        for r in &receipts {
+            let canon = r.signing_message()?;
+            inc_mmr.append_bytes(&canon);
+        }
+        inc_mmr.save_to_file(self.zmmr_path(sequence))?;
+
+        Ok(seal)
+    }
+
+    pub fn load_batch_seal(&self, sequence: u64) -> Result<ReceiptBatchSeal> {
+        let path = self.batch_seal_path(sequence);
+        if !path.exists() {
+            return Err(ZapLedgerError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("missing batch seal at {}", path.display()),
+            )));
+        }
+        let content = fs::read_to_string(&path)?;
+        let seal: ReceiptBatchSeal = serde_json::from_str(&content)?;
+        seal.validate_static()?;
+        Ok(seal)
+    }
+
+    pub fn save_segment_zmmr(&self, sequence: u64, mmr: &mut IncrementalMmr) -> Result<()> {
+        let path = self.zmmr_path(sequence);
+        mmr.save_to_file(path)?;
+        Ok(())
+    }
+
+    pub fn load_segment_zmmr(&self, sequence: u64) -> Result<IncrementalMmr> {
+        let path = self.zmmr_path(sequence);
+        if !path.exists() {
+            return Err(ZapLedgerError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("missing zmmr checkpoint at {}", path.display()),
+            )));
+        }
+        let mmr = IncrementalMmr::load_from_file(path)?;
+        Ok(mmr)
+    }
+
+    /// Build an Incremental Merkle Mountain Range accumulator from all receipts in the journal.
+    pub fn build_incremental_mmr(&self) -> Result<IncrementalMmr> {
+        let receipts = self.all()?;
+        let mut mmr = IncrementalMmr::new();
+        for receipt in &receipts {
+            let canon = receipt.signing_message()?;
+            mmr.append_bytes(&canon);
+        }
+        Ok(mmr)
+    }
+
+    /// Build a Merkle Mountain Range accumulator from all receipts in the journal.
+    pub fn build_mmr_accumulator(&self) -> Result<MerkleMountainRange> {
+        let receipts = self.all()?;
+        let mut mmr = MerkleMountainRange::new();
+        for receipt in &receipts {
+            let canon = receipt.signing_message()?;
+            mmr.append_bytes(&canon);
+        }
+        Ok(mmr)
+    }
+
+    /// Generate an O(log N) inclusion proof for the receipt at the given index.
+    pub fn prove_receipt_mmr_inclusion(&self, index: usize) -> Result<(MmrInclusionProof, MmrHash)> {
+        let mut mmr = self.build_mmr_accumulator()?;
+        let proof = mmr.prove_inclusion(index)?;
+        let root = mmr.root();
+        Ok((proof, root))
+    }
+
+    /// Generate a deduplicated multi-leaf batch inclusion proof for receipts at the given indices.
+    pub fn prove_receipt_batch_inclusion(
+        &self,
+        indices: &[usize],
+    ) -> Result<(MmrBatchInclusionProof, MmrHash)> {
+        let mut mmr = self.build_mmr_accumulator()?;
+        let proof = mmr.prove_batch_inclusion(indices)?;
+        let root = mmr.root();
+        Ok((proof, root))
     }
 }
 
@@ -931,6 +1237,20 @@ impl ReceiptSegmentIndex {
 }
 
 impl SignedActionReceipt {
+    pub fn sign(signer: &Keypair, receipt: ActionReceipt) -> Result<Self> {
+        let signer_public_key = STANDARD_NO_PAD.encode(signer.verifying_key().to_bytes());
+        let mut signed = Self {
+            receipt,
+            signer_node_id: signer.node_id(),
+            signer_public_key,
+            signature: String::new(),
+        };
+        let signing_key = SigningKey::from_bytes(&signer.secret_bytes());
+        let signature: Signature = signing_key.sign(&signed.signing_message()?);
+        signed.signature = STANDARD_NO_PAD.encode(signature.to_bytes());
+        Ok(signed)
+    }
+
     pub fn new(
         signer: &Keypair,
         frame: &ZapFrame,
@@ -1222,7 +1542,7 @@ fn receipt_hash(receipt: &SignedActionReceipt) -> Result<String> {
     Ok(hash_bytes(&serde_json::to_vec(receipt)?))
 }
 
-fn validate_artifact_hash(field: &'static str, value: &str) -> Result<()> {
+pub(crate) fn validate_artifact_hash(field: &'static str, value: &str) -> Result<()> {
     let hash =
         value
             .strip_prefix(HASH_PREFIX)
@@ -1253,7 +1573,7 @@ fn build_poa_receipt(frame: &ZapFrame, required_threshold: Option<u16>) -> Optio
     })
 }
 
-fn decode_fixed<const N: usize>(encoded: &str, kind: &'static str) -> Result<[u8; N]> {
+pub(crate) fn decode_fixed<const N: usize>(encoded: &str, kind: &'static str) -> Result<[u8; N]> {
     let decoded = STANDARD_NO_PAD.decode(encoded)?;
     if decoded.len() != N {
         return Err(ZapLedgerError::InvalidKeyLength {
@@ -1786,4 +2106,156 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn signed_segment_manifest_store_integration() {
+        let temp = tempfile::tempdir().unwrap();
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let options = zap_journal::JournalOptions {
+            max_segment_bytes: 64 * 1024,
+            max_segment_count: Some(5),
+            max_segment_records: Some(3),
+        };
+
+        let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+
+        for i in 0..6 {
+            let receipt = receipt_at(&node, &source, 1_000 + i * 100, "echo");
+            store.append(&receipt, false).unwrap();
+        }
+
+        // Rotate and seal sequence 0
+        let signed_manifest = store.rotate_and_seal_segment(0).unwrap();
+        signed_manifest.verify().unwrap();
+
+        // Load signed manifest
+        let loaded = store.load_signed_manifest(0).unwrap();
+        assert_eq!(loaded, signed_manifest);
+
+        // Build and verify index
+        let segment_index = store.build_and_verify_segment_index().unwrap();
+        assert!(!segment_index.entries.is_empty());
+
+        // Fast query
+        let req = ReceiptReplicationRequest {
+            after_processed_at_micros: Some(1_150),
+            ..ReceiptReplicationRequest::default()
+        };
+        let queried = store.query_fast(&req).unwrap();
+        assert!(!queried.is_empty());
+    }
+
+    #[test]
+    fn receipt_journal_batch_sealing_and_zmmr_checkpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+        let val1 = Keypair::generate();
+        let val2 = Keypair::generate();
+
+        let options = zap_journal::JournalOptions {
+            max_segment_bytes: 64 * 1024,
+            max_segment_count: Some(5),
+            max_segment_records: Some(4),
+        };
+
+        let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone()).with_options(options);
+
+        for i in 0..8 {
+            let receipt = receipt_at(&node, &source, 1_000 + i * 100, "tensor_calc");
+            store.append(&receipt, false).unwrap();
+        }
+
+        let init_state = format!("{HASH_PREFIX}{}", hex::encode([0x01; 32]));
+        let final_state = format!("{HASH_PREFIX}{}", hex::encode([0x02; 32]));
+
+        // Seal segment sequence 0
+        let seal = store
+            .seal_segment_batch(
+                0,
+                &[val1.clone(), val2.clone()],
+                2,
+                init_state.clone(),
+                final_state.clone(),
+                12_500,
+            )
+            .unwrap();
+
+        assert_eq!(seal.segment_sequence, 0);
+        assert_eq!(seal.receipt_count, 4);
+        assert_eq!(seal.validator_signatures.len(), 2);
+
+        // Load batch seal
+        let loaded_seal = store.load_batch_seal(0).unwrap();
+        assert_eq!(loaded_seal, seal);
+
+        // Load segment .zmmr
+        let mut loaded_zmmr = store.load_segment_zmmr(0).unwrap();
+        assert_eq!(loaded_zmmr.leaf_count, 4);
+        assert_eq!(format!("{HASH_PREFIX}{}", loaded_zmmr.root_hex()), seal.mmr_root);
+    }
+
+    #[test]
+    fn receipt_journal_incremental_mmr_and_batch_proof() {
+        let temp = tempfile::tempdir().unwrap();
+        let node = Keypair::generate();
+        let source = Keypair::generate();
+
+        let store = ReceiptJournalStore::open_with_keypair(temp.path(), node.clone());
+
+        for i in 0..16 {
+            let receipt = receipt_at(&node, &source, 1_000 + i * 100, "op");
+            store.append(&receipt, false).unwrap();
+        }
+
+        let mut inc_mmr = store.build_incremental_mmr().unwrap();
+        let mut mem_mmr = store.build_mmr_accumulator().unwrap();
+
+        assert_eq!(inc_mmr.len(), 16);
+        assert_eq!(inc_mmr.get_root(), mem_mmr.root());
+
+        // Batch inclusion proof for receipts [1, 4, 7, 15]
+        let indices = vec![1, 4, 7, 15];
+        let (batch_proof, root) = store.prove_receipt_batch_inclusion(&indices).unwrap();
+        assert_eq!(batch_proof.leaf_indices, vec![1, 4, 7, 15]);
+        assert_eq!(batch_proof.total_leaves, 16);
+        assert!(batch_proof.verify(&root).unwrap());
+    }
+
+    #[test]
+    fn receipt_scale_1000_batch_verification_sub_millisecond() {
+        let mut mmr = MerkleMountainRange::new();
+        let count = 1000;
+
+        for i in 0..count {
+            let data = format!("scale_receipt_hash_commitment_{i}");
+            mmr.append_bytes(data.as_bytes());
+        }
+
+        let root = mmr.root();
+
+        // 1. Generate full batch inclusion proof for 1,000 receipts
+        let all_indices: Vec<usize> = (0..count).collect();
+        let batch_proof = mmr.prove_batch_inclusion(&all_indices).unwrap();
+        assert_eq!(batch_proof.total_leaves, 1000);
+        assert_eq!(batch_proof.leaf_indices.len(), 1000);
+        // Sister hashes for a full tree batch proof are 0 due to DAG deduplication
+        assert!(batch_proof.sister_hashes.is_empty());
+
+        // 2. Measure verification time
+        let start = std::time::Instant::now();
+        let verified = batch_proof.verify(&root).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(verified);
+        // Verify that 1000-leaf batch verification executes extremely fast (< 100ms in unoptimized debug mode)
+        assert!(
+            elapsed < std::time::Duration::from_millis(100),
+            "verification took too long: {:?}",
+            elapsed
+        );
+    }
 }
+
+

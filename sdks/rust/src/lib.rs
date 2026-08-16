@@ -23,6 +23,7 @@ pub use zap_pact::{
     PACT_SCHEMA_VERSION, PACT_VERIFY_SUBJECT, ZapPact, ZapPactBundle, ZapPactProof,
     ZapPactRevocation, ZapPactStatus, ZapPactVerification,
 };
+pub use zap_ledger::{ReceiptJournalStore, SignedActionReceipt};
 pub use zap_store::{
     DRIVER_ABI_VERSION, DRIVER_HASH_PREFIX, DriverAbiRequirement, DriverManifest, DriverRegistry,
     DriverRegistryEntry, DriverRegistryMigration, DriverRegistryStatus,
@@ -222,6 +223,80 @@ pub fn verify_registry_signature(registry: &DriverRegistry) -> zap_store::Result
     registry.verify_signature()
 }
 
+#[derive(Debug)]
+pub struct ZapUdpClient {
+    socket: std::net::UdpSocket,
+}
+
+impl ZapUdpClient {
+    pub fn bind(addr: impl std::net::ToSocketAddrs) -> Result<Self> {
+        let socket = std::net::UdpSocket::bind(addr).map_err(|e| {
+            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
+        })?;
+        Ok(Self { socket })
+    }
+
+    pub fn send_envelope(
+        &self,
+        envelope: &ZapEnvelope,
+        target: impl std::net::ToSocketAddrs,
+    ) -> Result<usize> {
+        let bytes = envelope.encode();
+        self.socket.send_to(&bytes, target).map_err(|e| {
+            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
+        })
+    }
+
+    pub fn send_control(
+        &self,
+        frame: &ControlFrame,
+        target: impl std::net::ToSocketAddrs,
+    ) -> Result<usize> {
+        let bytes = frame.encode();
+        self.socket.send_to(&bytes, target).map_err(|e| {
+            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
+        })
+    }
+
+    pub fn recv_envelope(
+        &self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<(ZapEnvelope, std::net::SocketAddr)> {
+        self.socket.set_read_timeout(timeout).ok();
+        let mut buf = [0u8; 65535];
+        let (n, addr) = self.socket.recv_from(&mut buf).map_err(|e| {
+            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
+        })?;
+        let env_ref = ZapEnvelopeRef::parse(&buf[..n])?;
+        let owned = ZapEnvelope::new(
+            env_ref.kind(),
+            env_ref.subject(),
+            env_ref.content_type(),
+            Bytes::copy_from_slice(env_ref.body()),
+        )?
+        .with_id(env_ref.id())
+        .with_metadata(Bytes::copy_from_slice(env_ref.metadata()))?;
+        Ok((owned, addr))
+    }
+
+    pub fn request_control(
+        &self,
+        frame: &ControlFrame,
+        target: impl std::net::ToSocketAddrs,
+        timeout: std::time::Duration,
+    ) -> Result<ControlFrame> {
+        self.send_control(frame, target)?;
+        let (env, _) = self.recv_envelope(Some(timeout))?;
+        if env.kind() != ZapMessageKind::Control {
+            return Err(SdkError::ExpectedControl {
+                actual: env.kind(),
+            });
+        }
+        let encoded = env.encode();
+        ControlFrame::decode(&encoded)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,5 +397,21 @@ mod tests {
         let verification = pact.verify(None).unwrap();
         assert!(verification.valid);
         assert_eq!(verification.hash, pact.hash.unwrap());
+    }
+
+    #[test]
+    fn udp_client_send_and_receive_envelope() {
+        let server = ZapUdpClient::bind("127.0.0.1:0").unwrap();
+        let server_addr = server.socket.local_addr().unwrap();
+        let client = ZapUdpClient::bind("127.0.0.1:0").unwrap();
+
+        let frame = ControlFrame::new("zap.test.ping", "text/plain", Bytes::from_static(b"ping")).unwrap();
+        let bytes_sent = client.send_control(&frame, server_addr).unwrap();
+        assert!(bytes_sent > 0);
+
+        let (recv_env, from_addr) = server.recv_envelope(Some(std::time::Duration::from_millis(500))).unwrap();
+        assert_eq!(recv_env.subject(), "zap.test.ping");
+        assert_eq!(recv_env.body(), b"ping");
+        assert_eq!(from_addr, client.socket.local_addr().unwrap());
     }
 }

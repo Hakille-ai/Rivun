@@ -8,11 +8,22 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::{fmt, str::FromStr};
 use thiserror::Error;
 use uuid::Uuid;
 use zap_capability::DriverPermissions;
 use zap_crypto::{Keypair, node_id_from_public_key};
+
+pub mod audit;
+pub mod bundle;
+pub mod resolver;
+pub mod validator;
+
+pub use audit::*;
+pub use bundle::*;
+pub use resolver::*;
+pub use validator::*;
 
 pub const MANIFEST_SCHEMA_VERSION: u8 = 1;
 pub const REGISTRY_SCHEMA_VERSION: u8 = 1;
@@ -218,6 +229,22 @@ pub enum ZapStoreError {
     TomlDecode(#[from] toml::de::Error),
     #[error("failed to serialize TOML driver manifest: {0}")]
     TomlEncode(#[from] toml::ser::Error),
+    #[error("invalid domain pack bundle format: {0}")]
+    InvalidDomainPackBundleFormat(String),
+    #[error("domain pack bundle digest mismatch for `{path}`: expected {expected}, actual {actual}")]
+    DomainPackBundleDigestMismatch { path: String, expected: String, actual: String },
+    #[error("domain pack signature missing or invalid")]
+    InvalidDomainPackBundleSignature,
+    #[error("domain pack signature signer `{signer}` is not in trusted public keys whitelist")]
+    UntrustedDomainPackSigner { signer: String },
+    #[error("unsatisfied domain pack dependency `{pack_id}` version requirement `{requirement}`")]
+    UnsatisfiedDomainPackDependency { pack_id: String, requirement: String },
+    #[error("circular dependency detected in domain pack graph: {0}")]
+    CircularDomainPackDependency(String),
+    #[error("domain pack policy validation failed: {0}")]
+    DomainPackPolicyValidationFailed(String),
+    #[error("I/O error: {0}")]
+    IoError(String),
 }
 
 pub type Result<T> = std::result::Result<T, ZapStoreError>;
@@ -489,9 +516,10 @@ pub enum DomainPackStatus {
     Active,
     Deprecated,
     Revoked,
+    Draft,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum DomainPackRisk {
     #[default]
@@ -511,16 +539,52 @@ pub struct DomainPackCompatibility {
     pub runtimes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub abi_versions: Vec<u16>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub zap_version_req: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub abi_version_req: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities_required: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities_provided: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DomainPackArtifact {
+    #[serde(default)]
     pub path: String,
+    #[serde(default)]
     pub hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256_hex: Option<String>,
+}
+
+impl DomainPackArtifact {
+    pub fn path(&self) -> &str {
+        if !self.path.is_empty() {
+            &self.path
+        } else if let Some(ref p) = self.relative_path {
+            p.as_str()
+        } else {
+            ""
+        }
+    }
+
+    pub fn hash(&self) -> &str {
+        if !self.hash.is_empty() {
+            &self.hash
+        } else if let Some(ref h) = self.sha256_hex {
+            h.as_str()
+        } else {
+            ""
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -537,6 +601,8 @@ pub struct DomainPackRegistryEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked_reason: Option<String>,
     #[serde(default)]
+    pub author_node_id: Uuid,
+    #[serde(default)]
     pub compatibility: DomainPackCompatibility,
     pub manifest: DomainPackArtifact,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -545,6 +611,12 @@ pub struct DomainPackRegistryEntry {
     pub policies: Vec<DomainPackArtifact>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schemas: Vec<DomainPackArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drivers: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<DomainPackDependencySpec>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub labels: Vec<String>,
 }
@@ -2263,6 +2335,8 @@ impl DomainPackArtifact {
             hash: artifact_hash(bytes),
             content_type,
             size_bytes: Some(bytes.len() as u64),
+            relative_path: None,
+            sha256_hex: None,
         }
     }
 
@@ -2567,11 +2641,16 @@ mod tests {
             description: Some("Domain pack for integration tests".to_string()),
             deprecated_reason: None,
             revoked_reason: None,
+            author_node_id: Uuid::nil(),
             compatibility: DomainPackCompatibility {
                 min_zap_version: Some("1.0.0".to_string()),
                 max_zap_version: None,
                 runtimes: vec!["wasmtime".to_string()],
                 abi_versions: vec![DRIVER_ABI_VERSION],
+                zap_version_req: String::new(),
+                abi_version_req: String::new(),
+                capabilities_required: vec![],
+                capabilities_provided: vec![],
             },
             manifest: DomainPackArtifact::new(
                 format!("{id}/pack.toml"),
@@ -2593,6 +2672,9 @@ mod tests {
                 b"# Subjects\n",
                 Some("text/markdown".to_string()),
             )],
+            drivers: vec![],
+            metadata: BTreeMap::new(),
+            dependencies: vec![],
             labels: vec!["phase-4".to_string(), "domain-pack".to_string()],
         }
     }

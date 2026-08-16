@@ -27,9 +27,9 @@ Status values:
 | Health endpoint | done | `ZapNode::health_snapshot()`, `ZapNode::health_json()`, `ZapNode::healthz_text()`, optional `/healthz` and `/healthz.json`, `doctor` observability check | Add fleet-level health aggregation |
 | Prometheus/Grafana assets | done | `crates/zap-ops/config`, `docs/observability.md`, `crates/zap-ops/tests/configs.rs` | Add new rules only with emitted-metric validation |
 | Fail-closed message policy | done | `message_policy.default_decision`, policy tests, docs | Add more production profile examples |
-| Receipt fsync/segments/index | partial | `zap-journal`, `ReceiptJournalStore`, `ReceiptFsyncPolicy`, `[receipts] dir`, binary segments, sidecar indexes, bounded `until_processed_at_micros`, pull cursor tests | Add segment sealing/compression policy and durable peer replay windows |
-| Durable replay window | partial | In-memory replay guard and datagram nonce cache | Add optional restart-persistent replay windows |
-| Runtime host-call limits | partial | Host call byte limit and runtime bounds exist | Add per-action budget profiles and richer error taxonomy |
+| Receipt fsync/segments/index | done | `zap-journal`, `ReceiptJournalStore`, `ReceiptFsyncPolicy`, `[receipts] dir`, binary segments, sidecar indexes, bounded `until_processed_at_micros`, pull cursor tests, signed segment manifests, batch seals, MMR build | Add per-profile compression policy and fleet-level journal supervision |
+| Durable replay window | done | `DurableNonceStore` WAL (`ZAPNONC1`) in `zap-net`, `DurableReplayStore` frame fingerprints in `zap-node`, stress tests across restart floods | Tune window size policy per deployment |
+| Runtime host-call limits | partial | Host call byte limit and runtime bounds exist; async pipeline, streaming buffers, and IPC are implemented (`zap-runtime`) | Add per-action budget profiles and richer error taxonomy |
 
 ## Phase 2: Protocol Spec and SDK Conformance
 
@@ -45,10 +45,10 @@ Status values:
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
 | Agent intent/status/result | done | `zap-agent`, `zap agent intent/status/result`, tests, docs | Keep SDK fixture coverage in sync |
-| Agent session/delegate/negotiate | partial | `zap agent session/delegate/negotiate`, CLI tests, session/delegation/negotiation fixtures | Add receipt links, storage, and persistent orchestration |
-| Agent receipt linkage | partial | Receipts record message kind/subject and PoA | Link intent/session/capabilities/output artifacts explicitly |
-| Evidence export | partial | `zap memory export-evidence` emits payload-free memory and receipt summaries | Add signed bundle manifest and optional encrypted raw evidence archive |
-| Agent framework adapters | planned | Architecture docs only | Add adapters outside the wire protocol core |
+| Agent session/delegate/negotiate | done | `zap agent session/delegate/negotiate`, CLI tests, session/delegation/negotiation fixtures, gateway REST+SSE endpoints and MCP tools | Add persistent orchestration state and cross-node session recovery |
+| Agent receipt linkage | done | Receipts record message kind/subject and PoA; provenance chain covers intent→negotiation→policy→driver→poa→receipt with root signing | Link provenance digests into receipt records and incident evidence |
+| Evidence export | partial | `zap memory export-evidence` emits payload-free memory and receipt summaries; `zap incident snapshot` bundles redacted evidence; signed bundle manifests supported | Add optional encrypted raw evidence archive |
+| Agent framework adapters | partial | `zap-gateway` MCP server (stdio/HTTP), REST/SSE/WebSocket transports, provenance chain engine | Add adapters outside the wire protocol core (gRPC, NATS/Kafka bridges) |
 
 ## PACT Profile
 
@@ -63,25 +63,25 @@ Status values:
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
-| Domain pack manifest | done | `docs/domain-packs.md`, `zap pack validate/inspect/list` | Add signing/build/install workflows |
+| Domain pack manifest | done | `docs/domain-packs.md`, `zap pack validate/inspect/list` | Keep signing/build/install workflows covered by CI |
 | Preview packs | done | agentic-dev, smart-building, cloud-ops, industrial, personal-ai, healthcare, finance | Add robotics and data-platform packs |
 | Pack catalog | done | `zap pack list --root ... --json` | Expose catalog in website or ZapStore |
-| Pack marketplace | planned | ZapStore driver registry exists | Extend ZapStore to signed domain-pack registry |
+| Pack lifecycle (build/sign/install/audit) | done | `zap pack init/build/sign/verify/install/audit`, `zap-pack`/`zap-store` bundle machinery, `zap-store/tests/pack_tests.rs` | Add signed publication and revocation across peers |
 
 ## Phase 5: Fleet and Multi-Transport
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
 | Static peers | done | Config, trust, peer invite/accept/rotate/revoke | Add live enrollment and revocation propagation |
-| Fleet doctor | planned | `doctor --strict` local checks | Add fleet topology inspection across peers |
-| Stream/gateway transports | planned | UDP transport and control messages | Add HTTP, WebSocket, gRPC, MQTT/NATS/Kafka/ROS2/OPC UA/Modbus bridges |
-| Incident snapshot | partial | `zap incident snapshot` captures doctor/config/memory/receipt/cache summaries | Add live process metrics, network state, and fleet-wide peer snapshots |
+| Fleet doctor | done | `zap fleet doctor` aggregates 6 core criteria across nodes; `FleetDoctor` in `zap-telemetry` | Add fleet-wide health dashboards and alerting wiring |
+| Stream/gateway transports | partial | `zap-gateway`: HTTP REST, SSE, WebSocket, MCP stdio; encrypted UDP transport | Add gRPC, MQTT/NATS/Kafka/ROS2/OPC UA/Modbus bridges |
+| Incident snapshot | done | `zap incident snapshot` captures doctor/config/memory/receipt/cache summaries, process state, and redaction; tar and JSON output | Add fleet-wide peer snapshots aggregation |
 
 ## Phase 6: Architecture Modularization
 
 | Item | Status | Evidence | Remaining Work |
 | --- | --- | --- | --- |
-| Node service boundaries | planned | `zap-node` still owns many responsibilities | Extract config, control, discovery, receipts, registry, PoA, route, runtime, observability services |
+| Node service boundaries | partial | `zap-node` gained actor modules (udp_rx, gossip, mesh, consensus, execution) and `zap-gateway`/`zap-telemetry` services | Extract config, control, discovery, receipts, registry, PoA, route, runtime, observability services further |
 | Cross-boundary invariant tests | partial | Many unit and integration tests exist | Add direct invariant suites per service boundary |
 
 ## Phase 7: 1.0 Readiness
@@ -95,9 +95,9 @@ Status values:
 
 ## Next Highest-Value Implementation Blocks
 
-1. Wire receipt segment manifests into daemon log rotation and disk-backed indexes.
+1. Add per-profile journal compression policy and fleet-level journal supervision.
 2. Expand fixtures to generated binary golden vectors and fixture manifests.
-3. Add durable restart-persistent replay windows.
-4. Add fleet topology inspection and fleet-wide incident snapshots.
-5. Add signed evidence bundle manifests and optional encrypted raw evidence archive.
-6. Extend ZapStore with signed domain-pack build/sign/verify/install workflows.
+3. Tune durable replay window sizing and rotation policy per deployment.
+4. Add fleet-wide incident snapshot aggregation and topology-driven alerting.
+5. Add signed pack publication and revocation propagation across peers.
+6. Add gRPC and MQTT/NATS/Kafka bridge gateways on top of `zap-gateway`.

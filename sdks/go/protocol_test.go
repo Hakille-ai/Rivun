@@ -221,44 +221,27 @@ func TestUnsignedControlFrameFixtureRoundTripsWithoutSecurityTrailers(t *testing
 
 func TestReceiptSampleFixtureHasStableResponseShape(t *testing.T) {
 	var fixture struct {
-		FixtureSchemaVersion uint8  `json:"fixture_schema_version"`
-		Subject              string `json:"subject"`
-		ContentType          string `json:"content_type"`
-		BodyJSON             struct {
-			SchemaVersion uint8 `json:"schema_version"`
-			RequestID     UUID  `json:"request_id"`
-			Truncated     bool  `json:"truncated"`
-			Receipts      []struct {
-				SchemaVersion        uint8                  `json:"schema_version"`
-				ReceiptID            UUID                   `json:"receipt_id"`
-				NodeID               UUID                   `json:"node_id"`
-				FrameID              UUID                   `json:"frame_id"`
-				Subject              string                 `json:"subject"`
-				ContentType          string                 `json:"content_type"`
-				BodyHash             string                 `json:"body_hash"`
-				PolicyDecision       string                 `json:"policy_decision"`
-				Outcome              string                 `json:"outcome"`
-				StartedAtUnixMicros  uint64                 `json:"started_at_unix_micros"`
-				FinishedAtUnixMicros uint64                 `json:"finished_at_unix_micros"`
-				Metadata             map[string]interface{} `json:"metadata"`
-				SignerPublicKey      string                 `json:"signer_public_key"`
-				Signature            string                 `json:"signature"`
-			} `json:"receipts"`
-		} `json:"body_json"`
+		FixtureSchemaVersion uint8                          `json:"fixture_schema_version"`
+		Subject              string                         `json:"subject"`
+		ContentType          string                         `json:"content_type"`
+		BodyJSON             ReceiptReplicationResponseBody `json:"body_json"`
 	}
 	loadRootFixture(t, filepath.Join("protocol", "receipt-sample-v1.json"), &fixture)
 
-	if fixture.FixtureSchemaVersion != 1 || fixture.BodyJSON.SchemaVersion != 1 {
+	if fixture.FixtureSchemaVersion != 1 || fixture.BodyJSON.SchemaVersion != ReceiptReplicationSchemaVersion {
 		t.Fatalf("fixture schema mismatch: %+v", fixture)
 	}
-	if fixture.Subject != "zap.receipts.response" || fixture.ContentType != "application/zap-receipts+json" {
+	if fixture.Subject != ReceiptReplicationResponseSubject || fixture.ContentType != ReceiptReplicationContentType {
 		t.Fatalf("receipt fixture route mismatch: %s %s", fixture.Subject, fixture.ContentType)
+	}
+	if err := ValidateReceiptResponseShape(fixture.BodyJSON); err != nil {
+		t.Fatalf("receipt response validation failed: %v", err)
 	}
 	if fixture.BodyJSON.Truncated || len(fixture.BodyJSON.Receipts) != 1 {
 		t.Fatalf("receipt collection mismatch: %+v", fixture.BodyJSON)
 	}
 	receipt := fixture.BodyJSON.Receipts[0]
-	if receipt.SchemaVersion != 1 || receipt.Subject != RegistryIndexRequestSubject || receipt.ContentType != RegistryIndexContentType {
+	if receipt.SchemaVersion != ReceiptSchemaVersion || receipt.Subject != RegistryIndexRequestSubject || receipt.ContentType != RegistryIndexContentType {
 		t.Fatalf("receipt protocol fields mismatch: %+v", receipt)
 	}
 	if receipt.PolicyDecision != "allow" || receipt.Outcome != "accepted" {

@@ -7,7 +7,7 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use rand_core::OsRng;
+use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use thiserror::Error;
@@ -24,6 +24,10 @@ const SIGN_HINT_DOMAIN: &[u8] = b"ZAP-SIGN-HINT-v1";
 const POA_DIGEST_DOMAIN: &[u8] = b"ZAP-POA-DIGEST-v1";
 const POA_SIGNATURE_DOMAIN: &[u8] = b"ZAP-POA-SIGNATURE-v1";
 const POA_VALIDATOR_SET_SIGNATURE_DOMAIN: &[u8] = b"ZAP-POA-VALIDATOR-SET-v1";
+pub const BLINDED_COMMITMENT_DOMAIN: &[u8] = b"ZAP-BLINDED-COMMITMENT-v1";
+pub const BLINDED_RECEIPT_DOMAIN: &[u8] = b"ZAP-BLINDED-RECEIPT-v1";
+pub const BATCH_SEAL_DOMAIN: &[u8] = b"ZAP-BATCH-SEAL-v1";
+pub const BLINDED_RECEIPT_SCHEMA_VERSION: u8 = 1;
 pub const POA_ATTESTATION_SCHEMA_VERSION: u8 = 1;
 pub const POA_VALIDATOR_SET_SCHEMA_VERSION: u8 = 1;
 pub const POA_ATTESTATION_CONTENT_TYPE: &str = "application/json";
@@ -223,6 +227,10 @@ impl PublicKey {
         node_id_from_public_key(&self.to_bytes())
     }
 
+    pub fn verifying_key(&self) -> VerifyingKey {
+        self.verifying_key
+    }
+
     pub fn verify_domain_message(
         &self,
         domain: &[u8],
@@ -234,6 +242,116 @@ impl PublicKey {
             .verify(&domain_message(domain, message), &signature)
             .map_err(|_| ZapCryptoError::InvalidSignature)
     }
+}
+
+/// Cryptographic Blinding Utilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlindedCommitment;
+
+impl BlindedCommitment {
+    /// Generates a high-entropy 256-bit cryptographically secure blinding factor.
+    pub fn generate_blinding_factor() -> [u8; 32] {
+        let mut blinding = [0u8; 32];
+        OsRng.fill_bytes(&mut blinding);
+        blinding
+    }
+
+    /// Computes a domain-separated blinded commitment: Blake3(domain || blinding || payload).
+    pub fn commit(domain: &[u8], payload: &[u8], blinding: &[u8; 32]) -> [u8; 32] {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(domain);
+        hasher.update(blinding);
+        hasher.update(payload);
+        *hasher.finalize().as_bytes()
+    }
+
+    /// Verifies a blinded commitment against expected domain, payload, and blinding factor.
+    pub fn verify(commitment: &[u8; 32], domain: &[u8], payload: &[u8], blinding: &[u8; 32]) -> bool {
+        let expected = Self::commit(domain, payload, blinding);
+        expected == *commitment
+    }
+}
+
+/// Blinded receipt commitment hiding sensitive payload details.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BlindedReceiptCommitment {
+    pub schema_version: u8,
+    pub commitment: String, // hex encoded
+    pub payload_hash: String, // hex encoded
+    pub blinded_fields_hash: String, // hex encoded
+}
+
+impl BlindedReceiptCommitment {
+    pub fn new(
+        schema_version: u8,
+        commitment: String,
+        payload_hash: String,
+        blinded_fields_hash: String,
+    ) -> Self {
+        Self {
+            schema_version,
+            commitment,
+            payload_hash,
+            blinded_fields_hash,
+        }
+    }
+
+    pub fn commit(payload: &[u8], blinded_fields: &[u8], blinding: &[u8; 32]) -> Self {
+        let payload_hash = blake3::hash(payload).to_hex().to_string();
+        let blinded_fields_hash = blake3::hash(blinded_fields).to_hex().to_string();
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(BLINDED_RECEIPT_DOMAIN);
+        hasher.update(blinding);
+        hasher.update(payload_hash.as_bytes());
+        hasher.update(blinded_fields_hash.as_bytes());
+        let commitment = hasher.finalize().to_hex().to_string();
+
+        Self {
+            schema_version: BLINDED_RECEIPT_SCHEMA_VERSION,
+            commitment,
+            payload_hash,
+            blinded_fields_hash,
+        }
+    }
+
+    pub fn verify(&self, payload: &[u8], blinded_fields: &[u8], blinding: &[u8; 32]) -> bool {
+        if self.schema_version != BLINDED_RECEIPT_SCHEMA_VERSION {
+            return false;
+        }
+        let expected = Self::commit(payload, blinded_fields, blinding);
+        self.commitment == expected.commitment
+            && self.payload_hash == expected.payload_hash
+            && self.blinded_fields_hash == expected.blinded_fields_hash
+    }
+}
+
+/// Batch signature verification helper leveraging `ed25519-dalek` batch verification.
+pub fn verify_batch_signatures(
+    messages: &[&[u8]],
+    signatures: &[[u8; ED25519_SIGNATURE_LEN]],
+    public_keys: &[PublicKey],
+) -> Result<()> {
+    if messages.len() != signatures.len() || signatures.len() != public_keys.len() {
+        return Err(ZapCryptoError::InvalidKeyLength {
+            kind: "batch_verification_mismatch",
+            expected: messages.len(),
+            actual: signatures.len(),
+        });
+    }
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let dalek_sigs = signatures
+        .iter()
+        .map(Signature::from_bytes)
+        .collect::<Vec<_>>();
+    let dalek_keys = public_keys
+        .iter()
+        .map(|k| k.verifying_key)
+        .collect::<Vec<_>>();
+
+    ed25519_dalek::verify_batch(messages, &dalek_sigs, &dalek_keys)
+        .map_err(|_| ZapCryptoError::InvalidSignature)
 }
 
 fn domain_message(domain: &[u8], message: &[u8]) -> Vec<u8> {
@@ -1076,4 +1194,100 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn blinded_commitment_commit_and_verify() {
+        let blinding = BlindedCommitment::generate_blinding_factor();
+        let payload = b"secret payload data 12345";
+        let commitment = BlindedCommitment::commit(BLINDED_COMMITMENT_DOMAIN, payload, &blinding);
+
+        // Verification with correct arguments should succeed
+        assert!(BlindedCommitment::verify(&commitment, BLINDED_COMMITMENT_DOMAIN, payload, &blinding));
+
+        // Verification with wrong blinding must fail
+        let wrong_blinding = BlindedCommitment::generate_blinding_factor();
+        assert!(!BlindedCommitment::verify(&commitment, BLINDED_COMMITMENT_DOMAIN, payload, &wrong_blinding));
+
+        // Verification with wrong payload must fail
+        assert!(!BlindedCommitment::verify(&commitment, BLINDED_COMMITMENT_DOMAIN, b"tampered payload", &blinding));
+
+        // Verification with wrong domain must fail
+        assert!(!BlindedCommitment::verify(&commitment, b"WRONG-DOMAIN", payload, &blinding));
+    }
+
+    #[test]
+    fn blinded_receipt_commitment_lifecycle() {
+        let blinding = BlindedCommitment::generate_blinding_factor();
+        let payload = b"{\"driver\":\"cuda\",\"action\":\"tensor_matmul\"}";
+        let blinded_fields = b"{\"gas\":1000,\"node\":\"validator-1\"}";
+
+        let commitment = BlindedReceiptCommitment::commit(payload, blinded_fields, &blinding);
+        assert_eq!(commitment.schema_version, BLINDED_RECEIPT_SCHEMA_VERSION);
+
+        // Verify valid commitment
+        assert!(commitment.verify(payload, blinded_fields, &blinding));
+
+        // Tampered payload fails
+        assert!(!commitment.verify(b"{\"driver\":\"cpu\"}", blinded_fields, &blinding));
+
+        // Tampered blinded fields fails
+        assert!(!commitment.verify(payload, b"{\"gas\":2000}", &blinding));
+
+        // Tampered blinding factor fails
+        let wrong_blinding = BlindedCommitment::generate_blinding_factor();
+        assert!(!commitment.verify(payload, blinded_fields, &wrong_blinding));
+
+        // Unsupported schema version fails
+        let mut corrupted_schema = commitment.clone();
+        corrupted_schema.schema_version = 99;
+        assert!(!corrupted_schema.verify(payload, blinded_fields, &blinding));
+    }
+
+    #[test]
+    fn batch_signature_verification() {
+        let keypair1 = Keypair::generate();
+        let keypair2 = Keypair::generate();
+        let keypair3 = Keypair::generate();
+
+        let msg1 = b"batch message 1";
+        let msg2 = b"batch message 2";
+        let msg3 = b"batch message 3";
+
+        let sig1 = keypair1.sign_domain_message(b"BATCH_TEST", msg1);
+        let sig2 = keypair2.sign_domain_message(b"BATCH_TEST", msg2);
+        let sig3 = keypair3.sign_domain_message(b"BATCH_TEST", msg3);
+
+        let d_msg1 = domain_message(b"BATCH_TEST", msg1);
+        let d_msg2 = domain_message(b"BATCH_TEST", msg2);
+        let d_msg3 = domain_message(b"BATCH_TEST", msg3);
+
+        let messages: Vec<&[u8]> = vec![&d_msg1, &d_msg2, &d_msg3];
+        let signatures = vec![sig1, sig2, sig3];
+        let public_keys = vec![
+            keypair1.verifying_key(),
+            keypair2.verifying_key(),
+            keypair3.verifying_key(),
+        ];
+
+        // Batch verify succeeds
+        verify_batch_signatures(&messages, &signatures, &public_keys).unwrap();
+
+        // Empty batch succeeds
+        verify_batch_signatures(&[], &[], &[]).unwrap();
+
+        // Length mismatch fails
+        assert!(matches!(
+            verify_batch_signatures(&messages[..2], &signatures, &public_keys),
+            Err(ZapCryptoError::InvalidKeyLength { .. })
+        ));
+
+        // Invalid signature fails
+        let mut corrupted_sigs = signatures.clone();
+        corrupted_sigs[1][0] ^= 0xff;
+        assert!(matches!(
+            verify_batch_signatures(&messages, &corrupted_sigs, &public_keys),
+            Err(ZapCryptoError::InvalidSignature)
+        ));
+    }
 }
+

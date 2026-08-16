@@ -13,7 +13,9 @@ JSON control messages. Nodes answer signed `ZENV` control envelopes:
 - `zap.capability.response`
 - `zap.capability.announce`
 
-Inspect local capabilities:
+Inspect local capabilities (generate
+`examples/wasm-drivers/echo/echo.manifest.toml` first with
+`zap driver-manifest create`, see [ZapStore](zapstore.md#cli)):
 
 ```bash
 cargo run -p zap-cli -- capability list --config zap.toml --json

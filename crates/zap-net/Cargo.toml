@@ -8,19 +8,24 @@ version.workspace = true
 
 [dependencies]
 blake3.workspace = true
-bytes.workspace = true
+bytes = { workspace = true, features = ["serde"] }
 chacha20poly1305.workspace = true
+ed25519-dalek = { workspace = true, features = ["batch", "rand_core"] }
 hex.workspace = true
 rand_core.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 snow.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 uuid.workspace = true
 zap-core = { path = "../zap-core" }
+zap-crypto = { path = "../zap-crypto" }
 
 [dev-dependencies]
 criterion.workspace = true
+tempfile.workspace = true
 
 [[bench]]
 name = "round_trip"

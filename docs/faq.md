@@ -39,9 +39,10 @@ To verify a full Ed25519 signature, ZAP needs to run complex elliptic curve math
 The `ZAP_SIGN` field is a BLAKE3 hash of the signature. ZAP checks this hint first. If the hint doesn't match the signature, the packet is rejected instantly without running the expensive Ed25519 verification.
 
 ### How does ZAP prevent Replay Attacks?
-ZAP employs two mechanisms:
+ZAP employs three mechanisms:
 1. **Clock Skew checks**: Frames must have a timestamp within a configured window (default 5 minutes). Frames outside this window are rejected.
 2. **Replay Cache**: ZAP nodes maintain an in-memory cache of recently processed frame fingerprints (BLAKE3). If a duplicate fingerprint is received, it is immediately discarded.
+3. **Durable windows**: deployments can persist transport nonces (`DurableNonceStore`) and frame fingerprints (`DurableReplayStore`) so replays cannot be replayed across process restarts. See [Security Model](security.md).
 
 ---
 
@@ -65,7 +66,7 @@ fixtures and SDK helpers.
 ## 5. Extensibility & Runtime
 
 ### Why are host capabilities denied by default in WASM?
-To enforce a zero-trust model. If a driver needs filesystem or network access, this must be explicitly requested in its manifest and approved by the operator in the node configuration. In the initial version (v1), all host imports are denied to guarantee maximum security.
+To enforce a zero-trust model. If a driver needs filesystem or network access, this must be explicitly requested in its manifest and approved by the operator in the node configuration. In ABI v1, all host imports are denied. The ABI v2 foundation exposes only scoped `zap` imports (event emission, local memory interaction, device-call requests), and those remain inert until granted by the manifest, bounded by host-call byte limits, and enabled by node config gates such as `[memory] allow_driver_write = true`. Network, filesystem, clock, and environment access are still denied as broad ambient authority.
 
 ### Where does AI or natural-language planning run?
 Outside ZAP. Models, agents, or operator tools should produce strict typed

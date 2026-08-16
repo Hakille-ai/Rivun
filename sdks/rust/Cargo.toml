@@ -17,3 +17,4 @@ zap-core = { path = "../../crates/zap-core" }
 zap-envelope = { path = "../../crates/zap-envelope" }
 zap-pact = { path = "../../crates/zap-pact" }
 zap-store = { path = "../../crates/zap-store" }
+zap-ledger = { path = "../../crates/zap-ledger" }

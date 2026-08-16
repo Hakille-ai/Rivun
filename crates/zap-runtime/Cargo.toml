@@ -8,10 +8,16 @@ version.workspace = true
 
 [dependencies]
 blake3.workspace = true
+bytes.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-wasmtime.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde", "v4"] }
+wasmtime = { workspace = true, features = ["async"] }
 zap-capability.workspace = true
+zap-driver-sdk = { path = "../zap-driver-sdk" }
 
 [dev-dependencies]
 criterion.workspace = true

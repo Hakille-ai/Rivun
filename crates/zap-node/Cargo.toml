@@ -31,6 +31,7 @@ zap-router.workspace = true
 zap-runtime = { path = "../zap-runtime" }
 zap-schema.workspace = true
 zap-store = { path = "../zap-store" }
+zap-telemetry = { path = "../zap-telemetry" }
 
 [dev-dependencies]
 criterion.workspace = true

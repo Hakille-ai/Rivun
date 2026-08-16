@@ -15,6 +15,7 @@ anyhow.workspace = true
 base64.workspace = true
 bytes.workspace = true
 clap.workspace = true
+flate2.workspace = true
 hex.workspace = true
 rand_core.workspace = true
 serde.workspace = true
@@ -27,16 +28,19 @@ zap-capability.workspace = true
 zap-core = { path = "../zap-core" }
 zap-crypto = { path = "../zap-crypto" }
 zap-envelope = { path = "../zap-envelope" }
+zap-gateway = { path = "../zap-gateway" }
 zap-ledger = { path = "../zap-ledger" }
 zap-memory.workspace = true
 zap-net = { path = "../zap-net" }
 zap-node = { path = "../zap-node" }
 zap-pact.workspace = true
+zap-pack.workspace = true
 zap-policy.workspace = true
 zap-router.workspace = true
 zap-runtime = { path = "../zap-runtime" }
 zap-schema.workspace = true
 zap-store = { path = "../zap-store" }
+zap-telemetry = { path = "../zap-telemetry" }
 toml.workspace = true
 
 [dev-dependencies]

@@ -106,6 +106,10 @@ include:
 | --- | --- | --- |
 | `zap.capability.query` | `application/zap-capability+json` | Ask a peer for advertised capabilities and grants |
 | `zap.capability.response` | `application/zap-capability+json` | Return a signed peer capability advertisement |
+| `zap.capability.announce` | `application/zap-capability+json` | Push an unsolicited signed capability advertisement |
+| `zap.discovery.announce` | `application/zap-discovery+json` | Signed service and peer advertisement |
+| `zap.discovery.query` | `application/zap-discovery+json` | Query a peer's services, peers, and learned announcements |
+| `zap.discovery.response` | `application/zap-discovery+json` | Signed discovery response with services, peers, and known announcements |
 | `zap.poa.validator_set.request` | `application/zap-poa-validator-set+json` | Request a signed versioned PoA validator set from a peer |
 | `zap.poa.validator_set.response` | `application/zap-poa-validator-set+json` | Return a signed PoA validator set or an unavailable reason |
 | `zap.pact.verify` | `application/zap-pact+json` | Exchange offline PACT verification requests or results |
@@ -117,6 +121,19 @@ include:
 | `zap.registry.bundle.manifest.response` | `application/zap-registry-bundle-manifest+json` | Return a bundle manifest or an unavailable reason |
 | `zap.receipts.request` | `application/zap-receipts+json` | Request signed receipts from a peer receipt journal |
 | `zap.receipts.response` | `application/zap-receipts+json` | Return verified signed receipts, with a truncation flag |
+| `zap.agent.intent` | `application/zap-agent+json` | Typed agent intent (see [Agent Protocol](agent-protocol.md)) |
+| `zap.agent.session` | `application/zap-agent+json` | Agent session lifecycle |
+| `zap.agent.delegation.request` | `application/zap-agent+json` | Delegate scoped work to another agent |
+| `zap.agent.delegation.response` | `application/zap-agent+json` | Accept, reject, or counter-offer a delegation |
+| `zap.agent.capability_negotiation.request` | `application/zap-agent+json` | Negotiate required and optional capabilities |
+| `zap.agent.capability_negotiation.response` | `application/zap-agent+json` | Capability negotiation outcome |
+| `zap.agent.status` | `application/zap-agent+json` | Agent progress status |
+| `zap.agent.result` | `application/zap-agent+json` | Terminal agent result |
+| `zap.agent.error` | `application/zap-agent+json` | Structured agent error |
+| `zap.swarm.intent.propose` | `application/zap-swarm+json` | Swarm consensus proposal |
+| `zap.swarm.intent.commit` | `application/zap-swarm+json` | Swarm consensus commit certificate |
+| `poa.attestation_request` | `application/zap-poa+json` | Request a PoA attestation from a validator peer |
+| `poa.attestation_response` | `application/zap-poa+json` | Signed PoA attestation response |
 
 PoA validator-set requests can include a minimum epoch. Responses are signed as
 normal frames and carry a nested signed validator-set document. Receivers should

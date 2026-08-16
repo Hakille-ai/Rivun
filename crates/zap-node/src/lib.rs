@@ -4,6 +4,10 @@
 //! Ed25519 frame verification, and WASM action dispatch.
 
 use anyhow::{Context, Result, anyhow, bail};
+pub mod actors;
+pub mod config;
+pub mod durable_replay;
+pub use config::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD_NO_PAD};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -103,6 +107,12 @@ pub struct ZapNodeConfig {
     pub message_schema: MessageSchemaConfig,
     #[serde(default)]
     pub routes: Vec<RouteRule>,
+    #[serde(default)]
+    pub swarm: SwarmConfig,
+    #[serde(default)]
+    pub gossip: GossipConfig,
+    #[serde(default)]
+    pub mesh: MeshConfig,
 }
 
 impl ZapNodeConfig {
@@ -162,6 +172,9 @@ fn resolve_config_paths(mut config: ZapNodeConfig, config_path: &Path) -> ZapNod
     }
     if let Some(path) = config.capability_cache.path.take() {
         config.capability_cache.path = Some(resolve_relative_path(base_dir, &path));
+    }
+    if let Some(path) = config.security.durable_replay_store_path.take() {
+        config.security.durable_replay_store_path = Some(resolve_relative_path(base_dir, &path));
     }
     if let Some(path) = config.discovery.announcement_cache.take() {
         config.discovery.announcement_cache = Some(resolve_relative_path(base_dir, &path));
@@ -895,12 +908,14 @@ impl From<MessagePolicyRule> for PolicyRule {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityConfig {
     #[serde(default = "default_max_clock_skew_micros")]
     pub max_clock_skew_micros: u64,
     #[serde(default = "default_replay_cache_capacity")]
     pub replay_cache_capacity: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durable_replay_store_path: Option<PathBuf>,
 }
 
 impl Default for SecurityConfig {
@@ -908,6 +923,7 @@ impl Default for SecurityConfig {
         Self {
             max_clock_skew_micros: default_max_clock_skew_micros(),
             replay_cache_capacity: default_replay_cache_capacity(),
+            durable_replay_store_path: None,
         }
     }
 }
@@ -1250,19 +1266,9 @@ impl ReceiptDurabilityState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ZapNodeMetricsSnapshot {
-    pub node_id: Uuid,
-    pub frames_sent_total: Vec<PeerCounter>,
-    pub frames_received_total: Vec<PeerCounter>,
-    pub frames_rejected_total: Vec<ReasonCounter>,
-    pub driver_execution_errors_total: Vec<ActionCounter>,
-    pub peer_trust_status: Vec<PeerTrustGauge>,
-    pub registry_signature_valid: Option<u8>,
-    pub capability_cache_age_seconds: Option<u64>,
-    pub receipt_log_verify_failures_total: u64,
-    pub poa_attestation_failures_total: u64,
-}
+pub use zap_telemetry::{
+    ActionCounter, PeerCounter, PeerTrustGauge, ReasonCounter, TransportCounter, ZapNodeMetricsSnapshot,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -1273,7 +1279,7 @@ pub enum ZapNodeHealthStatus {
 }
 
 impl ZapNodeHealthStatus {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             ZapNodeHealthStatus::Healthy => "healthy",
             ZapNodeHealthStatus::Degraded => "degraded",
@@ -1281,7 +1287,7 @@ impl ZapNodeHealthStatus {
         }
     }
 
-    fn merge(self, other: Self) -> Self {
+    pub fn merge(self, other: Self) -> Self {
         match (self, other) {
             (ZapNodeHealthStatus::Critical, _) | (_, ZapNodeHealthStatus::Critical) => {
                 ZapNodeHealthStatus::Critical
@@ -1304,7 +1310,7 @@ pub struct ZapNodeHealthCheck {
 }
 
 impl ZapNodeHealthCheck {
-    fn new(
+    pub fn new(
         name: impl Into<String>,
         status: ZapNodeHealthStatus,
         summary: impl Into<String>,
@@ -1317,7 +1323,7 @@ impl ZapNodeHealthCheck {
         }
     }
 
-    fn with_detail(mut self, detail: impl Into<String>) -> Self {
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
     }
@@ -1352,123 +1358,6 @@ impl ZapNodeHealthSnapshot {
     }
 }
 
-impl ZapNodeMetricsSnapshot {
-    pub fn to_prometheus_text(&self) -> String {
-        let mut output = String::new();
-        output.push_str("# HELP zap_frames_sent_total ZAP frames sent by peer.\n");
-        output.push_str("# TYPE zap_frames_sent_total counter\n");
-        for counter in &self.frames_sent_total {
-            output.push_str(&format!(
-                "zap_frames_sent_total{{node_id=\"{}\",peer=\"{}\"}} {}\n",
-                self.node_id, counter.peer, counter.value
-            ));
-        }
-        output.push_str("# HELP zap_frames_received_total ZAP frames received by peer.\n");
-        output.push_str("# TYPE zap_frames_received_total counter\n");
-        for counter in &self.frames_received_total {
-            output.push_str(&format!(
-                "zap_frames_received_total{{node_id=\"{}\",peer=\"{}\"}} {}\n",
-                self.node_id, counter.peer, counter.value
-            ));
-        }
-        output
-            .push_str("# HELP zap_frames_rejected_total ZAP inbound frames rejected by reason.\n");
-        output.push_str("# TYPE zap_frames_rejected_total counter\n");
-        for counter in &self.frames_rejected_total {
-            output.push_str(&format!(
-                "zap_frames_rejected_total{{node_id=\"{}\",reason=\"{}\"}} {}\n",
-                self.node_id,
-                prometheus_escape(&counter.reason),
-                counter.value
-            ));
-        }
-        output.push_str(
-            "# HELP zap_driver_execution_errors_total ZAP WASM driver execution failures.\n",
-        );
-        output.push_str("# TYPE zap_driver_execution_errors_total counter\n");
-        for counter in &self.driver_execution_errors_total {
-            output.push_str(&format!(
-                "zap_driver_execution_errors_total{{node_id=\"{}\",action=\"{}\"}} {}\n",
-                self.node_id,
-                prometheus_escape(&counter.action),
-                counter.value
-            ));
-        }
-        output
-            .push_str("# HELP zap_peer_trust_status Peer trust status gauge by peer and status.\n");
-        output.push_str("# TYPE zap_peer_trust_status gauge\n");
-        for gauge in &self.peer_trust_status {
-            output.push_str(&format!(
-                "zap_peer_trust_status{{node_id=\"{}\",peer=\"{}\",status=\"{}\"}} {}\n",
-                self.node_id,
-                gauge.peer,
-                gauge.status.as_metric_label(),
-                gauge.value
-            ));
-        }
-        if let Some(valid) = self.registry_signature_valid {
-            output.push_str(
-                "# HELP zap_registry_signature_valid Whether the local registry signature verifies.\n",
-            );
-            output.push_str("# TYPE zap_registry_signature_valid gauge\n");
-            output.push_str(&format!(
-                "zap_registry_signature_valid{{node_id=\"{}\"}} {}\n",
-                self.node_id, valid
-            ));
-        }
-        if let Some(age) = self.capability_cache_age_seconds {
-            output.push_str(
-                "# HELP zap_capability_cache_age_seconds Age of the local capability cache file.\n",
-            );
-            output.push_str("# TYPE zap_capability_cache_age_seconds gauge\n");
-            output.push_str(&format!(
-                "zap_capability_cache_age_seconds{{node_id=\"{}\"}} {}\n",
-                self.node_id, age
-            ));
-        }
-        output.push_str(
-            "# HELP zap_receipt_log_verify_failures_total Receipt log verification failures.\n",
-        );
-        output.push_str("# TYPE zap_receipt_log_verify_failures_total counter\n");
-        output.push_str(&format!(
-            "zap_receipt_log_verify_failures_total{{node_id=\"{}\"}} {}\n",
-            self.node_id, self.receipt_log_verify_failures_total
-        ));
-        output.push_str("# HELP zap_poa_attestation_failures_total Proof-of-Action validation or attestation failures.\n");
-        output.push_str("# TYPE zap_poa_attestation_failures_total counter\n");
-        output.push_str(&format!(
-            "zap_poa_attestation_failures_total{{node_id=\"{}\"}} {}\n",
-            self.node_id, self.poa_attestation_failures_total
-        ));
-        output
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PeerCounter {
-    pub peer: Uuid,
-    pub value: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReasonCounter {
-    pub reason: String,
-    pub value: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ActionCounter {
-    pub action: String,
-    pub value: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PeerTrustGauge {
-    pub peer: Uuid,
-    pub status: PeerTrustStatus,
-    pub value: u8,
-}
-
 impl PeerTrustStatus {
     fn as_metric_label(self) -> &'static str {
         match self {
@@ -1479,17 +1368,6 @@ impl PeerTrustStatus {
     }
 }
 
-fn prometheus_escape(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(|ch| match ch {
-            '\\' => "\\\\".chars().collect::<Vec<_>>(),
-            '"' => "\\\"".chars().collect::<Vec<_>>(),
-            '\n' => "\\n".chars().collect::<Vec<_>>(),
-            _ => vec![ch],
-        })
-        .collect()
-}
 
 fn health_text_escape(value: &str) -> String {
     value
@@ -1641,6 +1519,16 @@ struct NodeMetricsCounters {
     driver_execution_errors_by_action: BTreeMap<String, u64>,
     receipt_log_verify_failures_total: u64,
     poa_attestation_failures_total: u64,
+    replay_rejections_total: u64,
+    replay_drops_total: u64,
+    journal_segment_rotations_total: u64,
+    segment_manifest_errors_total: u64,
+    pack_verification_failures_total: u64,
+    store_verifications_total: u64,
+    agent_gateway_requests_total: BTreeMap<(String, String), u64>,
+    agent_sessions_active: i64,
+    provenance_verification_failures_total: u64,
+    peers_active: u64,
 }
 
 #[derive(Debug)]
@@ -1743,6 +1631,16 @@ impl ZapNode {
         let receipt_fsync = config.receipts.fsync;
         let receipt_fsync_interval_writes = config.receipts.fsync_interval_writes();
         let endpoint = ZapEndpoint::bind(endpoint_config).await?;
+        let replay_guard = if let Some(path) = &config.security.durable_replay_store_path {
+            let store = durable_replay::DurableReplayStore::open(
+                path,
+                config.security.replay_cache_capacity,
+                config.security.max_clock_skew_micros,
+            )?;
+            ReplayGuard::with_durable_store(config.security.replay_cache_capacity, store)
+        } else {
+            ReplayGuard::new(config.security.replay_cache_capacity)
+        };
 
         Ok(Self {
             endpoint,
@@ -1753,7 +1651,7 @@ impl ZapNode {
             runtime,
             limits: config.runtime.to_limits(),
             require_signed: config.require_signed,
-            replay_guard: Mutex::new(ReplayGuard::new(config.security.replay_cache_capacity)),
+            replay_guard: Mutex::new(replay_guard),
             security: config.security,
             poa_validators: poa_verifier.validators,
             poa_required_threshold: poa_verifier.required_threshold,
@@ -1991,6 +1889,24 @@ impl ZapNode {
             capability_cache_age_seconds: self.capability_cache_age_seconds(),
             receipt_log_verify_failures_total: counters.receipt_log_verify_failures_total,
             poa_attestation_failures_total: counters.poa_attestation_failures_total,
+            replay_rejections_total: counters.replay_rejections_total,
+            replay_drops_total: counters.replay_drops_total,
+            journal_segment_rotations_total: counters.journal_segment_rotations_total,
+            segment_manifest_errors_total: counters.segment_manifest_errors_total,
+            pack_verification_failures_total: counters.pack_verification_failures_total,
+            store_verifications_total: counters.store_verifications_total,
+            agent_gateway_requests_total: counters
+                .agent_gateway_requests_total
+                .iter()
+                .map(|((t, s), value)| TransportCounter {
+                    transport: t.clone(),
+                    status: s.clone(),
+                    value: *value,
+                })
+                .collect(),
+            agent_sessions_active: counters.agent_sessions_active,
+            provenance_verification_failures_total: counters.provenance_verification_failures_total,
+            peers_active: counters.peers_active,
         }
     }
 
@@ -2296,19 +2212,19 @@ impl ZapNode {
         )
     }
 
-    fn record_sent_frame(&self, peer: Uuid) {
+    pub fn record_sent_frame(&self, peer: Uuid) {
         if let Ok(mut counters) = self.metrics.lock() {
             *counters.frames_sent_by_peer.entry(peer).or_default() += 1;
         }
     }
 
-    fn record_received_frame(&self, peer: Uuid) {
+    pub fn record_received_frame(&self, peer: Uuid) {
         if let Ok(mut counters) = self.metrics.lock() {
             *counters.frames_received_by_peer.entry(peer).or_default() += 1;
         }
     }
 
-    fn record_rejected_frame(&self, reason: &'static str) {
+    pub fn record_rejected_frame(&self, reason: &'static str) {
         if let Ok(mut counters) = self.metrics.lock() {
             *counters
                 .frames_rejected_by_reason
@@ -2317,7 +2233,7 @@ impl ZapNode {
         }
     }
 
-    fn record_driver_execution_error(&self, action: &str) {
+    pub fn record_driver_execution_error(&self, action: &str) {
         if let Ok(mut counters) = self.metrics.lock() {
             *counters
                 .driver_execution_errors_by_action
@@ -2326,15 +2242,85 @@ impl ZapNode {
         }
     }
 
-    fn record_receipt_log_verify_failure(&self) {
+    pub fn record_receipt_log_verify_failure(&self) {
         if let Ok(mut counters) = self.metrics.lock() {
             counters.receipt_log_verify_failures_total += 1;
         }
     }
 
-    fn record_poa_attestation_failure(&self) {
+    pub fn record_poa_attestation_failure(&self) {
         if let Ok(mut counters) = self.metrics.lock() {
             counters.poa_attestation_failures_total += 1;
+        }
+    }
+
+    pub fn record_replay_drop(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.replay_drops_total += 1;
+            counters.replay_rejections_total += 1;
+        }
+    }
+
+    pub fn record_replay_rejection(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.replay_rejections_total += 1;
+        }
+    }
+
+    pub fn record_segment_rotation(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.journal_segment_rotations_total += 1;
+        }
+    }
+
+    pub fn record_segment_manifest_error(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.segment_manifest_errors_total += 1;
+        }
+    }
+
+    pub fn record_pack_verification_failure(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.pack_verification_failures_total += 1;
+        }
+    }
+
+    pub fn record_store_verification(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.store_verifications_total += 1;
+        }
+    }
+
+    pub fn record_agent_gateway_request(&self, transport: &str, status: &str) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            *counters
+                .agent_gateway_requests_total
+                .entry((transport.to_string(), status.to_string()))
+                .or_default() += 1;
+        }
+    }
+
+    pub fn inc_agent_session(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.agent_sessions_active += 1;
+        }
+    }
+
+    pub fn dec_agent_session(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.agent_sessions_active = (counters.agent_sessions_active - 1).max(0);
+        }
+    }
+
+    pub fn record_provenance_verification_failure(&self) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.provenance_verification_failures_total += 1;
+        }
+    }
+
+    pub fn set_peers_active(&self, count: usize) {
+        if let Ok(mut counters) = self.metrics.lock() {
+            counters.peers_active = count as u64;
         }
     }
 
@@ -2348,12 +2334,12 @@ impl ZapNode {
             ] {
                 gauges.push(PeerTrustGauge {
                     peer: *peer,
-                    status,
-                    value: u8::from(trust.status == status),
+                    status: status.as_metric_label().to_string(),
+                    value: u64::from(trust.status == status),
                 });
             }
         }
-        gauges.sort_by_key(|gauge| (gauge.peer, gauge.status.as_metric_label()));
+        gauges.sort_by_key(|gauge| (gauge.peer, gauge.status.clone()));
         gauges
     }
 
@@ -4429,6 +4415,7 @@ fn merge_permissions(a: DriverPermissions, b: DriverPermissions) -> DriverPermis
 #[derive(Debug)]
 struct ReplayGuard {
     capacity: usize,
+    durable_store: Option<durable_replay::DurableReplayStore>,
     seen: HashSet<[u8; 16]>,
     order: VecDeque<[u8; 16]>,
 }
@@ -4437,6 +4424,16 @@ impl ReplayGuard {
     fn new(capacity: usize) -> Self {
         Self {
             capacity,
+            durable_store: None,
+            seen: HashSet::with_capacity(capacity.min(4096)),
+            order: VecDeque::with_capacity(capacity.min(4096)),
+        }
+    }
+
+    fn with_durable_store(capacity: usize, durable_store: durable_replay::DurableReplayStore) -> Self {
+        Self {
+            capacity,
+            durable_store: Some(durable_store),
             seen: HashSet::with_capacity(capacity.min(4096)),
             order: VecDeque::with_capacity(capacity.min(4096)),
         }
@@ -4447,21 +4444,25 @@ impl ReplayGuard {
             return Ok(());
         }
 
-        let fingerprint = frame_fingerprint(frame);
-        if self.seen.contains(&fingerprint) {
-            bail!(
-                "replayed frame rejected: source_node={}, timestamp_micros={}, signature_hint={}",
-                frame.header.source_node,
-                frame.header.timestamp_micros,
-                hex_hint(frame.header.zap_sign)
-            );
-        }
+        if let Some(durable) = &mut self.durable_store {
+            durable.check_and_insert(frame, now_micros()?)?;
+        } else {
+            let fingerprint = frame_fingerprint(frame);
+            if self.seen.contains(&fingerprint) {
+                bail!(
+                    "replayed frame rejected: source_node={}, timestamp_micros={}, signature_hint={}",
+                    frame.header.source_node,
+                    frame.header.timestamp_micros,
+                    hex_hint(frame.header.zap_sign)
+                );
+            }
 
-        self.seen.insert(fingerprint);
-        self.order.push_back(fingerprint);
-        while self.order.len() > self.capacity {
-            if let Some(expired) = self.order.pop_front() {
-                self.seen.remove(&expired);
+            self.seen.insert(fingerprint);
+            self.order.push_back(fingerprint);
+            while self.order.len() > self.capacity {
+                if let Some(expired) = self.order.pop_front() {
+                    self.seen.remove(&expired);
+                }
             }
         }
         Ok(())
@@ -5999,7 +6000,7 @@ fsync = "always"
                 .peer_trust_status
                 .iter()
                 .any(|gauge| gauge.peer == harness.sender_key.node_id()
-                    && gauge.status == PeerTrustStatus::Trusted
+                    && gauge.status == "trusted"
                     && gauge.value == 1)
         );
 
@@ -6013,6 +6014,7 @@ fsync = "always"
         let harness = node_harness(SecurityConfig {
             max_clock_skew_micros: 1_000,
             replay_cache_capacity: 4096,
+            durable_replay_store_path: None,
         })
         .await;
         let signed = signed_echo_frame(&harness, 1);
@@ -7208,6 +7210,7 @@ required_json_fields = ["message"]
         let harness = node_harness(SecurityConfig {
             max_clock_skew_micros: 1_000,
             replay_cache_capacity: 4096,
+            durable_replay_store_path: None,
         })
         .await;
         let signed = signed_echo_frame(&harness, 1);
@@ -7226,6 +7229,7 @@ required_json_fields = ["message"]
         let harness = node_harness(SecurityConfig {
             max_clock_skew_micros: 1_000,
             replay_cache_capacity: 4096,
+            durable_replay_store_path: None,
         })
         .await;
         let signed = signed_echo_frame(&harness, now_micros().unwrap() + 10_000_000);

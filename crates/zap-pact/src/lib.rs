@@ -22,6 +22,9 @@ pub const PACT_SIGNATURE_DOMAIN: &[u8] = b"ZAP-PACT-v1";
 pub const PACT_REVOCATION_SIGNATURE_DOMAIN: &[u8] = b"ZAP-PACT-REVOCATION-v1";
 pub const PACT_HASH_PREFIX: &str = "blake3:";
 
+pub mod dispute;
+pub use dispute::*;
+
 const ED25519_SIGNATURE_LEN: usize = 64;
 const ED25519_PUBLIC_KEY_LEN: usize = 32;
 const MAX_TEXT_BYTES: usize = 16 * 1024;
@@ -30,6 +33,8 @@ pub type Result<T> = std::result::Result<T, ZapPactError>;
 
 #[derive(Debug, Error)]
 pub enum ZapPactError {
+    #[error("dispute error: {0}")]
+    Dispute(#[from] DisputeError),
     #[error("{entity} schema version {version} is unsupported")]
     UnsupportedSchemaVersion { entity: &'static str, version: u8 },
     #[error("{entity} field `{field}` must not be empty")]

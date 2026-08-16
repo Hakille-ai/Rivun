@@ -12,6 +12,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -243,6 +249,9 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cast"
@@ -785,6 +794,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
+name = "flate2"
+version = "1.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1108,6 +1127,16 @@ dependencies = [
  "keccak",
  "rand_core 0.6.4",
  "zeroize",
+]
+
+[[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+dependencies = [
+ "adler2",
+ "simd-adler32",
 ]
 
 [[package]]
@@ -1636,6 +1665,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "simd-adler32"
+version = "0.3.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1789,6 +1824,7 @@ version = "1.52.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fc7f01b389ac15039e4dc9531aa973a135d7a4135281b12d7c1bc79fd57fffe"
 dependencies = [
+ "bytes",
  "libc",
  "mio",
  "pin-project-lite",
@@ -2189,6 +2225,7 @@ dependencies = [
  "target-lexicon",
  "wasmparser 0.248.0",
  "wasmtime-environ",
+ "wasmtime-internal-component-macro",
  "wasmtime-internal-core",
  "wasmtime-internal-cranelift",
  "wasmtime-internal-fiber",
@@ -2228,6 +2265,27 @@ dependencies = [
  "wasmprinter",
  "wasmtime-internal-core",
 ]
+
+[[package]]
+name = "wasmtime-internal-component-macro"
+version = "45.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab1cc8df1940657960571d7bc9bc0eadf869c0eb95cff831a6554409f89b25b0"
+dependencies = [
+ "anyhow",
+ "proc-macro2",
+ "quote",
+ "syn",
+ "wasmtime-internal-component-util",
+ "wasmtime-internal-wit-bindgen",
+ "wit-parser 0.248.0",
+]
+
+[[package]]
+name = "wasmtime-internal-component-util"
+version = "45.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f73ccd2e0e6bd91fb0161a17ee5e2d7badbeba6eb7461d0e0e3991492bd3835d"
 
 [[package]]
 name = "wasmtime-internal-core"
@@ -2326,6 +2384,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "wasmtime-internal-wit-bindgen"
+version = "45.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "708b3d8cfaad2d33a92ec4ed93d69e9836c04f7eb5b8dfe1dde9df47c41f20b7"
+dependencies = [
+ "anyhow",
+ "bitflags",
+ "heck",
+ "indexmap",
+ "wit-parser 0.248.0",
 ]
 
 [[package]]
@@ -2492,7 +2563,7 @@ checksum = "ea61de684c3ea68cb082b7a88508a8b27fcc8b797d738bfc99a82facf1d752dc"
 dependencies = [
  "anyhow",
  "heck",
- "wit-parser",
+ "wit-parser 0.244.0",
 ]
 
 [[package]]
@@ -2542,7 +2613,7 @@ dependencies = [
  "wasm-encoder 0.244.0",
  "wasm-metadata",
  "wasmparser 0.244.0",
- "wit-parser",
+ "wit-parser 0.244.0",
 ]
 
 [[package]]
@@ -2564,6 +2635,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "wit-parser"
+version = "0.248.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "247ad505da2915a082fe13204c5ba8788425aea1de54f43b284818cf82637856"
+dependencies = [
+ "anyhow",
+ "hashbrown 0.17.1",
+ "id-arena",
+ "indexmap",
+ "log",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "unicode-xid",
+ "wasmparser 0.248.0",
+]
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
 dependencies = [
@@ -2577,11 +2667,17 @@ dependencies = [
 name = "zap-agent"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
  "uuid",
  "zap-capability",
+ "zap-core",
+ "zap-crypto",
 ]
 
 [[package]]
@@ -2605,6 +2701,7 @@ dependencies = [
  "base64",
  "bytes",
  "clap",
+ "flate2",
  "hex",
  "rand_core 0.6.4",
  "serde",
@@ -2619,16 +2716,19 @@ dependencies = [
  "zap-core",
  "zap-crypto",
  "zap-envelope",
+ "zap-gateway",
  "zap-ledger",
  "zap-memory",
  "zap-net",
  "zap-node",
+ "zap-pack",
  "zap-pact",
  "zap-policy",
  "zap-router",
  "zap-runtime",
  "zap-schema",
  "zap-store",
+ "zap-telemetry",
 ]
 
 [[package]]
@@ -2666,7 +2766,55 @@ dependencies = [
 name = "zap-driver-sdk"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
+ "blake3",
+ "bytes",
  "criterion",
+ "hex",
+ "serde",
+ "thiserror",
+ "tokio",
+ "zap-capability",
+]
+
+[[package]]
+name = "zap-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "blake3",
+ "bytes",
+ "ed25519-dalek",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "toml",
+ "uuid",
+ "wat",
+ "zap-agent",
+ "zap-capability",
+ "zap-core",
+ "zap-crypto",
+ "zap-driver-sdk",
+ "zap-envelope",
+ "zap-gateway",
+ "zap-journal",
+ "zap-ledger",
+ "zap-memory",
+ "zap-net",
+ "zap-node",
+ "zap-ops",
+ "zap-pact",
+ "zap-policy",
+ "zap-router",
+ "zap-runtime",
+ "zap-schema",
+ "zap-store",
+ "zap-telemetry",
 ]
 
 [[package]]
@@ -2704,6 +2852,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "zap-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "ed25519-dalek",
+ "hex",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+ "zap-agent",
+ "zap-capability",
+ "zap-core",
+ "zap-crypto",
+ "zap-envelope",
+ "zap-journal",
+ "zap-ledger",
+ "zap-memory",
+ "zap-node",
+ "zap-pack",
+ "zap-pact",
+ "zap-policy",
+ "zap-router",
+ "zap-runtime",
+ "zap-schema",
+ "zap-store",
+ "zap-telemetry",
+]
+
+[[package]]
 name = "zap-journal"
 version = "0.1.0"
 dependencies = [
@@ -2725,6 +2911,7 @@ dependencies = [
  "bytes",
  "criterion",
  "ed25519-dalek",
+ "hex",
  "rayon",
  "serde",
  "serde_json",
@@ -2770,14 +2957,19 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "criterion",
+ "ed25519-dalek",
  "hex",
  "rand_core 0.6.4",
  "serde",
+ "serde_json",
  "snow",
+ "tempfile",
  "thiserror",
  "tokio",
+ "tracing",
  "uuid",
  "zap-core",
+ "zap-crypto",
 ]
 
 [[package]]
@@ -2810,6 +3002,7 @@ dependencies = [
  "zap-runtime",
  "zap-schema",
  "zap-store",
+ "zap-telemetry",
 ]
 
 [[package]]
@@ -2824,6 +3017,24 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "zap-pack"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "uuid",
+ "zap-capability",
+ "zap-crypto",
+ "zap-policy",
+ "zap-router",
+ "zap-store",
 ]
 
 [[package]]
@@ -2868,12 +3079,18 @@ name = "zap-runtime"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "bytes",
  "criterion",
  "serde",
+ "serde_json",
  "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
  "wasmtime",
  "wat",
  "zap-capability",
+ "zap-driver-sdk",
 ]
 
 [[package]]
@@ -2896,13 +3113,42 @@ dependencies = [
  "blake3",
  "criterion",
  "ed25519-dalek",
+ "hex",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
  "toml",
  "uuid",
  "zap-capability",
  "zap-crypto",
+ "zap-policy",
+ "zap-router",
+]
+
+[[package]]
+name = "zap-telemetry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "flate2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+ "zap-core",
+ "zap-crypto",
+ "zap-journal",
+ "zap-ledger",
+ "zap-net",
+ "zap-pact",
+ "zap-store",
 ]
 
 [[package]]

@@ -14,18 +14,28 @@ import (
 )
 
 const (
-	RegistryIndexSyncSchemaVersion   = 1
-	RegistryBundleSchemaVersion      = 1
-	RegistryInstallPlanSchemaVersion = 1
-	DriverABIVersion                 = 1
-	DriverHashPrefix                 = "blake3:"
-	PactSchemaVersion                = 1
-	PactContentType                  = "application/zap-pact+json"
-	PactRecordSubject                = "zap.pact.record"
-	PactVerifySubject                = "zap.pact.verify"
-	PactRevokeSubject                = "zap.pact.revoke"
-	PactBundleSubject                = "zap.pact.bundle"
-	PactSignatureDomain              = "ZAP-PACT-v1"
+	RegistryIndexSyncSchemaVersion    = 1
+	RegistryBundleSchemaVersion       = 1
+	RegistryInstallPlanSchemaVersion  = 1
+	DriverABIVersion                  = 1
+	DriverHashPrefix                  = "blake3:"
+	ReceiptSchemaVersion              = 1
+	ReceiptReplicationSchemaVersion   = 1
+	ReceiptReplicationContentType     = "application/zap-receipts+json"
+	ReceiptReplicationRequestSubject  = "zap.receipts.request"
+	ReceiptReplicationResponseSubject = "zap.receipts.response"
+	ReceiptSignatureDomain            = "ZAP-ACTION-RECEIPT-v1"
+	AgentContentType                  = "application/zap-agent+json"
+	AgentIntentSubject                = "zap.agent.intent"
+	AgentStatusSubject                = "zap.agent.status"
+	AgentResultSubject                = "zap.agent.result"
+	PactSchemaVersion                 = 1
+	PactContentType                   = "application/zap-pact+json"
+	PactRecordSubject                 = "zap.pact.record"
+	PactVerifySubject                 = "zap.pact.verify"
+	PactRevokeSubject                 = "zap.pact.revoke"
+	PactBundleSubject                 = "zap.pact.bundle"
+	PactSignatureDomain               = "ZAP-PACT-v1"
 )
 
 var artifactHashPattern = regexp.MustCompile(`^blake3:[0-9a-f]{64}$`)
@@ -204,9 +214,115 @@ type RegistryInstallPlan struct {
 	Signature              string                     `json:"signature"`
 }
 
+type ReceiptSample struct {
+	SchemaVersion        uint8          `json:"schema_version"`
+	ReceiptID            UUID           `json:"receipt_id"`
+	NodeID               UUID           `json:"node_id"`
+	FrameID              UUID           `json:"frame_id"`
+	Subject              string         `json:"subject"`
+	ContentType          string         `json:"content_type"`
+	BodyHash             string         `json:"body_hash"`
+	PolicyDecision       string         `json:"policy_decision"`
+	Outcome              string         `json:"outcome"`
+	StartedAtUnixMicros  uint64         `json:"started_at_unix_micros"`
+	FinishedAtUnixMicros uint64         `json:"finished_at_unix_micros"`
+	Metadata             map[string]any `json:"metadata,omitempty"`
+	SignerPublicKey      string         `json:"signer_public_key"`
+	Signature            string         `json:"signature"`
+}
+
+type ReceiptReplicationResponseBody struct {
+	SchemaVersion uint8           `json:"schema_version"`
+	RequestID     UUID            `json:"request_id"`
+	Truncated     bool            `json:"truncated"`
+	Receipts      []ReceiptSample `json:"receipts"`
+}
+
+type receiptSigningPayload struct {
+	Receipt         any    `json:"receipt"`
+	SignerNodeID    string `json:"signer_node_id"`
+	SignerPublicKey string `json:"signer_public_key"`
+}
+
 type SignatureVerificationStatus struct {
 	Supported bool   `json:"supported"`
 	Reason    string `json:"reason"`
+}
+
+func ReceiptBodyHash(body []byte) (string, error) {
+	return ArtifactHash(body)
+}
+
+func ReceiptSigningMessage(receipt any) ([]byte, error) {
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return nil, err
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return nil, err
+	}
+	signerPublicKey, _ := data["signer_public_key"].(string)
+	if signerPublicKey == "" {
+		return nil, errors.New("receipt signer_public_key is required")
+	}
+	signerNodeID, _ := data["signer_node_id"].(string)
+	if signerNodeID == "" {
+		signerNodeID, _ = data["node_id"].(string)
+	}
+	if signerNodeID == "" {
+		return nil, errors.New("receipt signer_node_id or node_id is required")
+	}
+	unsignedReceipt := map[string]any{}
+	for k, v := range data {
+		if k != "signature" && k != "signer_public_key" {
+			unsignedReceipt[k] = v
+		}
+	}
+	payload := receiptSigningPayload{
+		Receipt:         unsignedReceipt,
+		SignerNodeID:    signerNodeID,
+		SignerPublicKey: signerPublicKey,
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	output := make([]byte, 0, len(ReceiptSignatureDomain)+len(encoded))
+	output = append(output, []byte(ReceiptSignatureDomain)...)
+	output = append(output, encoded...)
+	return output, nil
+}
+
+func ValidateReceiptShape(receipt ReceiptSample) error {
+	if receipt.SchemaVersion != ReceiptSchemaVersion {
+		return fmt.Errorf("unsupported receipt schema version %d", receipt.SchemaVersion)
+	}
+	if receipt.ReceiptID == (UUID{}) || receipt.NodeID == (UUID{}) || receipt.FrameID == (UUID{}) {
+		return errors.New("receipt ids must not be nil")
+	}
+	if !ValidateArtifactHash(receipt.BodyHash) {
+		return fmt.Errorf("invalid receipt body hash %q", receipt.BodyHash)
+	}
+	if receipt.FinishedAtUnixMicros < receipt.StartedAtUnixMicros {
+		return errors.New("receipt finished_at_unix_micros is before started_at_unix_micros")
+	}
+	return nil
+}
+
+func ValidateReceiptResponseShape(response ReceiptReplicationResponseBody) error {
+	if response.SchemaVersion != ReceiptReplicationSchemaVersion {
+		return fmt.Errorf("unsupported receipt replication schema version %d", response.SchemaVersion)
+	}
+	if response.RequestID == (UUID{}) {
+		return errors.New("request_id must not be nil")
+	}
+	for _, receipt := range response.Receipts {
+		if err := ValidateReceiptShape(receipt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type ZapStoreClient struct{}

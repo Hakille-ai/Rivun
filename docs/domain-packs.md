@@ -37,7 +37,8 @@ directories are added when the pack includes concrete executable artifacts.
 
 ## CLI Workflows
 
-Preview packs can already be checked locally with the CLI.
+Packs can be validated, inspected, listed, built into signed bundles, and
+installed locally with the CLI.
 
 Validate a pack:
 
@@ -49,6 +50,12 @@ Inspect a pack summary:
 
 ```powershell
 cargo run -p zap-cli -- pack inspect --pack examples/domain-packs/cloud-ops --json
+```
+
+List every pack under a root directory:
+
+```powershell
+cargo run -p zap-cli -- pack list --root examples/domain-packs --json
 ```
 
 `pack validate` checks that:
@@ -99,10 +106,13 @@ path = "policies/action-policy.toml"
 description = "Baseline fail-closed policy for pack actions."
 ```
 
-Future signed manifests should also include author identity, operator approval,
-bundle hashes, revocation metadata, and install-plan bindings. Until that is
-implemented, pack manifests are documentation and planning artifacts, not a
-node-enforced trust source.
+A `pack.toml` can be turned into a signed, verifiable artifact through the
+build/sign/verify/install workflow: `zap pack build` produces a `.zpack`
+bundle whose manifest and artifact digests are signed by the pack author's
+Ed25519 key, and `zap pack install` only copies bundles whose signature
+verifies against a trusted key. Signed packs are the trust source for pack
+installation; a directory-level `pack.toml` remains documentation and
+planning metadata until it is built and signed.
 
 ## Risk Levels
 
@@ -146,7 +156,16 @@ pr.create
 
 ## Pack Lifecycle
 
-Preview lifecycle:
+Supported lifecycle — enabled by `zap-pack` and `zap-store`:
+
+1. **Create** — `zap pack init --dir <dir> --id zap-pack-example --name "Example"` scaffolds a pack directory (templates: `default`, `minimal`, `full`).
+2. **Build** — `zap pack build --pack <dir> --out <name>.zpack` compiles the directory into a single `.zpack` archive bundle with a manifest and artifact digests.
+3. **Sign** — `zap pack sign --bundle <name>.zpack --key <author.key>` attaches an Ed25519 signature (`.zpack.sig` serves as a detached signature file).
+4. **Verify** — `zap pack verify --bundle <name>.zpack --signature <name>.zpack.sig --public-key <key>` checks the bundle signature, manifest integrity, and policy/route rules offline (`--no-policy-check` to skip static validation).
+5. **Install** — `zap pack install --bundle <name>.zpack --store-dir <store> --trusted-key <key>` verifies the bundle and signatures, resolves dependencies, and copies artifacts into a pack store directory (`--force` to overwrite an installed version).
+6. **Audit** — `zap pack audit --pack <dir|bundle> --max-risk <level>` emits a security report over capability grants, permissions, and route policies (`low`/`medium`/`high`/`critical` risk vocabulary).
+
+Preview lifecycle (before packaging math exists for a domain):
 
 1. create the pack directory and manifest;
 2. define capability ids and risk levels;
@@ -156,14 +175,9 @@ Preview lifecycle:
 6. add tests and expected receipts;
 7. promote from `preview` to `beta` once an end-to-end example passes.
 
-Future lifecycle:
-
-1. `zap pack build`;
-2. `zap pack sign`;
-3. `zap pack publish`;
-4. `zap pack install`;
-5. `zap pack audit`;
-6. `zap pack revoke`.
+Publication, discovery, and revocation of packs across nodes builds on the
+ZapStore registry/bundle machinery (`registry publication create`,
+`registry bundle export/verify/import`); see [ZapStore](zapstore.md).
 
 ## First Official Packs
 
@@ -185,8 +199,9 @@ Recommended next packs:
 - `zap-pack-data-platform`: pipelines, data quality, access grants, and
   lineage receipts.
 
-These packs should start as docs and examples, then become signed ZapStore
-artifacts once pack installation exists.
+These packs should start as docs and examples, then become signed `.zpack`
+bundles (see [Pack Lifecycle](#pack-lifecycle)) once CI validates their
+build/sign/verify workflow.
 
 ## CI Expectations
 

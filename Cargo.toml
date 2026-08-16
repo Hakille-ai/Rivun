@@ -7,6 +7,7 @@ members = [
     "crates/zap-crypto",
     "crates/zap-driver-sdk",
     "crates/zap-envelope",
+    "crates/zap-gateway",
     "crates/zap-journal",
     "crates/zap-ledger",
     "crates/zap-machine",
@@ -15,12 +16,15 @@ members = [
     "crates/zap-node",
     "crates/zap-ops",
     "crates/zap-pact",
+    "crates/zap-pack",
     "crates/zap-policy",
     "crates/zap-router",
     "crates/zap-runtime",
     "crates/zap-schema",
     "crates/zap-store",
+    "crates/zap-telemetry",
     "examples",
+    "tests/e2e",
     "tools/xtask",
 ]
 resolver = "3"
@@ -36,11 +40,12 @@ anyhow = "1"
 base64 = "0.22"
 bitflags = "2"
 blake3 = "1"
-bytes = "1"
+bytes = { version = "1", features = ["serde"] }
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 criterion = { version = "0.7", features = ["async_tokio"] }
 ed25519-dalek = { version = "2", features = ["batch", "rand_core"] }
+flate2 = "1.0"
 hex = "0.4"
 proptest = "1"
 rand_core = { version = "0.6", features = ["getrandom"] }
@@ -56,17 +61,20 @@ toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
-wasmtime = { version = "45.0.1", default-features = false, features = ["cranelift", "runtime", "std", "wat"] }
+wasmtime = { version = "45.0.1", default-features = false, features = ["async", "cranelift", "runtime", "std", "wat"] }
 wat = "1"
 zap-agent = { path = "crates/zap-agent" }
 zap-capability = { path = "crates/zap-capability" }
+zap-gateway = { path = "crates/zap-gateway" }
 zap-journal = { path = "crates/zap-journal" }
 zap-memory = { path = "crates/zap-memory" }
 zap-ops = { path = "crates/zap-ops" }
 zap-pact = { path = "crates/zap-pact" }
+zap-pack = { path = "crates/zap-pack" }
 zap-policy = { path = "crates/zap-policy" }
 zap-router = { path = "crates/zap-router" }
 zap-schema = { path = "crates/zap-schema" }
+zap-telemetry = { path = "crates/zap-telemetry" }
 
 [profile.release]
 codegen-units = 1

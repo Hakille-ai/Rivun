@@ -1,201 +1,125 @@
-<p align="center">
-  <strong>⚡ ZAP</strong><br>
-  <em>Universal Low-Latency Protocol for Typed Message Dispatch</em>
-</p>
+# ZAP
 
-<p align="center">
-  <a href="https://github.com/Hakille-ai/ZAP/actions"><img src="https://img.shields.io/github/actions/workflow/status/Hakille-ai/ZAP/ci.yml?branch=main&label=CI&style=flat-square" alt="CI"></a>
-  <a href="https://github.com/Hakille-ai/ZAP/actions/workflows/perf.yml"><img src="https://img.shields.io/github/actions/workflow/status/Hakille-ai/ZAP/perf.yml?branch=main&label=Bench&style=flat-square" alt="Bench"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square" alt="License"></a>
-  <img src="https://img.shields.io/badge/Rust-1.93+-orange?style=flat-square&logo=rust" alt="Rust 1.93+">
-  <img src="https://img.shields.io/badge/Status-Pre--1.0_Alpha-yellow?style=flat-square" alt="Status">
-</p>
+**Universal low-latency protocol for typed message dispatch, signed by default.**
 
----
+ZAP is a compact, signed, encrypted, low-latency messaging protocol implemented
+in Rust. It moves **typed messages** between nodes — data, events, commands,
+queries, responses, stream chunks, actions, and control messages — through a
+unified wire format with end-to-end cryptographic provenance.
 
-ZAP is a compact, signed, encrypted, low-latency protocol implemented in Rust
-for moving **typed messages** between nodes. While actions are a primary use
-case, ZAP is not limited to action dispatch — it carries data, events, commands,
-queries, responses, stream chunks, actions, and control messages through a
-unified wire format.
+ZAP is a protocol, not a runtime: it is agnostic to AI models, application
+frameworks, and hardware. It is used wherever messages must be verifiable,
+auditable, and safe to dispatch — from factory safety systems to agent
+gateways.
 
-## Use ZAP When
+**Status:** pre-1.0, under active development. Interfaces can evolve; see
+[Versioning](docs/versioning.md) before depending on public APIs.
+
+## Highlights
+
+- **Signed wire format.** Every frame carries an Ed25519 signature verified by
+  the receiver. Identity is a deterministic function of the node public key.
+- **Authenticated encrypted transport.** ChaCha20-Poly1305 datagrams over UDP
+  with per-endpoint nonce prefixes, replay protection, and an optional
+  restart-persistent nonce window.
+- **Proof-of-Action.** Consensus-protected frames require a threshold of
+  validator attestations before dispatch. A two-phase BFT consensus engine
+  (proposal → pre-vote → pre-commit → certificate) is available for swarm
+  coordination.
+- **WASM sandboxing.** Untrusted drivers run inside Wasmtime with fuel, memory,
+  time, output, and host-call bounds.
+- **Auditable by design.** Append-only binary journals, signed action receipts,
+  MMR accumulators, and ZK rollup commitments make execution history verifiable
+  offline.
+- **Multiple transports & integration surfaces.** Native HTTP, SSE, and
+  WebSocket servers with a Model Context Protocol (MCP) gateway for agent
+  integrations.
+- **Multi-agent protocol.** Typed intents, sessions, delegation, capability
+  negotiation, status/result contracts, and a cryptographic provenance chain
+  across execution stages.
+- **SDKs in 4 languages.** Rust, Go, TypeScript, and Python share the same
+  protocol fixtures and canonical hashing rules.
+
+## When to use ZAP
 
 - You need typed messages with cryptographic provenance between nodes.
-- Actions must be checked by deterministic policy before execution.
-- High-risk operations need Proof-of-Action, human approval, simulation, or
-  explicit grants.
-- Untrusted extensions should run in a resource-bounded WASM sandbox.
+- Actions must pass deterministic policy before execution.
+- High-risk operations need Proof-of-Action, simulation, explicit grants, or
+  multi-party approval.
+- Untrusted extensions must run in a resource-bounded sandbox.
 - Operators need signed receipts, replay protection, and audit evidence.
-- SDKs and gateways must agree on stable protocol fixtures across languages.
+- Gateways and SDKs must agree on stable protocol fixtures across languages.
 
-## Do Not Use ZAP When
+## When not to use ZAP
 
-- You only need a generic message broker, queue, or RPC framework.
-- Natural-language planning should decide authority inside the protocol.
+- You only need a generic message broker, queue, or RPC framework (use MQTT,
+  NATS, or gRPC).
 - You need a database, hidden model memory store, financial ledger, or payment
-  rail.
+  rail — ZAP is explicitly not one of these.
 - An integration would bypass identity, policy, grants, PoA, or receipts for
   convenience.
 - You cannot tolerate pre-1.0 API and CLI evolution.
 
-
-## ❓ Why ZAP?
-
-1. **End-to-End Cryptographic Provenance**: Every message frame is signed by the sender node's identity and verified by the receiver, establishing full custody and identity tracking for distributed processes.
-2. **AI-Ready Typed Actions**: External agents or models can produce strict `ZENV` messages while ZAP stays deterministic, auditable, and independent from any model runtime.
-3. **Consensus-Gated Operations**: High-risk actions (e.g. hardware control or factory safety systems) can require multi-node Proof-of-Action consensus (ZPOA) before dispatch.
-4. **Sandboxed Edge Execution**: Execute untrusted custom device drivers inside a Wasmtime sandbox with strict instruction (fuel), memory, time, and permission boundaries.
-5. **Durable Auditable Ledgers**: Nodes maintain append-only, BLAKE3 hash-chained memory journals and signed receipt journals, providing verifiable, tamper-evident audit trails.
-
-## ✨ Key Features
-
-| Feature | Description |
-|---|---|
-| **64-byte Wire Header** | Fixed-size `ZAP_` frame header with auth and PoA trailers — zero-copy parseable |
-| **Universal Envelopes** | `ZENV` payload format with kind, subject, content type, metadata, and body |
-| **Ed25519 Signatures** | Every frame is cryptographically signed and verified end-to-end |
-| **Encrypted Transport** | ChaCha20-Poly1305 authenticated encryption over UDP with Noise helpers |
-| **Peer Trust Contracts** | Per-machine send, receive, forward, PoA, expiry, and key-rotation gates |
-| **Replay Protection** | Nonce tracking and frame-level replay checks enabled by default |
-| **WASM Sandboxing** | Wasmtime-based driver execution with fuel, memory, time, and output limits |
-| **Scoped Host ABI** | Deny-by-default `zap` WASM imports for auditable event, memory, and device requests |
-| **Signed Manifests** | Drivers are verified against SHA-256 hashes and Ed25519 author signatures |
-| **Capability System** | Explicit capability advertisements, queries, grants, and policy enforcement |
-| **Deterministic Routing** | Explainable route planning before local dispatch or peer forwarding |
-| **Auditable Memory** | Append-only binary journal memory with body hashes, hash chains, indexes, and tombstones |
-| **Proof-of-Action** | Multi-validator consensus for critical operations with configurable thresholds |
-| **Message Policy** | Deterministic allow/deny/require-PoA rules for typed message subjects |
-| **Receipt Ledger** | Signed, verifiable, compactable receipt journals for full operational audit trails |
-| **Driver Registry** | Local ZapStore index with versioning, revocation, and operator signatures |
-| **PACT Profile** | Portable signed action records with offline verification, revocation, bundles, and receipt references |
-
-## 🏗 Architecture
+## Repository layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          ZAP Node                                   │
-│                                                                     │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────────────┐  │
-│  │ Message   │  │ Capabil- │  │  Router   │  │     Memory        │  │
-│  │  Policy   │  │   ity    │  │           │  │  (ZJSEG + Hash)   │  │
-│  └─────┬─────┘  └────┬─────┘  └─────┬─────┘  └───────────────────┘  │
-│        │              │              │                                │
-│  ┌─────▼──────────────▼──────────────▼──────┐                        │
-│  │              Node Daemon                  │                        │
-│  │  ┌────────┐ ┌─────────┐ ┌──────────────┐ │                        │
-│  │  │Dispatch│ │Receipts │ │  PoA Verify  │ │                        │
-│  │  └───┬────┘ └─────────┘ └──────────────┘ │                        │
-│  └──────┼────────────────────────────────────┘                        │
-│         │                                                             │
-│  ┌──────▼───────┐    ┌───────────────┐    ┌─────────────────────┐    │
-│  │   Runtime    │    │   ZapStore    │    │     Transport       │    │
-│  │  (Wasmtime)  │    │  (Manifests)  │    │  (Encrypted UDP)    │    │
-│  │  ┌─────────┐ │    │  ┌─────────┐  │    │  ┌──────────────┐  │    │
-│  │  │ Driver  │ │    │  │Manifest │  │    │  │ChaCha20+Noise│  │    │
-│  │  │  WASM   │ │    │  │Registry │  │    │  │  Peer Table  │  │    │
-│  │  └─────────┘ │    │  └─────────┘  │    │  │Replay Protect│  │    │
-│  └──────────────┘    └───────────────┘    │  └──────────────┘  │    │
-│                                           └─────────────────────┘    │
-│                                                                      │
-│  ┌─────────────────────────────────────────────────────────────┐     │
-│  │                    ZAP Wire Protocol                         │     │
-│  │  ┌────────────┐  ┌──────────┐  ┌────────────┐  ┌─────────┐ │     │
-│  │  │ ZAP_ Frame │  │   ZENV   │  │ Auth Trail │  │  PoA    │ │     │
-│  │  │  (64 B)    │  │ Envelope │  │  (Ed25519) │  │ Trailer │ │     │
-│  │  └────────────┘  └──────────┘  └────────────┘  └─────────┘ │     │
-│  └─────────────────────────────────────────────────────────────┘     │
-└──────────────────────────────────────────────────────────────────────┘
+crates/       Workspace crates (23) — protocol, node, runtime, tooling
+docs/         Protocol, security, operations, and guide documentation
+examples/     Runnable examples, configs, domain packs, WASM drivers
+fixtures/     Versioned JSON protocol fixtures shared by SDKs and tests
+sdks/         Rust, Go, TypeScript, Python SDKs
+tests/e2e/    Opaque-box 4-tier end-to-end suite (174 tests)
+tools/        xtask and benchmark tooling
+website/      Marketing and docs site (Next.js)
 ```
 
-## 📦 Workspace Crates
-
-ZAP is organized as a Rust workspace of focused crates:
-
-### Core Protocol
-
-| Crate | Description |
-|---|---|
-| `zap-core` | ZAP-Wire v1 frame parsing/encoding: fixed 64-byte `ZAP_` header, bitflags, auth trailers, PoA trailers |
-| `zap-envelope` | Universal `ZENV` payload envelopes — kind, subject, content type, metadata, and body |
-| `zap-crypto` | Node identity (Ed25519), key generation, full-frame signing, verification, and PoA certificates |
-| `zap-net` | Encrypted UDP endpoint, static peer table, ChaCha20-Poly1305 encryption, Noise helpers, nonce replay checks |
-| `zap-pact` | PACT profile contracts: signed action records, canonical BLAKE3 hashes, revocations, bundles, and offline verification |
-
-### Execution & Dispatch
-
-| Crate | Description |
-|---|---|
-| `zap-node` | Daemon core: TOML config, peer verification, replay protection, receipts, capability-aware dispatch, routing |
-| `zap-runtime` | Wasmtime sandboxed execution: ABI verification, fuel metering, memory limits, time bounds, output caps |
-| `zap-driver-sdk` | Minimal ABI helpers for WASM driver authors |
-| `zap-cli` | Operator CLI: `keygen`, `run`, `send`, `inspect`, `doctor`, `trust`, `peer`, `registry`, `capability`, `route`, `memory`, `receipts`, `poa`, `pact` |
-
-### Intelligence & Policy
-
-| Crate | Description |
-|---|---|
-| `zap-capability` | Capability identifiers, driver permission contracts, local advertisements, signed query/response |
-| `zap-schema` | Typed message contracts for agent gateways, machine commands, and payload validation |
-| `zap-policy` | Deterministic policy decisions for allow/deny/PoA/grant/human/simulation gates |
-| `zap-router` | Deterministic route tables, explainable route decisions, peer grant requirements |
-
-### Audit & Storage
-
-| Crate | Description |
-|---|---|
-| `zap-ledger` | Signed receipt records for action audit trails |
-| `zap-memory` | Append-only binary journal memory: body hashes, entry hash chains, tombstones, compaction, JSONL import/export, verification |
-| `zap-store` | ZapStore driver manifests: SHA-256 hashes, Ed25519 signatures, local registry with versioning and revocation |
-
-## 🚀 Quickstart
+## Quickstart
 
 ### Prerequisites
 
-- **Rust 1.93+** (edition 2024) — install via [rustup](https://rustup.rs)
-- **Docker** (optional) — for containerized deployment
+- Rust **1.93+** (edition 2024) — install via [rustup](https://rustup.rs)
+- Docker (optional) — for containerized deployment
 
-### Build & Test
+### Build and test
 
 ```bash
-# Run the full test suite
+cargo build --workspace
 cargo test --workspace --all-targets
+```
 
-# Generate a node identity key
+### First steps
+
+```bash
+# Generate a node identity
 cargo run -p zap-cli -- keygen --out .zap/node.key
 
-# Send a typed action envelope
+# Send a typed action envelope (needs a configured peer, see below)
 cargo run -p zap-cli -- send --config zap.toml --target <uuid> --action echo --payload hello
 
-# Run a quick parse benchmark (100k iterations)
+# Run a quick parse benchmark
 cargo run -p zap-cli -- bench parse --iterations 100000
 ```
 
-> **Note:** `zap keygen` refuses to overwrite an existing key unless `--force`
-> is provided.
+### Two-node demo
 
-### Two-Node Local Demo
-
-1. **Generate keys** for each node
-2. **Configure peers** — copy `node_id`, `public_key`, and a shared 32-byte
-   `transport_key` into TOML configs based on
-   [`node-a.toml`](examples/configs/node-a.toml) and
-   [`node-b.toml`](examples/configs/node-b.toml)
-3. **Validate and run:**
+1. Generate keys for both nodes: `zap keygen --out .zap/node-a.key` and
+   `zap keygen --out .zap/node-b.key`.
+2. Copy `node_id` and `public_key` into
+   [`examples/configs/node-a.toml`](examples/configs/node-a.toml) and
+   [`examples/configs/node-b.toml`](examples/configs/node-b.toml), and set a
+   shared 32-byte `transport_key` in both files.
+3. Validate and run:
 
 ```bash
-# Validate configs
 cargo run -p zap-cli -- check-config --config examples/configs/node-a.toml
 cargo run -p zap-cli -- check-config --config examples/configs/node-b.toml
 
-# Start node A
+# Terminal 1
 cargo run -p zap-cli -- run --config examples/configs/node-a.toml
 
-# From another terminal — send an action
+# Terminal 2 — send an action and a typed event
 cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> --action echo --payload hello
-
-# Send a universal event envelope
 cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> --kind event --subject sensor.temperature \
   --payload '{"c":21.5}' --content-type application/json
@@ -205,382 +129,287 @@ cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
 > enforce static peer addresses. Do not run `zap run` and `zap send` from the
 > same config simultaneously.
 
-## 💡 Programmatic Examples
-
-### PACT Record Demo
-
-PACT records are portable signed action records carried as
-`application/zap-pact+json` in normal `ZENV` envelopes.
+### Programmatic examples
 
 ```bash
-cargo run -p zap-cli -- pact create \
-  --actor agent.alpha \
-  --target driver.valve \
-  --intent valve.open \
-  --object '{"valve":"v-7"}' \
-  --terms '{"max_runtime_ms":5000}' \
-  --created-at-micros 1893456000000000 \
-  --out pact-unsigned.json
-cargo run -p zap-cli -- pact sign \
-  --input pact-unsigned.json \
-  --key .zap/node.key \
-  --out pact-signed.json
-cargo run -p zap-cli -- pact verify --input pact-signed.json --json
+cargo run -p zap-examples --bin frame_basics      # frame creation, signing, verification
+cargo run -p zap-examples --bin envelope_types    # ZENV envelopes and causal linking
+cargo run -p zap-examples --bin memory_store      # append-only journal memory + audit
+cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry revocation
 ```
 
-ZAP provides compile-ready Rust code examples under the `examples/` directory. You can build and run them via cargo:
+## Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                              ZAP Node (zap-node)                            │
+│  policy │ capability │ router │ memory │ receipts │ observability          │
+│  ───────────────────────────────┐                                          │
+│         Node daemon             │   actors: udp_rx, gossip, mesh,           │
+│  dispatch · receipts · PoA      │   consensus, execution                    │
+│  ───────────────────────────────┘                                          │
+│         │          │               │               │                       │
+│  ┌──────▼───┐ ┌────▼─────┐ ┌───────▼───────┐ ┌─────▼──────────┐            │
+│  │ Runtime  │ │ ZapStore │ │  Transport    │ │   Ledger       │            │
+│  │ Wasmtime │ │ driver & │ │  (zap-net)    │ │   (zap-ledger) │            │
+│  │ fuel/mem │ │ pack     │ │  ChaCha20     │ │   receipts     │            │
+│  │ time/out │ │ registry │ │  Noise ·      │ │   MMR · batch  │            │
+│  │ async    │ │ signed   │ │  replay       │ │   ZK rollups   │            │
+│  │ pipeline │ │ bundles  │ │  BFT ·        │ │   (zap-journal)│            │
+│  │          │ │          │ │  gossip ·     │ │                │            │
+│  │          │ │          │ │  mesh · PEX   │ │                │            │
+│  └──────────┘ └──────────┘ └───────────────┘ └────────────────┘            │
+│                                                                            │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  Gateway (zap-gateway)    MCP stdio · HTTP REST · SSE · WebSocket     │  │
+│  │                          provenance chain: intent → … → receipt       │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  ┌─────────────────────────────────────────┐   ┌────────────────────────┐  │
+│  │  Wire format (zap-core / zap-envelope)  │   │  Fleet (zap-telemetry) │  │
+│  │  ZAP_ header │ ZENV │ ZSIG │ ZPOA       │   │  doctor · metrics      │  │
+│  └─────────────────────────────────────────┘   │  incident · topology   │  │
+│                                                └────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Workspace crates
+
+| Crate | Responsibility |
+|---|---|
+| **Core protocol** | |
+| `zap-core` | ZAP-Wire v1 frame parsing/encoding: 64-byte `ZAP_` header, flags, auth and PoA trailers |
+| `zap-envelope` | Universal `ZENV` payload envelopes: kind, subject, content type, metadata, body |
+| `zap-crypto` | Node identity (Ed25519), key generation, frame signing/verification, PoA certificates |
+| `zap-schema` | Typed message contracts for agent gateways and machine commands |
+| `zap-pact` | PACT profile: signed action records, canonical hashes, revocations, bundles, dispute engine |
+| **Node & execution** | |
+| `zap-node` | Daemon core: config, peer verification, replay protection, receipts, capability-aware dispatch, actors |
+| `zap-runtime` | Wasmtime sandboxed execution: ABI verification, fuel/memory/time/output limits, async pipeline, streaming |
+| `zap-driver-sdk` | ABI helpers for WASM driver authors: async drivers, ring buffers, zero-copy IPC |
+| `zap-machine` | Machine connections and profile contracts for industrial adapters |
+| `zap-cli` | Operator CLI: 29 commands covering every workflow below |
+| **Network** | |
+| `zap-net` | Encrypted UDP transport, Noise handshake, durable anti-replay, BFT consensus, gossip, adaptive mesh |
+| **Intelligence & policy** | |
+| `zap-capability` | Capability ids, driver permission contracts, signed query/response |
+| `zap-policy` | Deterministic policy decisions: allow/deny/PoA/grant/human/simulation |
+| `zap-router` | Deterministic route tables and explainable route decisions |
+| `zap-agent` | Agent protocol contracts: intents, sessions, delegation, negotiation, provenance chain, swarm |
+| **Audit & storage** | |
+| `zap-journal` | Append-only binary journal segments: hash chaining, sealing, indexes, crash recovery |
+| `zap-ledger` | Signed action receipts, batch seals, incremental MMR, blinded ZK rollups |
+| `zap-memory` | Append-only binary journal memory: body hashes, entries, tombstones, compaction |
+| `zap-store` | Driver manifests, registry index, migrations, publications, install plans, bundles |
+| `zap-pack` | Domain pack lifecycle: build, sign, verify, install, audit (shared with `zap-store`) |
+| **Gateway & operations** | |
+| `zap-gateway` | AI agent gateway: MCP server, HTTP REST, SSE, WebSocket, provenance chain engine |
+| `zap-telemetry` | Fleet doctor, incident snapshots, Prometheus metrics, topology |
+| `zap-ops` | Operations contracts: observability, governance, production configs |
+
+## CLI
+
+Full command reference for a node:
 
 ```bash
-# Run ZAP binary frame creation, signing, and verification example
-cargo run -p zap-examples --bin frame_basics
-
-# Run ZENV Universal Payload Envelope construction and causal linking
-cargo run -p zap-examples --bin envelope_types
-
-# Run append-only binary journal memory store and BLAKE3 hash chain audits
-cargo run -p zap-examples --bin memory_store
-
-# Run driver manifest creation, signing, and local registry revocation
-cargo run -p zap-examples --bin driver_manifest
+zap keygen            # generate a node identity key
+zap run               # start the daemon
+zap check-config      # validate a config
+zap doctor            # operator readiness gate
+zap fleet doctor      # multi-node health aggregation
+zap send              # send a message or action to a peer
+zap inspect           # decode a frame file
 ```
 
-Refer to the source files in `examples/src/bin/` to see how to import and use the APIs in your own projects.
-
-## 🐳 Docker Deployment
-
-### Build
+Identity & peer trust:
 
 ```bash
-docker build -t zap:local .
+zap trust enroll / inspect
+zap peer invite / accept / rotate / revoke
 ```
 
-### Run with Compose
+Protocol, policy & routing:
 
 ```bash
-mkdir -p .zap/container
-docker compose run --rm node keygen --out /var/lib/zap/node.key
-docker compose up --build
+zap capability list / query / cache / inspect-manifest
+zap discovery announce / query
+zap route explain
+zap policy evaluate
+zap schema validate / inspect / export
 ```
 
-The container runs as a **non-root user** (UID 10001), exposes **UDP 7000**,
-uses a **read-only root filesystem**, drops all capabilities, limits PIDs to
-128, and stores node state under `/var/lib/zap`.
-
-See [Deployment](docs/deployment.md) for production hardening notes.
-
-## 🛠 CLI Reference
-
-### Configuration & Diagnostics
+Agents, PACT, packs & fixtures:
 
 ```bash
-zap doctor --config zap.toml                          # Readiness gate with scoring
-zap doctor --config zap.toml --json --strict          # Machine-readable strict mode
-zap check-config --strict --config zap.toml           # Validate config
-zap trust enroll --node-id <uuid> --addr <host:port> \
-  --public-key <base64> --transport-key <hex>          # Generate peer TOML
-zap trust inspect --config zap.toml --json             # Review peer trust posture
-zap peer invite --config zap.toml --addr <host:port> \
-  --out node.invite.json                               # Signed peer invitation
-zap peer accept --invite node.invite.json --config zap.toml \
-  --out zap.with-node.toml --json                      # Verify and add peer
-zap peer rotate --config zap.toml --node-id <uuid> \
-  --out zap.rotated.toml --json                        # Rotate transport key
-zap peer revoke --config zap.toml --node-id <uuid> \
-  --out zap.revoked.toml --json                        # Disable peer trust
+zap agent session / intent / status / result / delegate / negotiate / validate / schema
+zap pact create / sign / verify / revoke / bundle / schema
+zap pack init / build / sign / verify / install / audit / validate / inspect / list
+zap fixtures verify --fixtures fixtures --sdk <sdk-path>
 ```
 
-### Sending Messages
+Drivers & registry:
 
 ```bash
-# Action envelope → WASM driver
-zap send --config zap.toml --target <uuid> --action echo --payload hello
-
-# Binary payload from file
-zap send --config zap.toml --target <uuid> --action upload \
-  --payload-file payload.bin --binary-payload
-
-# Event envelope with metadata
-zap send --config zap.toml --target <uuid> --kind event \
-  --subject sensor.temperature --payload '{"c":21.5}' \
-  --content-type application/json --metadata '{"source":"sim"}'
-
-# Consensus-protected typed action
-zap send --config zap.toml --target <uuid> \
-  --kind action --subject safety.emergency_stop \
-  --payload '{"reason":"operator_request"}' --content-type application/json \
-  --requires-consensus --poa-network
+zap driver-manifest create / verify
+zap registry init / add / sign / verify-signature / resolve / pull / mirror
+zap registry publication create / verify
+zap registry plan create / verify
+zap registry bundle export / pull-manifest / verify / import
+zap registry revoke / deprecate / migration add / list
 ```
 
-### Driver Manifests & Registry
+Audit & evidence:
 
 ```bash
-# Create and verify a signed manifest
-zap driver-manifest create --driver echo.wat --action echo \
-  --author-key .zap/node.key --out echo.manifest.toml
-zap driver-manifest create --driver machine.wat --action machine.note \
-  --author-key .zap/node.key --out machine.manifest.toml \
-  --allow-emit-event --allow-memory-write --max-host-call-bytes 8192
-zap driver-manifest verify --driver echo.wat --manifest echo.manifest.toml
-
-# Manage a local registry
-zap registry init --out registry.index.toml
-zap registry add --registry registry.index.toml --manifest echo.manifest.toml
-zap registry verify --registry registry.index.toml --manifest echo.manifest.toml
-zap registry revoke --registry registry.index.toml \
-  --action echo --version 0.1.0 --reason "bad release"
-zap registry deprecate --registry registry.index.toml \
-  --action echo --version 0.1.0 --reason "use 0.2.0"
-zap registry migration add --registry registry.index.toml \
-  --action echo --version 2.0.0 --from-version-req '^1.0.0' \
-  --from-abi-req '=1' --requires-operator-approval \
-  --migration-driver echo-migrate@0.1.0
-zap registry sign --registry registry.index.toml --operator-key .zap/node.key
-zap registry verify-signature --registry registry.index.toml
-zap registry resolve --registry registry.index.toml \
-  --action echo --version-req '^0.1.0' --abi-req '>=1,<=2' --json
-zap registry pull --config zap.toml --target <uuid> \
-  --out registry.index.toml --operator-public-key <base64-public-key> --json
-zap registry mirror --config zap.toml --out mirrored-registry.index.toml \
-  --operator-public-key <base64-public-key> --json
-zap registry sign --registry mirrored-registry.index.toml --operator-key .zap/node.key
-zap registry publication create --registry mirrored-registry.index.toml \
-  --publisher-key .zap/node.key --out registry.publication.json --channel stable
-zap registry publication verify --registry mirrored-registry.index.toml \
-  --publication registry.publication.json
-zap registry plan create --registry mirrored-registry.index.toml \
-  --publication registry.publication.json --planner-key .zap/node.key \
-  --out registry.install-plan.json --driver 'echo@^0.1.0' \
-  --abi-req '>=1,<=2' --json
-zap registry plan verify --registry mirrored-registry.index.toml \
-  --plan registry.install-plan.json --planner-public-key <base64-public-key>
-zap registry bundle export --registry mirrored-registry.index.toml \
-  --publication registry.publication.json --out zapstore-bundle \
-  --driver echo@0.1.0=echo.wat --json
-zap registry bundle pull-manifest --config zap.toml --target <uuid> \
-  --out pulled-zapstore.bundle.json --require-publication --require-drivers --json
-zap registry bundle verify --bundle zapstore-bundle --require-drivers
-zap registry bundle import --bundle zapstore-bundle --out .zap/imported-zapstore
+zap receipts pull / verify / import-jsonl / export-jsonl / compact
+zap memory put / get / query / tombstone / verify / prune / compact
+zap memory import-jsonl / export-jsonl / export-evidence
+zap incident snapshot
+zap provenance verify
 ```
 
-### Capabilities, Routing & Memory
+Consensus:
 
 ```bash
-# Capability discovery
-zap capability list --config zap.toml --json
-zap capability query --config zap.toml --target <uuid> \
-  --cache .zap/capabilities.jsonl --json
-zap capability cache refresh --config zap.toml --json --strict
-zap capability cache verify --path .zap/capabilities.jsonl
-
-# Route planning
-zap route explain --config zap.toml --kind action --subject echo --json
-
-# Typed message contracts and policy dry-runs
-zap schema validate --contract echo.contract.toml --envelope echo.zenv --json
-zap policy evaluate --policy policy.toml --kind action \
-  --subject safety.emergency_stop --requires-consensus --strict --json
-
-# PACT profile
-zap pact create --actor agent.alpha --target driver.valve --intent valve.open \
-  --out pact-unsigned.json
-zap pact sign --input pact-unsigned.json --key .zap/node.key \
-  --out pact-signed.json
-zap pact verify --input pact-signed.json --json
-zap pact bundle export --pact pact-signed.json --out pact-bundle.json
-zap pact bundle verify --bundle pact-bundle.json --json
-
-# Local memory store
-zap memory put --dir .zap/memory --subject note --payload hello
-zap memory verify --dir .zap/memory
+zap poa request / attest / validator-set create / verify / pull / apply
 ```
 
-### Proof-of-Action & Receipts
+Gateway & simulation:
 
 ```bash
-# PoA workflow
-zap send --config zap.toml --target <uuid> \
-  --kind action --subject safety.emergency_stop \
-  --payload '{"reason":"operator_request"}' --content-type application/json \
-  --requires-consensus --poa-network --poa-timeout-ms 5000
-zap poa request --frame critical-frame.bin \
-  --requester-key .zap/node.key --threshold 1 > poa-request.json
-zap poa attest --request poa-request.json \
-  --validator-key .zap/validator.key > poa-response.json
-zap poa validator-set create --authority-key .zap/operator.key \
-  --epoch 4 --threshold 2 \
-  --validator <validator-a-node-id>=<validator-a-public-key> \
-  --validator <validator-b-node-id>=<validator-b-public-key> \
-  --out poa-validators.v4.json
-zap poa validator-set pull --config zap.toml --target <peer-node-id> \
-  --authority-public-key <operator-public-key> --min-epoch 4 \
-  --out poa-validators.v4.json --json
-zap poa validator-set apply --config zap.toml \
-  --set poa-validators.v4.json \
-  --authority-public-key <operator-public-key> \
-  --out zap.with-poa-set.toml --json
-
-# Receipt audit
-zap receipts verify --dir logs/receipts
-zap receipts pull --config zap.toml --target <peer-node-id> \
-  --after-processed-at-micros 1735689600000000 \
-  --limit 100 --out-dir logs/peer-receipts --json
-zap receipts export-jsonl --dir logs/receipts --out logs/receipts.archive.jsonl
-zap receipts import-jsonl --in logs/legacy-actions.jsonl --dir logs/receipts
-zap receipts compact --dir logs/receipts --out logs/receipts.compacted
-
-# Frame inspection
-zap inspect frame.bin --verify-with-public-key <base64-public-key>
+zap gateway start / status      # MCP stdio, HTTP REST, SSE, WebSocket
+zap cluster up / status         # in-memory N-node cluster simulation
+zap swarm bench / partition-test
+zap bench parse
 ```
 
-## 🔒 Security Model
+## SDKs
 
-ZAP is designed with **defense-in-depth** from the ground up:
+| SDK | Location | Notes |
+|---|---|---|
+| Rust (reference) | `sdks/rust` | Wraps canonical crates via path dependencies; network-free |
+| Go | `sdks/go` | Control envelopes, UDP client, Ed25519, BLAKE3 |
+| TypeScript | `sdks/typescript` | Node 24; `@noble` crypto; typecheck + declaration builds |
+| Python | `sdks/python` | Dataclasses, stdlib UDP; optional `[crypto]` extra for hash/sign |
 
-- **Ed25519 identity** — every node has a unique cryptographic identity
-- **Full-frame signatures** — `ZAP_SIGN` is an 8-byte optimization hint; full
-  verification is always enforced
-- **Authenticated encryption** — ChaCha20-Poly1305 over UDP datagrams
-- **Replay protection** — nonce tracking and frame-level replay checks enabled
-  by default
-- **WASM sandboxing** — drivers have no host capabilities; future APIs will
-  require explicit grants
-- **Capability model** — discovered capabilities are descriptive only and do not
-  grant authority
-- **Hash-chain memory** — local memory records are verifiable binary journal audit data,
-  not hidden model state
-- **Consensus gating** — frames marked `REQUIRES_CONSENSUS` require PoA
-  certificates before dispatch
-
-> Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md) and
-> the [Security Model](docs/security.md) documentation.
-
-## ⚙️ Development
-
-### Required CI Checks
+All SDKs consume the same versioned fixtures under `fixtures/` and reproduce
+the same canonical BLAKE3 hashes and offline verification results. See
+[SDKs](docs/sdks.md).
 
 ```bash
-cargo ci-fmt           # Format check
-cargo ci-test          # Full workspace test suite
-cargo ci-smoke         # End-to-end smoke: launches node, sends action, verifies receipt
-cargo ci-bench-smoke   # Compile and run benchmarks in test mode
-cargo ci-clippy        # Lint with -D warnings
+zap fixtures verify --fixtures fixtures --sdk sdks/rust --json
 ```
 
-These aliases are defined in [`.cargo/config.toml`](.cargo/config.toml) and
-mirror the [GitHub Actions workflows](.github/workflows/).
-
-### Benchmarks
+## Testing & benchmarks
 
 ```bash
-cargo ci-bench-full                                                    # Full Criterion run
-cargo ci-bench-compare --base target/bench-results/base.json \
-  --head target/bench-results/head.json                                # Regression check
+cargo ci-fmt           # format check
+cargo ci-test          # full workspace test suite
+cargo ci-smoke         # end-to-end smoke: node + action + receipt
+cargo ci-clippy        # lint with -D warnings
+cargo ci-bench-smoke   # compile and run benchmarks in test mode
+cargo ci-bench-full    # full Criterion run
 ```
 
-Pull requests compare base and head commits on the same runner and fail when
-critical regressions exceed the thresholds in
-[`bench-thresholds.toml`](tools/bench-thresholds.toml). Pushes to `main`
-publish benchmark history to GitHub Pages:
+The alias definitions live in [`.cargo/config.toml`](.cargo/config.toml) and
+mirror the GitHub Actions workflows. The 4-tier end-to-end suite in
+`tests/e2e` (174 tests) exercises all 15 roadmap features with real crypto and
+no mocks — see [TEST_INFRA.md](TEST_INFRA.md).
+
+| CI platform | Checks |
+|---|---|
+| Linux | Build, test, clippy, smoke, Docker validation |
+| Windows | Build, test |
+| Perf | Benchmark gates, regression detection, Pages publishing |
+
+Benchmark history is published to
 **[ZAP Benchmarks](https://hakille-ai.github.io/ZAP/)**.
 
-### CI Matrix
+## Security model
 
-| Platform | Checks |
-|---|---|
-| **Linux** | Build, test, clippy, smoke, Docker validation |
-| **Windows** | Build, test |
-| **Perf** | Benchmark gates, regression detection, Pages publishing |
+- **Identity:** Ed25519 node keys; the node UUID is derived from the public key.
+- **Signatures:** every frame is fully verified (`ZAP_SIGN` is only a fast
+  pre-filter hint).
+- **Transport:** ChaCha20-Poly1305 authenticated encryption over UDP; Noise
+  `NN_25519_ChaChaPoly_BLAKE2s` helpers; static peer table for deterministic
+  trust.
+- **Replay protection:** timestamp windows, in-memory fingerprint caches, and a
+  restart-persistent nonce window.
+- **Consensus gating:** `REQUIRES_CONSENSUS` frames need threshold PoA
+  attestations before dispatch.
+- **Sandboxing:** drivers start with no host capabilities; ABI v2 host imports
+  are permissioned, bounded, and audited.
+- **Audit:** signed receipts in hash-chained binary journals; batch seals, MMR
+  inclusion/exclusion proofs, and ZK rollup commitments for offline
+  verification.
 
-## 📋 Project Status
+See [Security Model](docs/security.md) and report vulnerabilities through
+[SECURITY.md](SECURITY.md).
 
-ZAP is **pre-1.0** and under active development. The codebase is structured
-like a production system from the start:
-
-- ✅ Strict binary parsing with property-based tests
-- ✅ Cryptographic verification on every frame
-- ✅ Encrypted transport with replay protection
-- ✅ Sandboxed WASM execution with resource limits
-- ✅ CLI tooling for all operator workflows
-- ✅ Comprehensive test suite and benchmark harnesses
-- ✅ Docker packaging with security hardening
-- ✅ Full operator and protocol documentation
-
-Compatibility is taken seriously even before 1.0. See
-[Versioning](docs/versioning.md) before changing public APIs, CLI behavior, or
-wire formats.
-
-## 🗺 Roadmap
+## Roadmap
 
 | Phase | Status | Focus |
 |---|---|---|
-| **1 — Kernel Alpha** | ✅ Implemented | Wire protocol, crypto, transport, WASM, CLI |
-| **2 — Typed Agent Gateway** | ✅ Foundation | Strict envelopes, message policy gates, external model boundary |
-| **3 — SDKs & Driver Registry** | ✅ Foundation | Signed manifests, ZapStore, revocation |
-| **4 — Proof-of-Action Network** | ✅ Foundation | Multi-validator PoA, receipts, audit |
-| **5 — Future Core Interfaces** | ✅ Foundation | Capabilities, routing, memory, doctor |
+| 1 — Kernel Alpha | Implemented | Wire protocol, crypto, transport, WASM, CLI |
+| 2 — Typed Agent Gateway | Implemented | Strict envelopes, policy gates, agent protocol, MCP gateway |
+| 3 — SDKs & Driver Registry | Implemented | Signed manifests, ZapStore, domain packs, SDK conformance |
+| 4 — Proof-of-Action Network | Implemented | Multi-validator PoA, BFT consensus, gossip, mesh, receipt audit |
+| 5 — Core Interfaces | Partial | Capabilities, routing, memory, fleet doctor, gateway transports |
+| 6 — 1.0 Readiness | Planned | Compatibility matrix, security audit, external adoption gates |
 
-See the full [Roadmap](docs/roadmap.md) for detailed status and next steps.
+See [Roadmap](docs/roadmap.md) and
+[Implementation Status](docs/roadmap-status.md).
 
-## Universal Trust Surface
-
-ZAP is being shaped as a reusable trust boundary for many domains, not a single
-application stack. The current preview surface includes:
-
-- agent protocol messages for typed AI intent, status, and result handoff;
-- domain packs for agentic development, smart buildings, cloud operations,
-  industrial automation, and personal AI workflows;
-- SDK conformance fixtures shared by Rust, TypeScript, Python, and Go;
-- PACT signed action records with offline bundle verification and receipt
-  references;
-- operator checks for message policy, fixtures, domain packs, receipts,
-  observability, and release readiness;
-- RFC/ZEP governance for protocol, crypto, ABI, config, SDK, and pack changes.
-
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |---|---|
-| [Install](docs/install.md) | Source install, CLI build, local setup, and Docker quickstart |
+| [Getting Started](docs/getting-started.md) | 5-minute developer onboarding |
+| [Install](docs/install.md) | Source install, CLI build, Docker quickstart |
 | [Protocol](docs/protocol.md) | ZAP-Wire v1 frame format and ZENV envelope specification |
-| [PACT Profile](docs/pact.md) | Portable signed action records, canonical hashes, CLI workflow, bundles, and SDK conformance |
-| [Security Model](docs/security.md) | Threat model, crypto choices, and defense-in-depth design |
-| [Use Cases](docs/use-cases.md) | Real-world application scenarios for the ZAP protocol |
-| [Getting Started](docs/getting-started.md) | Step-by-step developer onboarding and cluster setup |
-| [End-to-End Tutorial](docs/tutorial.md) | Full guide detailing WASM drivers, typed actions, policies, and Proof-of-Action |
-| [FAQ](docs/faq.md) | Frequently asked questions about design, security, and protocol comparisons |
-| [Deployment](docs/deployment.md) | Production configuration, Docker, and hardening guide |
-| [Operations](docs/operations.md) | Operator workflows: doctor, receipts, monitoring |
-| [Observability](docs/observability.md) | Metrics, health signals, alerting, and production telemetry |
-| [Runtime](docs/runtime.md) | WASM sandboxing: fuel, memory, time, and output limits |
-| [ZapStore](docs/zapstore.md) | Signed manifests, registry, versioning, and revocation |
-| [Capability, Router & Memory](docs/capability-router-memory.md) | Discovery, routing, and auditable memory |
-| [Message Policy](docs/message-policy.md) | Deterministic allow/deny/require-PoA gates for typed messages |
-| [Agent Protocol](docs/agent-protocol.md) | Typed agent intent, status, delegation, and result contracts |
-| [Domain Packs](docs/domain-packs.md) | Reusable capability, schema, and policy bundles by industry |
-| [SDKs](docs/sdks.md) | SDK surface, conformance matrix, fixtures, and test commands |
-| [Signed Receipts](docs/receipts.md) | Receipt ledger, peer pull, verification, pruning, and merging |
-| [RFC/ZEP Process](docs/rfc-process.md) | Proposal process for long-lived protocol and ecosystem contracts |
-| [Versioning](docs/versioning.md) | Semantic versioning and wire compatibility rules |
+| [Tutorial](docs/tutorial.md) | End-to-end factory telemetry & control |
+| [Use Cases](docs/use-cases.md) | Application scenarios for the protocol |
+| [FAQ](docs/faq.md) | Design, security, and protocol comparison questions |
+| [Security Model](docs/security.md) | Threat model, crypto choices, defense-in-depth |
+| [Gateway](docs/gateway.md) | MCP server, HTTP/SSE/WebSocket transports, provenance chain |
+| [Network](docs/network.md) | BFT consensus, gossip, adaptive mesh, durable replay |
+| [Ledger](docs/ledger.md) | Journals, batch seals, MMR, ZK rollup commitments |
+| [Telemetry](docs/telemetry.md) | Fleet doctor, incident snapshots, Prometheus metrics, topology |
+| [Swarm](docs/swarm.md) | Cluster simulation, swarm benchmarking, provenance verification |
+| [Operations](docs/operations.md) | Operator workflows: doctor, receipts, incident runbooks |
+| [Observability](docs/observability.md) | Metrics contract, health signals, alerting |
+| [Runtime](docs/runtime.md) | WASM sandboxing: fuel, memory, time, output, host calls |
+| [ZapStore](docs/zapstore.md) | Signed manifests, registry, versioning, revocation, bundles |
+| [Domain Packs](docs/domain-packs.md) | Pack layout, lifecycle, CLI, risk model |
+| [PACT Profile](docs/pact.md) | Signed action records, canonical hashes, bundles, disputes |
+| [Agent Protocol](docs/agent-protocol.md) | Intents, sessions, delegation, negotiation, provenance, swarm |
+| [SDKs](docs/sdks.md) | SDK surface, conformance matrix, fixtures |
+| [Message Policy](docs/message-policy.md) | Deterministic allow/deny/require-PoA gates |
+| [Capability, Router & Memory](docs/capability-router-memory.md) | Discovery, routing, auditable memory |
+| [Receipts](docs/receipts.md) | Receipt ledger, peer pull, verification, pruning |
+| [Discovery](docs/discovery.md) | Dynamic service discovery |
+| [Machine Connections](docs/machine-connections.md) | `zap-machine` profiles and adapters |
+| [Deployment](docs/deployment.md) | Docker, compose, hardening checklist |
+| [RFC/ZEP Process](docs/rfc-process.md) | Proposal process for protocol & ecosystem contracts |
+| [Versioning](docs/versioning.md) | Semver and wire compatibility rules |
 | [Release Process](docs/release.md) | Release checklist and publishing workflow |
-| [Roadmap](docs/roadmap.md) | Phased development plan and current status |
-| [PDF Requirements Trace](docs/pdf-requirements.md) | Requirements traceability matrix |
+| [Roadmap](docs/roadmap.md) | Phased development plan |
+| [Governance](docs/governance.md) | Roles, multi-sig, audit trail, break glass |
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome when they preserve the protocol's safety boundaries.
-Please review these documents before submitting:
+Please review:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development workflow and PR guidelines
 - [GOVERNANCE.md](GOVERNANCE.md) — project governance and decision-making
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community standards
+- [docs/rfc-process.md](docs/rfc-process.md) — how protocol changes are proposed
 
-## 📄 License
+All public changes must preserve backward compatibility with the versioned
+fixtures and SDK conformance matrix.
+
+## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE)
 for attributions.
-
----
-
-<p align="center">
-  <sub>Built with 🦀 Rust · Made by <a href="https://github.com/Hakille-ai">Hakille AI</a></sub>
-</p>

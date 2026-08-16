@@ -8,7 +8,23 @@
 //!
 //! `zap_execute` returns `(result_ptr << 32) | result_len`.
 
-use std::fmt;
+pub mod async_driver;
+pub mod buffer;
+pub mod error;
+pub mod ipc;
+
+pub use async_driver::{
+    AsyncStreamReader, AsyncStreamWriter, AsyncZapDriver, BoxFuture, DriverContext,
+    MemoryStreamReader, MemoryStreamWriter, SyncDriverAdapter, ZapDriverExt,
+};
+pub use buffer::{
+    BufferSlice, BufferSliceMut, IpcBufferView, MemoryMapper, PinnedBuffer, ZeroCopyBuffer,
+};
+pub use error::{BufferError, DriverError, IpcError};
+pub use ipc::{
+    BackpressurePolicy, BackpressureStrategy, IpcChannel, IpcChannelConfig, IpcFlags, IpcMessage,
+    IpcPipe, IpcRingBuffer, IpcTopology, IPC_MSG_DOMAIN,
+};
 
 pub const DRIVER_ABI_VERSION: u16 = 1;
 pub const MEMORY_EXPORT: &str = "memory";
@@ -66,31 +82,6 @@ pub fn execute_driver(
     driver.execute(DriverInput { action, payload })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DriverError {
-    message: String,
-}
-
-impl DriverError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-impl fmt::Display for DriverError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for DriverError {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,14 +112,12 @@ mod tests {
     #[test]
     fn driver_trait_executes() {
         let output = execute_driver(&EchoDriver, "echo", b"hello").unwrap();
-
         assert_eq!(output, b"hello");
     }
 
     #[test]
     fn driver_trait_reports_errors() {
         let error = execute_driver(&EchoDriver, "thermostat.setpoint", b"{}").unwrap_err();
-
         assert_eq!(error.message(), "unsupported action");
     }
 }

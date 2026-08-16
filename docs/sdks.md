@@ -26,6 +26,14 @@ Each SDK also includes base ZapStore types for registry index entries, bundle
 manifests, bundle entries, install plan requests, install plans, install plan
 entries, and PACT record/bundle conformance helpers.
 
+Shared protocol subjects are catalogued in `fixtures/control-subjects-v1.json`
+and now cover agent protocol messages (`zap.agent.*`), receipt replication
+(`zap.receipts.*`), PACT (`zap.pact.*`), registry (`zap.registry.*`),
+discovery (`zap.discovery.*`), and PoA validator sets
+(`zap.poa.validator_set.*`). SDK helpers build and parse envelopes for the
+subjects the SDK's test surface supports; see the per-SDK test files for the
+exact coverage.
+
 Shared protocol fixtures live in `fixtures/`. They provide readable JSON
 examples for ZENV control envelopes, agent protocol payloads, and the current
 control subject catalogue so SDK tests can converge on the same field names,

@@ -496,17 +496,20 @@ Success metrics:
 
 ## Immediate Next 20 Tasks
 
-1. Unify the tagline and product explanation across README, website, and docs.
-2. Add `docs/install.md` with binary, Docker, and source install paths.
-3. Convert getting started into a five-minute quickstart with expected output.
-4. Add missing docs pages to the website navigation.
-5. Add issue templates, PR template, CODEOWNERS, and RFC/ZEP docs.
-6. Add real daemon `/metrics` and `/healthz` endpoints.
-7. Connect Prometheus rules and Grafana panels to emitted metrics.
-8. Add configurable `message_policy.default_decision`.
-9. Add production doctor checks for fail-closed policy coverage.
-10. Add receipt fsync mode, segment rotation, and indexed pull planning.
-11. Add durable replay protection design and implementation.
+Status: completed items are struck through; the open items below are the
+current implementation backlog.
+
+1. ~~Unify the tagline and product explanation across README, website, and docs.~~
+2. ~~Add `docs/install.md` with binary, Docker, and source install paths.~~
+3. ~~Convert getting started into a five-minute quickstart with expected output.~~
+4. ~~Add missing docs pages to the website navigation.~~
+5. ~~Add issue templates, PR template, CODEOWNERS, and RFC/ZEP docs.~~
+6. ~~Add real daemon `/metrics` and `/healthz` endpoints.~~
+7. ~~Connect Prometheus rules and Grafana panels to emitted metrics.~~
+8. ~~Add configurable `message_policy.default_decision`.~~
+9. ~~Add production doctor checks for fail-closed policy coverage.~~
+10. ~~Add receipt fsync mode, segment rotation, and indexed pull planning.~~
+11. ~~Add durable replay protection design and implementation.~~
 12. Add runtime `max_host_calls` and per-action budgets.
 13. Expand protocol fixtures for remaining frame, envelope, signature, PoA, and
     control edge cases.
@@ -514,12 +517,19 @@ Success metrics:
     receipt, envelope, and control coverage.
 15. Expand SDK surface to frame signing, verification, receipts, capabilities,
     PACT helpers, and agent messages.
-16. Add CLI workflows for agent intent/session/delegation/negotiation/status.
-17. Define the domain pack manifest format.
-18. Build `zap-pack-agentic-dev` as the first complete domain pack.
-19. Build `zap-pack-smart-building` or `zap-pack-industrial` as the first
-    real-world automation pack.
-20. Publish a release-readiness checklist tied to 1.0 gates.
+16. ~~Add CLI workflows for agent intent/session/delegation/negotiation/status.~~
+17. ~~Define the domain pack manifest format.~~
+18. ~~Build `zap-pack-agentic-dev` as the first complete domain pack.~~
+19. ~~Build `zap-pack-smart-building` or `zap-pack-industrial` as the first
+    real-world automation pack.~~
+20. ~~Publish a release-readiness checklist tied to 1.0 gates.~~
+
+Newly implemented beyond this list: `zap-gateway` (MCP/HTTP/SSE/WebSocket +
+provenance chain), BFT consensus and gossip/mesh in `zap-net`, MMR/batch/ZK
+receipt accumulation in `zap-ledger`, async WASM pipeline and streaming buffers
+in `zap-runtime`, dispute/escrow engine in `zap-pact`, pack build/sign/install
+in `zap-pack`, fleet doctor/incident snapshots in `zap-telemetry`, and the
+174-test 4-tier E2E suite in `tests/e2e`.
 
 ## Release Cadence
 
