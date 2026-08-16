@@ -193,21 +193,14 @@ impl SocketState {
                 if let Ok(content) = fs::read_to_string(path) {
                     for line in content.lines().skip(1) {
                         let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 4 {
-                            let state = parts[3];
-                            let local_addr = parts[1];
-                            if state == "0A" {
-                                // TCP_LISTEN
-                                if let Some((_, port_hex)) = local_addr.split_once(':') {
-                                    if let Ok(port) = u16::from_str_radix(port_hex, 16) {
-                                        if !listening_ports.contains(&port) {
-                                            listening_ports.push(port);
-                                            active_sockets
-                                                .push(format!("0.0.0.0:{port} (TCP LISTEN)"));
-                                        }
-                                    }
-                                }
-                            }
+                        if parts.len() >= 4
+                            && parts[3] == "0A"
+                            && let Some((_, port_hex)) = parts[1].split_once(':')
+                            && let Ok(port) = u16::from_str_radix(port_hex, 16)
+                            && !listening_ports.contains(&port)
+                        {
+                            listening_ports.push(port);
+                            active_sockets.push(format!("0.0.0.0:{port} (TCP LISTEN)"));
                         }
                     }
                 }
