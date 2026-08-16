@@ -42,6 +42,7 @@ pub type Result<T> = std::result::Result<T, SdkError>;
 pub enum SdkError {
     Envelope(zap_envelope::ZapEnvelopeError),
     Json(serde_json::Error),
+    Io(std::io::Error),
     ExpectedControl { actual: ZapMessageKind },
 }
 
@@ -50,6 +51,7 @@ impl fmt::Display for SdkError {
         match self {
             Self::Envelope(error) => write!(f, "{error}"),
             Self::Json(error) => write!(f, "{error}"),
+            Self::Io(error) => write!(f, "{error}"),
             Self::ExpectedControl { actual } => {
                 write!(f, "expected control envelope, got {}", actual.as_str())
             }
@@ -62,6 +64,7 @@ impl Error for SdkError {
         match self {
             Self::Envelope(error) => Some(error),
             Self::Json(error) => Some(error),
+            Self::Io(error) => Some(error),
             Self::ExpectedControl { .. } => None,
         }
     }
@@ -230,9 +233,7 @@ pub struct ZapUdpClient {
 
 impl ZapUdpClient {
     pub fn bind(addr: impl std::net::ToSocketAddrs) -> Result<Self> {
-        let socket = std::net::UdpSocket::bind(addr).map_err(|e| {
-            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
-        })?;
+        let socket = std::net::UdpSocket::bind(addr).map_err(SdkError::Io)?;
         Ok(Self { socket })
     }
 
@@ -242,9 +243,9 @@ impl ZapUdpClient {
         target: impl std::net::ToSocketAddrs,
     ) -> Result<usize> {
         let bytes = envelope.encode();
-        self.socket.send_to(&bytes, target).map_err(|e| {
-            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
-        })
+        self.socket
+            .send_to(&bytes, target)
+            .map_err(SdkError::Io)
     }
 
     pub fn send_control(
@@ -253,9 +254,9 @@ impl ZapUdpClient {
         target: impl std::net::ToSocketAddrs,
     ) -> Result<usize> {
         let bytes = frame.encode();
-        self.socket.send_to(&bytes, target).map_err(|e| {
-            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
-        })
+        self.socket
+            .send_to(&bytes, target)
+            .map_err(SdkError::Io)
     }
 
     pub fn recv_envelope(
@@ -264,9 +265,7 @@ impl ZapUdpClient {
     ) -> Result<(ZapEnvelope, std::net::SocketAddr)> {
         self.socket.set_read_timeout(timeout).ok();
         let mut buf = [0u8; 65535];
-        let (n, addr) = self.socket.recv_from(&mut buf).map_err(|e| {
-            SdkError::Envelope(zap_envelope::ZapEnvelopeError::InvalidHeader(e.to_string()))
-        })?;
+        let (n, addr) = self.socket.recv_from(&mut buf).map_err(SdkError::Io)?;
         let env_ref = ZapEnvelopeRef::parse(&buf[..n])?;
         let owned = ZapEnvelope::new(
             env_ref.kind(),
