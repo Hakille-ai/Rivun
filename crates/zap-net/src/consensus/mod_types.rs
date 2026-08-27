@@ -9,6 +9,15 @@ pub enum ConsensusError {
     QuorumNotReached { received: usize, required: usize },
     #[error("epoch mismatch: cert epoch {cert_epoch}, validator set epoch {set_epoch}")]
     EpochMismatch { cert_epoch: u64, set_epoch: u64 },
+    #[error(
+        "round mismatch: message view/round {message_view}/{message_round}, current view/round {current_view}/{current_round}"
+    )]
+    RoundMismatch {
+        message_view: u64,
+        message_round: u64,
+        current_view: u64,
+        current_round: u64,
+    },
     #[error("threshold mismatch: cert threshold {cert_threshold}, required {required_threshold}")]
     ThresholdMismatch {
         cert_threshold: u16,

@@ -24,6 +24,22 @@ When a driver config includes `manifest = "..."`, `check-config` also verifies t
 
 The daemon repeats that compile-and-validate step during startup and keeps the compiled Wasmtime modules in memory. Driver files are not re-read for every action, so runtime behavior is stable after launch and per-message latency avoids repeated compilation.
 
+## Async execution path
+
+Nodes use the established synchronous executor by default. Deployments that need
+Tokio-native driver execution can explicitly enable the compatible async path:
+
+```toml
+[runtime]
+async_execution = true
+```
+
+The async executor preserves ABI v1 and the core `zap` host-import signatures,
+including auditable `memory_write` and `device_call` records. Existing drivers
+therefore do not need to be rebuilt merely to opt into asynchronous scheduling.
+The node rejects an async driver at startup if it fails the same ABI validation
+as the default executor.
+
 Wasmtime fuel enforces deterministic instruction budgets. Epoch interruption enforces wall-clock deadlines for long-running code, with the store configured to trap when the deadline is reached.
 
 ABI v1 provides no general host imports for network, filesystem, clock, or

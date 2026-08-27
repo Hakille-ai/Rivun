@@ -57,7 +57,10 @@ use zap_net::{MAX_DATAGRAM_SIZE, Peer, TransportKey, ZapEndpoint, ZapEndpointCon
 use zap_pact::{PACT_CONTENT_TYPE, PACT_RECORD_SUBJECT, ZapPact};
 use zap_policy::{PolicyInput, PolicyRule, PolicySet};
 use zap_router::{RouteDecision, RouteMessage, RouteRule, RouteTable};
-use zap_runtime::{ExecutionLimits, HostCallKind, HostCallRecord, WasmDriver, WasmExecutor};
+use zap_runtime::{
+    AsyncCompiledDriver, AsyncWasmExecutor, ExecutionLimits, HostCallKind, HostCallRecord,
+    WasmDriver, WasmExecutor,
+};
 use zap_schema::{MessageContract, MessageContractSet, MessageParts};
 use zap_store::{
     DriverManifest, DriverRegistry, REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE,
@@ -333,6 +336,10 @@ pub struct RuntimeConfig {
     pub fuel: Option<u64>,
     pub timeout_ms: Option<u64>,
     pub max_output_bytes: Option<usize>,
+    /// Executes drivers through Tokio/Wasmtime async APIs while preserving the
+    /// stable core driver ABI. Disabled by default for an explicit migration.
+    #[serde(default)]
+    pub async_execution: bool,
     #[serde(default)]
     pub permissions: DriverPermissions,
 }
@@ -344,6 +351,7 @@ impl Default for RuntimeConfig {
             fuel: None,
             timeout_ms: None,
             max_output_bytes: None,
+            async_execution: false,
             permissions: DriverPermissions::none(),
         }
     }
@@ -1209,6 +1217,7 @@ pub struct ZapNode {
     peer_trust: HashMap<Uuid, PeerTrustConfig>,
     drivers: HashMap<String, DriverRegistration>,
     runtime: WasmExecutor,
+    async_runtime: Option<AsyncWasmExecutor>,
     limits: ExecutionLimits,
     require_signed: bool,
     replay_guard: Mutex<ReplayGuard>,
@@ -1240,6 +1249,7 @@ pub struct ZapNode {
 
 struct DriverRegistration {
     driver: WasmDriver,
+    async_driver: Option<AsyncCompiledDriver>,
     permissions: DriverPermissions,
 }
 
@@ -1557,6 +1567,11 @@ impl ZapNode {
     pub async fn from_config(config: ZapNodeConfig) -> Result<Self> {
         let runtime = WasmExecutor::new()?;
         validate_config_with_executor(&config, &runtime)?;
+        let async_runtime = config
+            .runtime
+            .async_execution
+            .then(AsyncWasmExecutor::new)
+            .transpose()?;
         let keypair = load_keypair(&config.key_file)?;
         let node_id = keypair.node_id();
         let bind = config
@@ -1621,7 +1636,12 @@ impl ZapNode {
         let capability_cache_path = config.capability_cache.path.clone();
         let capability_cache_max_age_micros = config.capability_cache.max_age_micros;
         let registry = load_driver_registry_optional(&config.registry)?;
-        let drivers = load_drivers(&runtime, &config.drivers, registry.as_ref())?;
+        let drivers = load_drivers(
+            &runtime,
+            async_runtime.as_ref(),
+            &config.drivers,
+            registry.as_ref(),
+        )?;
         let route_table = RouteTable::new(config.routes.clone())?;
         let capability_advertisement = describe_capabilities(&config)?;
         let message_contracts = load_message_contract_set(&config.message_schema)?;
@@ -1649,6 +1669,7 @@ impl ZapNode {
             peer_trust,
             drivers,
             runtime,
+            async_runtime,
             limits: config.runtime.to_limits(),
             require_signed: config.require_signed,
             replay_guard: Mutex::new(replay_guard),
@@ -2790,22 +2811,22 @@ impl ZapNode {
             return Ok(None);
         }
         if let Some(capability) = target.capability {
-            return self.dispatch_capability(capability, message, frame);
+            return self.dispatch_capability(capability, message, frame).await;
         }
         if let Some(action) = target.local_driver {
-            return self.dispatch_local_driver(&action, message, frame);
+            return self.dispatch_local_driver(&action, message, frame).await;
         }
         Ok(None)
     }
 
-    fn dispatch_capability(
+    async fn dispatch_capability(
         &self,
         capability: CapabilityId,
         message: &InboundMessage,
         frame: &ZapFrame,
     ) -> Result<Option<Vec<u8>>> {
         if let Some(action) = capability.driver_action() {
-            return self.dispatch_local_driver(action, message, frame);
+            return self.dispatch_local_driver(action, message, frame).await;
         }
         warn!(
             capability = %capability,
@@ -2814,7 +2835,7 @@ impl ZapNode {
         Ok(None)
     }
 
-    fn dispatch_local_driver(
+    async fn dispatch_local_driver(
         &self,
         action: &str,
         message: &InboundMessage,
@@ -2833,19 +2854,27 @@ impl ZapNode {
             Some(driver) => {
                 let mut limits = self.limits;
                 limits.permissions = merge_permissions(limits.permissions, driver.permissions);
-                let result =
-                    match self
-                        .runtime
+                let execution = if let (Some(async_runtime), Some(async_driver)) =
+                    (&self.async_runtime, &driver.async_driver)
+                {
+                    async_runtime
+                        .execute_async(async_driver, action, &message.body, limits)
+                        .await
+                        .map(|result| (result.output, result.host_calls))
+                } else {
+                    self.runtime
                         .execute(&driver.driver, action, &message.body, limits)
-                    {
-                        Ok(result) => result,
-                        Err(error) => {
-                            self.record_driver_execution_error(action);
-                            return Err(error.into());
-                        }
-                    };
-                self.record_host_calls(action, message, frame, &result.host_calls)?;
-                Ok(Some(result.output))
+                        .map(|result| (result.output, result.host_calls))
+                };
+                let (output, host_calls) = match execution {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.record_driver_execution_error(action);
+                        return Err(error.into());
+                    }
+                };
+                self.record_host_calls(action, message, frame, &host_calls)?;
+                Ok(Some(output))
             }
             None => {
                 warn!(
@@ -4253,6 +4282,7 @@ fn validate_drivers(
 
 fn load_drivers(
     executor: &WasmExecutor,
+    async_executor: Option<&AsyncWasmExecutor>,
     drivers: &[DriverConfig],
     registry: Option<&DriverRegistry>,
 ) -> Result<HashMap<String, DriverRegistration>> {
@@ -4283,10 +4313,15 @@ fn load_drivers(
         let wasm_driver = executor
             .compile_and_validate_cached(&wasm)
             .with_context(|| format!("invalid driver ABI {}", driver.path.display()))?;
+        let async_driver = async_executor
+            .map(|executor| executor.compile_and_validate(&wasm))
+            .transpose()
+            .with_context(|| format!("invalid async driver ABI {}", driver.path.display()))?;
         compiled.insert(
             driver.action.clone(),
             DriverRegistration {
                 driver: wasm_driver,
+                async_driver,
                 permissions,
             },
         );
@@ -4660,6 +4695,7 @@ mod tests {
             [runtime]
             fuel = 100000
             timeout_ms = 250
+            async_execution = true
         "#;
 
         let config = ZapNodeConfig::from_toml_str(toml).unwrap();
@@ -4667,6 +4703,7 @@ mod tests {
         assert_eq!(config.peers.len(), 1);
         assert_eq!(config.drivers[0].action, "echo");
         assert_eq!(config.runtime.fuel, Some(100_000));
+        assert!(config.runtime.async_execution);
     }
 
     struct NodeHarness {
@@ -4707,6 +4744,23 @@ mod tests {
         message_policy: MessagePolicyConfig,
         message_schema: MessageSchemaConfig,
     ) -> NodeHarness {
+        node_harness_with_poa_policy_schema_and_runtime(
+            security,
+            poa,
+            message_policy,
+            message_schema,
+            RuntimeConfig::default(),
+        )
+        .await
+    }
+
+    async fn node_harness_with_poa_policy_schema_and_runtime(
+        security: SecurityConfig,
+        poa: PoaConfig,
+        message_policy: MessagePolicyConfig,
+        message_schema: MessageSchemaConfig,
+        runtime: RuntimeConfig,
+    ) -> NodeHarness {
         let temp = tempfile::tempdir().unwrap();
         let receiver_key = Keypair::generate();
         let sender_key = Keypair::generate();
@@ -4744,7 +4798,7 @@ mod tests {
                 path: driver_path.clone(),
                 manifest: None,
             }],
-            runtime: RuntimeConfig::default(),
+            runtime,
             security,
             trust: TrustConfig::default(),
             poa,
@@ -5978,6 +6032,34 @@ fsync = "always"
         assert_eq!(event.kind, ZapMessageKind::Action);
         assert_eq!(event.subject, "echo");
         assert_eq!(event.action, "echo");
+        assert_eq!(event.output.as_deref(), Some(b"hello-node".as_slice()));
+    }
+
+    #[tokio::test]
+    async fn node_async_runtime_executes_existing_driver_abi() {
+        let runtime = RuntimeConfig {
+            async_execution: true,
+            ..RuntimeConfig::default()
+        };
+        let harness = node_harness_with_poa_policy_schema_and_runtime(
+            SecurityConfig::default(),
+            PoaConfig::default(),
+            MessagePolicyConfig::default(),
+            MessageSchemaConfig::default(),
+            runtime,
+        )
+        .await;
+        let signed = signed_echo_frame(&harness, now_micros().unwrap());
+        harness
+            .sender_endpoint
+            .send_frame(harness.receiver_key.node_id(), &signed)
+            .await
+            .unwrap();
+
+        let event = timeout(Duration::from_secs(2), harness.node.handle_once())
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(event.output.as_deref(), Some(b"hello-node".as_slice()));
     }
 

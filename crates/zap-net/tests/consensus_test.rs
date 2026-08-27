@@ -4,8 +4,8 @@ use ed25519_dalek::SigningKey;
 use rand_core::OsRng;
 use uuid::Uuid;
 use zap_net::consensus::{
-    BftConsensusEngine, EquivocationProof, SwarmCommitCertificate, SwarmConsensusEngine, SwarmVote,
-    ValidatorEntry, ValidatorSet, VoteKind,
+    BftConsensusEngine, ConsensusError, EquivocationProof, SwarmCommitCertificate,
+    SwarmConsensusEngine, SwarmVote, ValidatorEntry, ValidatorSet, VoteKind,
 };
 
 fn create_validator_cluster(n: usize) -> (Vec<SigningKey>, ValidatorSet, Vec<BftConsensusEngine>) {
@@ -306,4 +306,78 @@ fn test_bft_dynamic_validator_epoch_transition() {
         assert_eq!(engine.current_epoch(), 2);
         assert_eq!(engine.current_round(), 0);
     }
+}
+
+#[test]
+fn test_bft_rejects_votes_from_a_stale_epoch_or_round() {
+    let (keys, val_set, engines) = create_validator_cluster(4);
+    let engine = &engines[0];
+    let voter = &val_set.validators[1];
+
+    let stale_epoch_vote = SwarmVote::new_signed(
+        0,
+        0,
+        0,
+        VoteKind::Prevote,
+        [7_u8; 32],
+        voter.node_id,
+        0,
+        &keys[1],
+    );
+    assert!(matches!(
+        engine.handle_vote(stale_epoch_vote),
+        Err(ConsensusError::EpochMismatch {
+            cert_epoch: 0,
+            set_epoch: 1
+        })
+    ));
+
+    engine.advance_round();
+    let stale_round_vote = SwarmVote::new_signed(
+        1,
+        0,
+        0,
+        VoteKind::Prevote,
+        [8_u8; 32],
+        voter.node_id,
+        0,
+        &keys[1],
+    );
+    assert!(matches!(
+        engine.handle_vote(stale_round_vote),
+        Err(ConsensusError::RoundMismatch {
+            message_round: 0,
+            current_round: 1,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn test_bft_commit_closes_round_and_advances_height() {
+    let (keys, val_set, engines) = create_validator_cluster(4);
+    let engine = &engines[0];
+    let payload = [33_u8; 32];
+
+    for (index, validator) in val_set.validators.iter().take(3).enumerate() {
+        let vote = SwarmVote::new_signed(
+            1,
+            0,
+            0,
+            VoteKind::Precommit,
+            payload,
+            validator.node_id,
+            0,
+            &keys[index],
+        );
+        let certificate = engine.handle_vote(vote).unwrap();
+        if index < 2 {
+            assert!(certificate.is_none());
+        } else {
+            assert!(certificate.is_some());
+        }
+    }
+
+    assert_eq!(engine.current_round(), 1);
+    assert_eq!(engine.next_block_height(), 2);
 }

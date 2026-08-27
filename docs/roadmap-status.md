@@ -29,7 +29,7 @@ Status values:
 | Fail-closed message policy | done | `message_policy.default_decision`, policy tests, docs | Add more production profile examples |
 | Receipt fsync/segments/index | done | `zap-journal`, `ReceiptJournalStore`, `ReceiptFsyncPolicy`, `[receipts] dir`, binary segments, sidecar indexes, bounded `until_processed_at_micros`, pull cursor tests, signed segment manifests, batch seals, MMR build | Add per-profile compression policy and fleet-level journal supervision |
 | Durable replay window | done | `DurableNonceStore` WAL (`ZAPNONC1`) in `zap-net`, `DurableReplayStore` frame fingerprints in `zap-node`, stress tests across restart floods | Tune window size policy per deployment |
-| Runtime host-call limits | partial | Host call byte limit and runtime bounds exist; async pipeline, streaming buffers, and IPC are implemented (`zap-runtime`) | Add per-action budget profiles and richer error taxonomy |
+| Runtime host-call limits | partial | Host call byte limit and runtime bounds exist; async pipeline, streaming buffers, IPC, and opt-in ABI-compatible async node dispatch are implemented (`zap-runtime`, `zap-node`) | Add per-action budget profiles and richer error taxonomy |
 
 ## Phase 2: Protocol Spec and SDK Conformance
 

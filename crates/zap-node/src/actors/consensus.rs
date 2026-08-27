@@ -2,7 +2,10 @@
 
 use anyhow::Result;
 use std::{sync::Arc, time::Duration};
-use tokio::sync::{broadcast, mpsc};
+use tokio::{
+    sync::{broadcast, mpsc},
+    time::{Instant, interval_at},
+};
 use tracing::{debug, info};
 use zap_agent::SwarmCommitCertificateRef;
 use zap_net::consensus::{SwarmConsensusEngine, SwarmProposal, SwarmVote};
@@ -39,7 +42,13 @@ impl ConsensusActor {
     pub async fn run(mut self) -> Result<()> {
         debug!("ConsensusActor started");
         let timeout_ms = self.config.max_round_timeout_ms.unwrap_or(3000);
-        let mut round_timeout = tokio::time::interval(Duration::from_millis(timeout_ms));
+        // `tokio::time::interval` ticks immediately on its first poll. A consensus
+        // node must first give the current leader a full round before declaring a
+        // timeout, otherwise every fresh actor skips round zero at startup.
+        let mut round_timeout = interval_at(
+            Instant::now() + Duration::from_millis(timeout_ms),
+            Duration::from_millis(timeout_ms),
+        );
 
         loop {
             tokio::select! {

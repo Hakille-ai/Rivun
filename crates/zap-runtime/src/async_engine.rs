@@ -13,7 +13,6 @@ use std::{
 use wasmtime::{
     Caller, Config, Engine, Linker, Module, Store, StoreLimits, StoreLimitsBuilder, ValType,
 };
-use zap_capability::DEFAULT_MAX_HOST_CALL_BYTES;
 
 const MEMORY_EXPORT: &str = "memory";
 const ALLOC_EXPORT: &str = "zap_alloc";
@@ -63,7 +62,7 @@ impl AsyncStoreState {
         Self {
             limits,
             permissions,
-            host_call_byte_limit: DEFAULT_MAX_HOST_CALL_BYTES as usize,
+            host_call_byte_limit: permissions.max_host_call_bytes as usize,
             host_calls: Vec::new(),
             stream_pool,
             ipc_router,
@@ -385,45 +384,65 @@ impl AsyncWasmExecutor {
             },
         )?;
 
-        // zap.memory_read(offset: i32, len: i32, ptr: i32) -> i32
+        // Keep the core host ABI identical to `WasmExecutor`. Drivers can opt
+        // into asynchronous stream/device imports without requiring a separate
+        // driver build for the node's async execution path.
+        // zap.memory_read(key_ptr: i32, key_len: i32, out_ptr: i32, out_len: i32) -> i32
         linker.func_wrap(
             HOST_MODULE,
             HOST_MEMORY_READ,
-            |caller: Caller<'_, AsyncStoreState>, _offset: i32, _len: i32, _ptr: i32| -> i32 {
+            |mut caller: Caller<'_, AsyncStoreState>,
+             key_ptr: i32,
+             key_len: i32,
+             out_ptr: i32,
+             out_len: i32|
+             -> i32 {
                 if !caller.data().permissions.memory_read {
                     return HOST_DENIED;
                 }
-                0
+                if out_ptr < 0 || out_len < 0 {
+                    return HOST_BAD_POINTER;
+                }
+                match read_host_bytes(&mut caller, key_ptr, key_len) {
+                    Ok(_) => 0,
+                    Err(status) => status,
+                }
             },
         )?;
 
-        // zap.memory_write(offset: i32, ptr: i32, len: i32) -> i32
+        // zap.memory_write(ptr: i32, len: i32) -> i32
         linker.func_wrap(
             HOST_MODULE,
             HOST_MEMORY_WRITE,
-            |caller: Caller<'_, AsyncStoreState>, _offset: i32, _ptr: i32, _len: i32| -> i32 {
-                if !caller.data().permissions.memory_write {
-                    return HOST_DENIED;
-                }
-                0
+            |mut caller: Caller<'_, AsyncStoreState>, ptr: i32, len: i32| -> i32 {
+                capture_host_call(
+                    &mut caller,
+                    HostCallKind::MemoryWrite,
+                    ptr,
+                    len,
+                    |permissions| permissions.memory_write,
+                )
             },
         )?;
 
-        // zap.device_call(port: i32, cmd_ptr: i32, cmd_len: i32, out_ptr: i32, max_out_len: i32) -> i32
+        // zap.device_call(ptr: i32, len: i32) -> i32
         linker.func_wrap(
             HOST_MODULE,
             HOST_DEVICE_CALL,
-            |caller: Caller<'_, AsyncStoreState>,
-             _port: i32,
-             _cmd_ptr: i32,
-             _cmd_len: i32,
-             _out_ptr: i32,
-             _max_out_len: i32|
-             -> i32 {
+            |mut caller: Caller<'_, AsyncStoreState>, ptr: i32, len: i32| -> i32 {
                 if !caller.data().permissions.device_call {
                     return HOST_DENIED;
                 }
-                0
+                match read_host_bytes(&mut caller, ptr, len) {
+                    Ok(payload) => {
+                        caller.data_mut().host_calls.push(HostCallRecord {
+                            kind: HostCallKind::DeviceCall,
+                            payload,
+                        });
+                        HOST_NOT_CONFIGURED
+                    }
+                    Err(status) => status,
+                }
             },
         )?;
 
@@ -510,6 +529,50 @@ impl AsyncWasmExecutor {
 
         Ok(())
     }
+}
+
+fn capture_host_call(
+    caller: &mut Caller<'_, AsyncStoreState>,
+    kind: HostCallKind,
+    ptr: i32,
+    len: i32,
+    allowed: fn(DriverPermissions) -> bool,
+) -> i32 {
+    if !allowed(caller.data().permissions) {
+        return HOST_DENIED;
+    }
+    match read_host_bytes(caller, ptr, len) {
+        Ok(payload) => {
+            caller
+                .data_mut()
+                .host_calls
+                .push(HostCallRecord { kind, payload });
+            0
+        }
+        Err(status) => status,
+    }
+}
+
+fn read_host_bytes(
+    caller: &mut Caller<'_, AsyncStoreState>,
+    ptr: i32,
+    len: i32,
+) -> std::result::Result<Vec<u8>, i32> {
+    if ptr < 0 || len < 0 {
+        return Err(HOST_BAD_POINTER);
+    }
+    let len = len as usize;
+    if len > caller.data().host_call_byte_limit {
+        return Err(HOST_TOO_LARGE);
+    }
+    let Some(wasmtime::Extern::Memory(memory)) = caller.get_export(MEMORY_EXPORT) else {
+        return Err(HOST_MEMORY_ERROR);
+    };
+    let mut payload = vec![0_u8; len];
+    memory
+        .read(caller, ptr as usize, &mut payload)
+        .map_err(|_| HOST_MEMORY_ERROR)?;
+    Ok(payload)
 }
 
 #[cfg(test)]
@@ -638,5 +701,44 @@ mod tests {
             err,
             ZapRuntimeError::Timeout { .. } | ZapRuntimeError::Wasmtime(_)
         ));
+    }
+
+    const SYNC_ABI_MEMORY_WRITE_WAT: &str = r#"
+    (module
+      (import "zap" "memory_write" (func $memory_write (param i32 i32) (result i32)))
+      (memory (export "memory") 1)
+      (data (i32.const 64) "async-audit")
+      (func (export "zap_alloc") (param i32) (result i32) (i32.const 1024))
+      (func (export "zap_dealloc") (param i32 i32))
+      (func (export "zap_execute") (param i32 i32 i32 i32) (result i64)
+        (drop (call $memory_write (i32.const 64) (i32.const 11)))
+        (i64.const 0)))
+    "#;
+
+    #[tokio::test]
+    async fn test_async_executor_supports_sync_host_abi_and_audit_records() {
+        let executor = AsyncWasmExecutor::new().unwrap();
+        let wasm = wat::parse_str(SYNC_ABI_MEMORY_WRITE_WAT).unwrap();
+        let driver = executor.compile_and_validate(&wasm).unwrap();
+        let limits = ExecutionLimits {
+            permissions: DriverPermissions {
+                memory_write: true,
+                ..DriverPermissions::none()
+            },
+            ..ExecutionLimits::default()
+        };
+
+        let result = executor
+            .execute_async(&driver, "audit", b"", limits)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.host_calls,
+            vec![HostCallRecord {
+                kind: HostCallKind::MemoryWrite,
+                payload: b"async-audit".to_vec(),
+            }]
+        );
     }
 }

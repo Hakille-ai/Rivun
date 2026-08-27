@@ -78,6 +78,12 @@ impl BftConsensusEngine {
         *self.epoch.lock().unwrap()
     }
 
+    /// Block height that will be assigned to the next proposal.
+    #[must_use]
+    pub fn next_block_height(&self) -> u64 {
+        *self.block_height.lock().unwrap()
+    }
+
     #[must_use]
     pub fn is_slashed(&self, node_id: &Uuid) -> bool {
         self.slashed_nodes.lock().unwrap().contains(node_id)
@@ -141,6 +147,16 @@ impl SwarmConsensusEngine for BftConsensusEngine {
                 set_epoch: current_epoch,
             });
         }
+        let current_view = *self.view.lock().unwrap();
+        let current_round = *self.round.lock().unwrap();
+        if proposal.view != current_view || proposal.round != current_round {
+            return Err(ConsensusError::RoundMismatch {
+                message_view: proposal.view,
+                message_round: proposal.round,
+                current_view,
+                current_round,
+            });
+        }
 
         if self.is_slashed(&proposal.proposer_node) {
             return Err(ConsensusError::InvalidProposalSignature(
@@ -192,6 +208,23 @@ impl SwarmConsensusEngine for BftConsensusEngine {
         &self,
         vote: SwarmVote,
     ) -> Result<Option<SwarmCommitCertificate>, ConsensusError> {
+        let current_epoch = *self.epoch.lock().unwrap();
+        if vote.epoch != current_epoch {
+            return Err(ConsensusError::EpochMismatch {
+                cert_epoch: vote.epoch,
+                set_epoch: current_epoch,
+            });
+        }
+        let current_view = *self.view.lock().unwrap();
+        let current_round = *self.round.lock().unwrap();
+        if vote.view != current_view || vote.round != current_round {
+            return Err(ConsensusError::RoundMismatch {
+                message_view: vote.view,
+                message_round: vote.round,
+                current_view,
+                current_round,
+            });
+        }
         if self.is_slashed(&vote.voter_node) {
             return Err(ConsensusError::InvalidVoteSignature(vote.voter_node));
         }
@@ -209,6 +242,12 @@ impl SwarmConsensusEngine for BftConsensusEngine {
 
         let mut states = self.round_states.lock().unwrap();
         let round_state = states.entry((vote.epoch, vote.round)).or_default();
+
+        // A certificate is emitted once per round. Re-emitting the same certificate
+        // for delayed packets would cause duplicate application at the node layer.
+        if round_state.committed_certificate.is_some() {
+            return Ok(None);
+        }
 
         match vote.vote_kind {
             VoteKind::Prevote => {
@@ -313,12 +352,29 @@ impl SwarmConsensusEngine for BftConsensusEngine {
                     };
 
                     round_state.committed_certificate = Some(cert.clone());
+                    drop(states);
+
+                    // Seal the committed height and close the round locally. This
+                    // prevents a later proposal from reusing the same block height
+                    // or delayed votes from reopening a finalized round.
+                    {
+                        let mut height = self.block_height.lock().unwrap();
+                        if *height == block_height {
+                            *height += 1;
+                        }
+                    }
+                    {
+                        let mut round = self.round.lock().unwrap();
+                        if *round == vote.round {
+                            *round += 1;
+                        }
+                    }
                     return Ok(Some(cert));
                 }
             }
         }
 
-        Ok(round_state.committed_certificate.clone())
+        Ok(None)
     }
 
     fn advance_round(&self) {
