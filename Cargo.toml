@@ -43,7 +43,7 @@ blake3 = "1"
 bytes = { version = "1", features = ["serde"] }
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 ed25519-dalek = { version = "2", features = ["batch", "rand_core"] }
 flate2 = "1.0"
 hex = "0.4"
