@@ -4,7 +4,12 @@
 //! deterministic dispute resolution, and timeout slashing across autonomous agents.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    fs::{self, OpenOptions},
+    io::Write,
+    path::Path,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -25,6 +30,45 @@ pub enum DisputeError {
     },
     #[error("arbitrator {0} already voted on dispute for pact {1}")]
     DuplicateArbitrationVote(Uuid, Uuid),
+    #[error(
+        "arbitration configuration is invalid: {arbitrators} arbitrators with threshold {threshold}"
+    )]
+    InvalidArbitrationConfiguration {
+        arbitrators: usize,
+        threshold: usize,
+    },
+    #[error("dispute for pact {0} has already been resolved")]
+    DisputeAlreadyResolved(Uuid),
+}
+
+/// Errors produced while durably saving or restoring a dispute engine.
+#[derive(Debug, Error)]
+pub enum DisputeStoreError {
+    #[error("failed to access dispute store: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("failed to encode or decode dispute store: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("unsupported dispute store version {0}")]
+    UnsupportedVersion(u8),
+    #[error("dispute store checksum mismatch")]
+    ChecksumMismatch,
+    #[error("invalid persisted dispute state: {0}")]
+    InvalidState(String),
+}
+
+const DISPUTE_STORE_VERSION: u8 = 1;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DisputeStoreEnvelope {
+    version: u8,
+    checksum: String,
+    payload: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedDisputeState {
+    pacts: HashMap<Uuid, EscrowPact>,
+    disputes: HashMap<Uuid, DisputeCase>,
 }
 
 /// Lifecycle states of an Escrow Agent Pact.
@@ -94,6 +138,75 @@ impl DisputeEngine {
             pacts: HashMap::new(),
             disputes: HashMap::new(),
         }
+    }
+
+    /// Persist a complete, integrity-checked snapshot using an fsynced temporary
+    /// file followed by an atomic replacement of the requested path.
+    pub fn save_to_path(&self, path: impl AsRef<Path>) -> Result<(), DisputeStoreError> {
+        validate_persisted_state(&self.pacts, &self.disputes)?;
+        let state = PersistedDisputeState {
+            pacts: self.pacts.clone(),
+            disputes: self.disputes.clone(),
+        };
+        let payload = serde_json::to_string(&state)?;
+        let envelope = DisputeStoreEnvelope {
+            version: DISPUTE_STORE_VERSION,
+            checksum: blake3::hash(payload.as_bytes()).to_hex().to_string(),
+            payload,
+        };
+        let bytes = serde_json::to_vec(&envelope)?;
+        let path = path.as_ref();
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)?;
+        }
+        let file_name = path.file_name().ok_or_else(|| {
+            DisputeStoreError::InvalidState("dispute store path has no file name".to_string())
+        })?;
+        let temporary = path.with_file_name(format!(
+            ".{}.{}.tmp",
+            file_name.to_string_lossy(),
+            Uuid::new_v4()
+        ));
+        let write_result = (|| -> Result<(), DisputeStoreError> {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, path)?;
+            Ok(())
+        })();
+        if write_result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        write_result
+    }
+
+    /// Restore a saved engine only after verifying its version, checksum, and
+    /// state-machine invariants. Corrupt or semantically invalid data fails
+    /// closed instead of reconstructing a partially trusted dispute state.
+    pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self, DisputeStoreError> {
+        let input = fs::read(path)?;
+        let envelope: DisputeStoreEnvelope = serde_json::from_slice(&input)?;
+        if envelope.version != DISPUTE_STORE_VERSION {
+            return Err(DisputeStoreError::UnsupportedVersion(envelope.version));
+        }
+        let checksum = blake3::hash(envelope.payload.as_bytes())
+            .to_hex()
+            .to_string();
+        if checksum != envelope.checksum {
+            return Err(DisputeStoreError::ChecksumMismatch);
+        }
+        let state: PersistedDisputeState = serde_json::from_str(&envelope.payload)?;
+        validate_persisted_state(&state.pacts, &state.disputes)?;
+        Ok(Self {
+            pacts: state.pacts,
+            disputes: state.disputes,
+        })
     }
 
     /// Lock resources in an escrow pact.
@@ -201,6 +314,11 @@ impl DisputeEngine {
             });
         }
 
+        if opened_by != pact.sender_node_id && opened_by != pact.recipient_node_id {
+            return Err(DisputeError::Unauthorized(opened_by));
+        }
+        validate_arbitration_configuration(pact)?;
+
         pact.state = PactState::Disputed;
 
         let dispute = DisputeCase {
@@ -232,6 +350,10 @@ impl DisputeEngine {
         if !pact.arbitration_nodes.contains(&arbitrator_id) {
             return Err(DisputeError::Unauthorized(arbitrator_id));
         }
+        if pact.state != PactState::Disputed {
+            return Err(DisputeError::DisputeAlreadyResolved(pact_id));
+        }
+        validate_arbitration_configuration(pact)?;
 
         let threshold = pact.arbitration_threshold;
         let total_escrow = pact.escrow_units;
@@ -246,6 +368,9 @@ impl DisputeEngine {
                 arbitrator_id,
                 pact_id,
             ));
+        }
+        if dispute.final_ruling.is_some() {
+            return Err(DisputeError::DisputeAlreadyResolved(pact_id));
         }
 
         dispute
@@ -288,6 +413,125 @@ impl DisputeEngine {
 
         Ok(None)
     }
+}
+
+fn validate_arbitration_configuration(pact: &EscrowPact) -> Result<(), DisputeError> {
+    let arbitrators: HashSet<Uuid> = pact.arbitration_nodes.iter().copied().collect();
+    if pact.arbitration_nodes.is_empty()
+        || arbitrators.len() != pact.arbitration_nodes.len()
+        || pact.arbitration_threshold == 0
+        || pact.arbitration_threshold > pact.arbitration_nodes.len()
+    {
+        return Err(DisputeError::InvalidArbitrationConfiguration {
+            arbitrators: pact.arbitration_nodes.len(),
+            threshold: pact.arbitration_threshold,
+        });
+    }
+    Ok(())
+}
+
+fn validate_persisted_state(
+    pacts: &HashMap<Uuid, EscrowPact>,
+    disputes: &HashMap<Uuid, DisputeCase>,
+) -> Result<(), DisputeStoreError> {
+    for (pact_id, pact) in pacts {
+        if pact.pact_id != *pact_id {
+            return Err(DisputeStoreError::InvalidState(format!(
+                "pact map key {pact_id} does not match embedded id {}",
+                pact.pact_id
+            )));
+        }
+        if pact.sender_node_id == pact.recipient_node_id {
+            return Err(DisputeStoreError::InvalidState(format!(
+                "pact {pact_id} has identical sender and recipient"
+            )));
+        }
+        let has_dispute = disputes.contains_key(pact_id);
+        let terminal_total = pact
+            .settled_recipient_units
+            .checked_add(pact.refunded_sender_units)
+            .ok_or_else(|| {
+                DisputeStoreError::InvalidState(format!(
+                    "pact {pact_id} terminal allocation overflows u64"
+                ))
+            })?;
+        match pact.state {
+            PactState::Locked => {
+                if has_dispute || terminal_total != 0 {
+                    return Err(DisputeStoreError::InvalidState(format!(
+                        "locked pact {pact_id} has dispute or settlement allocation"
+                    )));
+                }
+            }
+            PactState::Disputed => {
+                if !has_dispute || terminal_total != 0 {
+                    return Err(DisputeStoreError::InvalidState(format!(
+                        "disputed pact {pact_id} lacks a dispute or has settlement allocation"
+                    )));
+                }
+                validate_arbitration_configuration(pact).map_err(|error| {
+                    DisputeStoreError::InvalidState(format!(
+                        "disputed pact {pact_id} has invalid arbitration configuration: {error}"
+                    ))
+                })?;
+            }
+            PactState::Settled | PactState::Slashed => {
+                if terminal_total != pact.escrow_units {
+                    return Err(DisputeStoreError::InvalidState(format!(
+                        "terminal pact {pact_id} does not conserve escrow units"
+                    )));
+                }
+            }
+        }
+    }
+
+    for (pact_id, dispute) in disputes {
+        let pact = pacts.get(pact_id).ok_or_else(|| {
+            DisputeStoreError::InvalidState(format!("dispute {pact_id} references a missing pact"))
+        })?;
+        if dispute.pact_id != *pact_id {
+            return Err(DisputeStoreError::InvalidState(format!(
+                "dispute map key {pact_id} does not match embedded id {}",
+                dispute.pact_id
+            )));
+        }
+        if dispute.opened_by != pact.sender_node_id && dispute.opened_by != pact.recipient_node_id {
+            return Err(DisputeStoreError::InvalidState(format!(
+                "dispute {pact_id} was opened by an unauthorized participant"
+            )));
+        }
+        validate_arbitration_configuration(pact).map_err(|error| {
+            DisputeStoreError::InvalidState(format!(
+                "dispute {pact_id} has invalid arbitration configuration: {error}"
+            ))
+        })?;
+        if dispute
+            .votes
+            .keys()
+            .any(|arbitrator| !pact.arbitration_nodes.contains(arbitrator))
+        {
+            return Err(DisputeStoreError::InvalidState(format!(
+                "dispute {pact_id} contains a vote from an unauthorized arbitrator"
+            )));
+        }
+        if let Some(ruling) = dispute.final_ruling {
+            let votes_for_ruling = dispute
+                .votes
+                .values()
+                .filter(|(outcome, _)| *outcome == ruling)
+                .count();
+            if votes_for_ruling < pact.arbitration_threshold || pact.state == PactState::Disputed {
+                return Err(DisputeStoreError::InvalidState(format!(
+                    "dispute {pact_id} has an invalid final ruling"
+                )));
+            }
+        } else if pact.state != PactState::Disputed {
+            return Err(DisputeStoreError::InvalidState(format!(
+                "terminal pact {pact_id} has an unresolved dispute"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -416,5 +660,124 @@ mod tests {
         let pact = engine.pacts.get(&pact_id).unwrap();
         assert_eq!(pact.state, PactState::Slashed);
         assert_eq!(pact.refunded_sender_units, 10_000);
+    }
+
+    #[test]
+    fn test_dispute_store_round_trip_preserves_final_ruling() {
+        let mut engine = DisputeEngine::new();
+        let pact_id = Uuid::new_v4();
+        let sender = Uuid::new_v4();
+        let recipient = Uuid::new_v4();
+        let arb1 = Uuid::new_v4();
+        let arb2 = Uuid::new_v4();
+
+        engine.create_escrow_pact(
+            pact_id,
+            sender,
+            recipient,
+            42,
+            "persisted-commitment",
+            10_000,
+            vec![arb1, arb2],
+            2,
+        );
+        engine
+            .open_dispute(
+                pact_id,
+                sender,
+                DisputeEvidence {
+                    evidence_id: Uuid::new_v4(),
+                    submitter_node_id: sender,
+                    violation_code: "timeout".to_string(),
+                    payload_hash: "blake3:test".to_string(),
+                    signature: "test-signature".to_string(),
+                },
+                1,
+            )
+            .unwrap();
+        engine
+            .submit_arbitration_vote(pact_id, arb1, RulingOutcome::SplitEqual, "arb-1")
+            .unwrap();
+        assert_eq!(
+            engine
+                .submit_arbitration_vote(pact_id, arb2, RulingOutcome::SplitEqual, "arb-2")
+                .unwrap(),
+            Some(RulingOutcome::SplitEqual)
+        );
+
+        let temp = tempfile::tempdir().unwrap();
+        let store_path = temp.path().join("disputes.json");
+        engine.save_to_path(&store_path).unwrap();
+        let restored = DisputeEngine::load_from_path(&store_path).unwrap();
+
+        let pact = restored.pacts.get(&pact_id).unwrap();
+        assert_eq!(pact.state, PactState::Settled);
+        assert_eq!(pact.settled_recipient_units, 21);
+        assert_eq!(pact.refunded_sender_units, 21);
+        assert_eq!(
+            restored.disputes.get(&pact_id).unwrap().final_ruling,
+            Some(RulingOutcome::SplitEqual)
+        );
+    }
+
+    #[test]
+    fn test_dispute_store_rejects_tampered_checksum() {
+        let engine = DisputeEngine::new();
+        let temp = tempfile::tempdir().unwrap();
+        let store_path = temp.path().join("disputes.json");
+        engine.save_to_path(&store_path).unwrap();
+
+        let mut envelope: serde_json::Value =
+            serde_json::from_slice(&fs::read(&store_path).unwrap()).unwrap();
+        envelope["checksum"] = serde_json::Value::String("invalid".to_string());
+        fs::write(&store_path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+
+        assert!(matches!(
+            DisputeEngine::load_from_path(&store_path),
+            Err(DisputeStoreError::ChecksumMismatch)
+        ));
+    }
+
+    #[test]
+    fn test_dispute_rejects_unauthorized_opener_and_late_vote() {
+        let mut engine = DisputeEngine::new();
+        let pact_id = Uuid::new_v4();
+        let sender = Uuid::new_v4();
+        let recipient = Uuid::new_v4();
+        let arb1 = Uuid::new_v4();
+        let arb2 = Uuid::new_v4();
+        let outsider = Uuid::new_v4();
+        engine.create_escrow_pact(
+            pact_id,
+            sender,
+            recipient,
+            10,
+            "commitment",
+            100,
+            vec![arb1, arb2],
+            2,
+        );
+        let evidence = || DisputeEvidence {
+            evidence_id: Uuid::new_v4(),
+            submitter_node_id: outsider,
+            violation_code: "invalid".to_string(),
+            payload_hash: "hash".to_string(),
+            signature: "signature".to_string(),
+        };
+        assert_eq!(
+            engine.open_dispute(pact_id, outsider, evidence(), 1),
+            Err(DisputeError::Unauthorized(outsider))
+        );
+        engine.open_dispute(pact_id, sender, evidence(), 1).unwrap();
+        engine
+            .submit_arbitration_vote(pact_id, arb1, RulingOutcome::ReleaseToRecipient, "one")
+            .unwrap();
+        engine
+            .submit_arbitration_vote(pact_id, arb2, RulingOutcome::ReleaseToRecipient, "two")
+            .unwrap();
+        assert_eq!(
+            engine.submit_arbitration_vote(pact_id, arb1, RulingOutcome::ReleaseToRecipient, "x"),
+            Err(DisputeError::DisputeAlreadyResolved(pact_id))
+        );
     }
 }

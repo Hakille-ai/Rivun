@@ -3047,6 +3047,7 @@ dependencies = [
  "hex",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "uuid",
  "zap-crypto",

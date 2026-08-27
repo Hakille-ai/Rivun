@@ -58,6 +58,7 @@ Status values:
 | PACT bundles and revocation | done | `ZapPactBundle`, `ZapPactRevocation`, `zap pact revoke`, `zap pact bundle verify`, fixture verifier | Add richer multi-revocation examples if deployments need them |
 | PACT receipt references | done | `PactReceiptReference`, node integration test, `docs/receipts.md` | Add policy decision population when policy reporting is plumbed into receipt creation |
 | PACT SDK conformance | done | Rust/TypeScript/Python/Go helpers and shared fixture tests | Add browser-lite SDK coverage when browser mode exists |
+| Dispute-state durability | partial | `DisputeEngine::save_to_path/load_from_path`, fsynced atomic snapshots, checksum and state-invariant validation tests | Wire snapshots into cross-node orchestration and verify distributed arbitration signatures |
 
 ## Phase 4: Domain Packs and Marketplace
 

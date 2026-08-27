@@ -150,6 +150,16 @@ Quorum counting is explicit (`verify_quorum`), so a 2-of-3 arbitration panel
 can settle an escrow deterministically and offline. Slashing is applied
 automatically when an enforced timeout expires.
 
+### Durable dispute state
+
+`DisputeEngine` can persist and restore its complete escrow/dispute state with
+`save_to_path` and `load_from_path`. The store writes a fsynced temporary file
+before replacing the snapshot, and refuses to restore a file with an invalid
+version, checksum, participant relation, escrow allocation, arbitration
+configuration, or final-ruling quorum. Applications should save after each
+state transition; automatic cross-node replication and signature verification
+of arbitration votes remain separate deployment responsibilities.
+
 Escrow and disputes are **protocol evidence**, not a payment rail: the ruling
 outcome is recorded in the signed PACT timeline and can be referenced by
 receipts, but no value moves through ZAP itself.
