@@ -13,74 +13,74 @@ const DEFAULT_CRITERION_DIR: &str = "target/criterion";
 const NEW_BASELINE_DIR: &str = "new";
 const BENCH_TARGETS: &[BenchTarget] = &[
     BenchTarget {
-        package: "zap-capability",
+        package: "rivun-capability",
         bench: "capability",
-        path: "crates/zap-capability/benches/capability.rs",
+        path: "crates/rivun-capability/benches/capability.rs",
     },
     BenchTarget {
-        package: "zap-core",
+        package: "rivun-core",
         bench: "protocol",
-        path: "crates/zap-core/benches/protocol.rs",
+        path: "crates/rivun-core/benches/protocol.rs",
     },
     BenchTarget {
-        package: "zap-crypto",
+        package: "rivun-crypto",
         bench: "signature",
-        path: "crates/zap-crypto/benches/signature.rs",
+        path: "crates/rivun-crypto/benches/signature.rs",
     },
     BenchTarget {
-        package: "zap-driver-sdk",
+        package: "rivun-driver-sdk",
         bench: "sdk",
-        path: "crates/zap-driver-sdk/benches/sdk.rs",
+        path: "crates/rivun-driver-sdk/benches/sdk.rs",
     },
     BenchTarget {
-        package: "zap-envelope",
+        package: "rivun-envelope",
         bench: "envelope",
-        path: "crates/zap-envelope/benches/envelope.rs",
+        path: "crates/rivun-envelope/benches/envelope.rs",
     },
     BenchTarget {
-        package: "zap-ledger",
+        package: "rivun-ledger",
         bench: "receipt",
-        path: "crates/zap-ledger/benches/receipt.rs",
+        path: "crates/rivun-ledger/benches/receipt.rs",
     },
     BenchTarget {
-        package: "zap-memory",
+        package: "rivun-memory",
         bench: "memory",
-        path: "crates/zap-memory/benches/memory.rs",
+        path: "crates/rivun-memory/benches/memory.rs",
     },
     BenchTarget {
-        package: "zap-net",
+        package: "rivun-net",
         bench: "round_trip",
-        path: "crates/zap-net/benches/round_trip.rs",
+        path: "crates/rivun-net/benches/round_trip.rs",
     },
     BenchTarget {
-        package: "zap-node",
+        package: "rivun-node",
         bench: "dispatch",
-        path: "crates/zap-node/benches/dispatch.rs",
+        path: "crates/rivun-node/benches/dispatch.rs",
     },
     BenchTarget {
-        package: "zap-policy",
+        package: "rivun-policy",
         bench: "policy",
-        path: "crates/zap-policy/benches/policy.rs",
+        path: "crates/rivun-policy/benches/policy.rs",
     },
     BenchTarget {
-        package: "zap-router",
+        package: "rivun-router",
         bench: "router",
-        path: "crates/zap-router/benches/router.rs",
+        path: "crates/rivun-router/benches/router.rs",
     },
     BenchTarget {
-        package: "zap-runtime",
+        package: "rivun-runtime",
         bench: "runtime",
-        path: "crates/zap-runtime/benches/runtime.rs",
+        path: "crates/rivun-runtime/benches/runtime.rs",
     },
     BenchTarget {
-        package: "zap-schema",
+        package: "rivun-schema",
         bench: "schema",
-        path: "crates/zap-schema/benches/schema.rs",
+        path: "crates/rivun-schema/benches/schema.rs",
     },
     BenchTarget {
-        package: "zap-store",
+        package: "rivun-store",
         bench: "store",
-        path: "crates/zap-store/benches/store.rs",
+        path: "crates/rivun-store/benches/store.rs",
     },
 ];
 
@@ -309,7 +309,7 @@ fn release_readiness(options: ReadinessOptions) -> Result<()> {
             "run",
             "--locked",
             "-p",
-            "zap-cli",
+            "rivun-cli",
             "--",
             "fixtures",
             "verify",
@@ -327,7 +327,7 @@ fn release_readiness(options: ReadinessOptions) -> Result<()> {
             "run",
             "--locked",
             "-p",
-            "zap-cli",
+            "rivun-cli",
             "--",
             "pack",
             "list",
@@ -614,7 +614,7 @@ fn bench_compare(options: CompareOptions) -> Result<()> {
         .collect();
     let mut regressions = Vec::new();
     let mut lines = vec![
-        "# ZAP benchmark comparison".to_string(),
+        "# Rivun benchmark comparison".to_string(),
         String::new(),
         "| benchmark | base median | head median | delta | threshold | status |".to_string(),
         "| --- | ---: | ---: | ---: | ---: | --- |".to_string(),
@@ -873,7 +873,7 @@ fn render_site(latest: &BenchmarkReport, history: &BenchmarkHistory) -> String {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ZAP Benchmarks</title>
+  <title>Rivun Benchmarks</title>
   <style>
     :root {{ color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }}
     body {{ margin: 0; padding: 32px; background: Canvas; color: CanvasText; }}
@@ -888,7 +888,7 @@ fn render_site(latest: &BenchmarkReport, history: &BenchmarkHistory) -> String {
 </head>
 <body>
 <main>
-  <h1>ZAP Benchmarks</h1>
+  <h1>Rivun Benchmarks</h1>
   <p>Latest run: <code>{label}</code> at epoch <code>{generated}</code>. Stored runs: {runs}.</p>
   <p><a href="./latest.json">latest.json</a> · <a href="./history.json">history.json</a> · <a href="./badge.svg">badge.svg</a></p>
   <table>

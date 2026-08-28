@@ -1,6 +1,6 @@
 # Agentic Development Pack
 
-This preview domain pack describes auditable coding-agent workflows over ZAP.
+This preview domain pack describes auditable coding-agent workflows over Rivun.
 It is intentionally conservative: read-only inspection is low risk, source
 patching and test execution require explicit grants, and pull-request creation
 is treated as a high-risk publication action.
@@ -31,8 +31,8 @@ The pack reserves these action subjects:
 - `ci.inspect`
 - `pr.create`
 
-Agent protocol messages such as `zap.agent.intent`, `zap.agent.status`, and
-`zap.agent.result` should be used to link a coding task to the actions above.
+Agent protocol messages such as `rivun.agent.intent`, `rivun.agent.status`, and
+`rivun.agent.result` should be used to link a coding task to the actions above.
 
 ## Future Work
 
@@ -40,3 +40,4 @@ Agent protocol messages such as `zap.agent.intent`, `zap.agent.status`, and
 - add a gateway adapter for local git and test commands;
 - add expected receipt fixtures;
 - add an end-to-end demo: planner -> patcher -> tester -> reviewer -> PR.
+

@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping build ZAP. The project is intentionally conservative:
+Thank you for helping build rivun. The project is intentionally conservative:
 protocol correctness, security, and reproducibility matter more than cleverness.
 
 ## Development Setup
@@ -28,18 +28,18 @@ for release-profile Criterion builds.
 Docker users can build the CLI image with:
 
 ```bash
-docker build -t zap:local .
+docker build -t rivun:local .
 ```
 
 ## Contribution Rules
 
-- Do not change the 64-byte ZAP-Wire header layout without a new protocol
+- Do not change the 64-byte @@@@rivun_HEADER@@WIRE@@ header layout without a new protocol
   version and golden vectors.
-- Keep `ZAP_SIGN` as a fast hint only; never treat it as a complete signature.
-- Keep `zap-core` focused on wire frames. Put universal message semantics in
-  `zap-envelope`.
+- Keep `@@rivun_HEADER@@SIGN` as a fast hint only; never treat it as a complete signature.
+- Keep `rivun-core` focused on wire frames. Put universal message semantics in
+  `rivun-envelope`.
 - Keep host capabilities denied by default in the WASM runtime.
-- Keep `zap check-config` aligned with daemon startup validation.
+- Keep `rivun check-config` aligned with daemon startup validation.
 - Prefer typed errors and deterministic behavior over ad hoc parsing.
 - Add or update tests for every user-visible behavior change.
 - Do not add financial, billing, reward, or settlement behavior to the protocol
@@ -73,6 +73,6 @@ Use small, reviewable commits. Suggested prefixes:
 
 ## Compatibility Expectations
 
-ZAP is pre-1.0, but wire compatibility is still treated seriously. Any change
+rivun is pre-1.0, but wire compatibility is still treated seriously. Any change
 that affects parsing, encoding, signatures, trailers, or default security policy
 needs tests and an explicit note in [CHANGELOG.md](CHANGELOG.md).

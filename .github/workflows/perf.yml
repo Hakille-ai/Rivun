@@ -98,7 +98,7 @@ jobs:
       - name: Download previous history
         run: |
           mkdir -p target/bench-results
-          curl -fsSL https://hakille-ai.github.io/ZAP/history.json \
+          curl -fsSL https://hakille-ai.github.io/Rivun/history.json \
             -o target/bench-results/history.json || true
       - name: Build benchmark site
         run: |

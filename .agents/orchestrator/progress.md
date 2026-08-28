@@ -12,9 +12,10 @@ Current iteration: 1 / 32
 - [x] Phase 2: E2E Test Suite Setup (`TEST_READY.md` published)
 - [x] Phase 2: Status & Build Audit Complete (Reported in `explorer_status_audit`)
 - [ ] Phase 3: Targeted Remediation & Workspace Integration
-  - [/] Remediation Worker [Conv ID: 4ea5b36a-2258-43ac-b704-0df71ff108fa] — Applying fixes to `zap-net`, `zap-driver-sdk`, `zap-ledger`, `sdks/rust`, running full test & clippy suite
+  - [/] Remediation Worker [Conv ID: 4ea5b36a-2258-43ac-b704-0df71ff108fa] — Applying fixes to `rivun-net`, `rivun-driver-sdk`, `rivun-ledger`, `sdks/rust`, running full test & clippy suite
 - [ ] Phase 4: Verification & Gate Evaluation
   - [ ] 2 Reviewers
   - [ ] 2 Challengers
   - [ ] Forensic Auditor
 - [ ] Phase 5: Final Victory Report
+

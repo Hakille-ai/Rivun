@@ -1,23 +1,23 @@
 # Deployment
 
-ZAP can run directly from Cargo during development or from the production
+rivun can run directly from Cargo during development or from the production
 container image in environments that prefer immutable artifacts.
 
 ## Build the Container
 
 ```bash
-docker build -t zap:local .
+docker build -t rivun:local .
 ```
 
 The image is multi-stage:
 
-- builder: Rust toolchain, compiles `zap-cli` in release mode;
-- runtime: Debian slim, `tini`, non-root `zap` user, only the `zap` binary.
+- builder: Rust toolchain, compiles `rivun-cli` in release mode;
+- runtime: Debian slim, `tini`, non-root `rivun` user, only the `rivun` binary.
 
 The default command is:
 
 ```bash
-zap run --config /etc/zap/zap.toml
+rivun run --config /etc/rivun/rivun.toml
 ```
 
 ## Compose Template
@@ -25,8 +25,8 @@ zap run --config /etc/zap/zap.toml
 Create a local state directory and node key:
 
 ```bash
-mkdir -p .zap/container
-docker compose run --rm node keygen --out /var/lib/zap/node.key
+mkdir -p .rivun/container
+docker compose run --rm node keygen --out /var/lib/rivun/node.key
 ```
 
 Then start a node:
@@ -37,15 +37,15 @@ docker compose up --build
 
 The default compose file mounts:
 
-- `examples/configs/container-node.toml` to `/etc/zap/zap.toml`;
-- `.zap/container` to `/var/lib/zap`;
-- `examples/wasm-drivers` to `/opt/zap/drivers`.
+- `examples/configs/container-node.toml` to `/etc/rivun/rivun.toml`;
+- `.rivun/container` to `/var/lib/rivun`;
+- `examples/wasm-drivers` to `/opt/rivun/drivers`.
 
 The template binds the host UDP port to `127.0.0.1` by default. For production
 networks, replace that host address with the intended interface and enforce
 matching firewall policy.
 
-For real deployments, copy the example config into your own private `.zap`
+For real deployments, copy the example config into your own private `.rivun`
 state directory, add peers and drivers, then update the compose volume to mount
 that config instead.
 
@@ -59,7 +59,7 @@ The compose template uses:
 - `no-new-privileges`;
 - bounded process count;
 - `noexec`, `nosuid`, and `nodev` temporary filesystem;
-- writable state only under `/var/lib/zap`;
+- writable state only under `/var/lib/rivun`;
 - loopback-only UDP port exposure by default.
 
 Operators should additionally enforce host firewall rules and rotate transport
@@ -71,32 +71,33 @@ keys when peer membership changes.
 - Store node private keys outside the repository.
 - Configure static peers with verified `node_id`, `public_key`, and
   `transport_key`.
-- Prefer `zap peer invite` and `zap peer accept` for signed peer enrollment
-  material, and use `zap peer rotate` / `zap peer revoke` for auditable
+- Prefer `rivun peer invite` and `rivun peer accept` for signed peer enrollment
+  material, and use `rivun peer rotate` / `rivun peer revoke` for auditable
   membership changes.
 - Set `[peers.trust]` so send, receive, forwarding, PoA-attestation, expiry,
   and key-rotation policy are explicit for each machine.
 - Set `[security]` replay and clock-skew limits intentionally.
 - Use signed driver manifests for all production WASM drivers.
-- Use `zap registry pull --operator-public-key <key>` when mirroring registry
+- Use `rivun registry pull --operator-public-key <key>` when mirroring registry
   indexes from peers, and keep `[registry] require_signature = true` for
   deployment configs.
-- Use `zap registry mirror --operator-public-key <key>` to consolidate multiple
+- Use `rivun registry mirror --operator-public-key <key>` to consolidate multiple
   peer indexes, then review and re-sign the merged registry before deployment.
-- Create and archive `zap registry publication create` output for every
+- Create and archive `rivun registry publication create` output for every
   approved registry rollout so audits can verify the exact deployed index hash.
-- Use `zap registry bundle pull-manifest --require-publication --require-drivers`
+- Use `rivun registry bundle pull-manifest --require-publication --require-drivers`
   to inspect a peer-published bundle contract before fetching artifacts.
-- Use `zap registry bundle verify --require-drivers` before importing offline
-  ZapStore bundles into production or factory images.
+- Use `rivun registry bundle verify --require-drivers` before importing offline
+  RivunStore bundles into production or factory images.
 - Enable `[receipts].dir` when audit trails are required.
-- Run `zap capability cache refresh --config <path> --strict` before strict
+- Run `rivun capability cache refresh --config <path> --strict` before strict
   validation when routes require peer grants.
-- Use `zap poa validator-set verify` before deploying signed validator-set
+- Use `rivun poa validator-set verify` before deploying signed validator-set
   files referenced by `[poa].validator_set`.
-- Use `zap poa validator-set pull --authority-public-key <key>` when fetching
+- Use `rivun poa validator-set pull --authority-public-key <key>` when fetching
   validator sets from peers, then run strict config validation on the applied
   config.
-- Run `zap check-config --strict --config <path>` before starting a daemon.
+- Run `rivun check-config --strict --config <path>` before starting a daemon.
 - Pin container image digests in production orchestrators once images are
   published.
+

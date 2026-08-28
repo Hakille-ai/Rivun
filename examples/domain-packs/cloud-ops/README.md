@@ -1,7 +1,7 @@
 # Cloud Operations Domain Pack
 
 This preview domain pack models SRE, cloud operations, and incident response
-actions as auditable ZAP subjects. It is designed for automation that needs to
+actions as auditable Rivun subjects. It is designed for automation that needs to
 observe systems, coordinate incidents, mitigate production issues, and guard
 high-impact operational changes.
 
@@ -40,5 +40,5 @@ The baseline policy is fail-closed:
 Run this from the repository root:
 
 ```powershell
-cargo run -p zap-cli -- pack validate --pack examples/domain-packs/cloud-ops --json
+cargo run -p rivun-cli -- pack validate --pack examples/domain-packs/cloud-ops --json
 ```

@@ -8,7 +8,7 @@ Initializing and inspecting workspace crates and documentation.
 ## Checklist
 - [x] Create DISPATCH.md and BRIEFING.md
 - [ ] Inspect ORIGINAL_REQUEST.md, PROJECT.md, SCOPE.md
-- [ ] Inspect crates in workspace (zap-core, zap-crypto, zap-p2p, zap-storage, zap-driver, zap-policy, zap-cli, zap-bench, tests/e2e)
+- [ ] Inspect crates in workspace (rivun-core, rivun-crypto, rivun-p2p, rivun-storage, rivun-driver, rivun-policy, rivun-cli, rivun-bench, tests/e2e)
 - [ ] Design and implement `tests/e2e/src/harness.rs`
 - [ ] Implement `tests/e2e/tests/tier1_feature_tests.rs` (>= 75 tests)
 - [ ] Implement `tests/e2e/tests/tier2_boundary_tests.rs` (>= 75 tests)
@@ -17,5 +17,6 @@ Initializing and inspecting workspace crates and documentation.
 - [ ] Implement `tests/e2e/tests/e2e_suite.rs` (unified runner)
 - [ ] Update `TEST_INFRA.md`
 - [ ] Update `TEST_READY.md`
-- [ ] Run `cargo test --package zap-e2e` and verify all tests pass
+- [ ] Run `cargo test --package rivun-e2e` and verify all tests pass
 - [ ] Write `handoff.md` and notify parent
+

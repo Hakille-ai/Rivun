@@ -1,4 +1,4 @@
-//! ZAP Next-Gen End-to-End Test Harness Library
+//! Rivun Next-Gen End-to-End Test Harness Library
 
 pub mod harness;
 pub use harness::*;

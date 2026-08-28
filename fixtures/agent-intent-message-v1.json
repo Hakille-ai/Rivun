@@ -1,8 +1,8 @@
 {
   "fixture_schema_version": 1,
   "description": "Agent intent payload for the zap.agent.intent ZENV subject.",
-  "subject": "zap.agent.intent",
-  "content_type": "application/zap-agent+json",
+  "subject": "rivun.agent.intent",
+  "content_type": "application/rivun-agent+json",
   "body_json": {
     "type": "intent",
     "payload": {

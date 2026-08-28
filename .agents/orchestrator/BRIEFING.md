@@ -1,22 +1,22 @@
 # BRIEFING — 2026-08-15T20:23:50Z
 
 ## Mission
-Lead the full realization of the ZAP Next-Gen Frontier upgrade based on ORIGINAL_REQUEST.md (R1: P2P Swarm Gossip Consensus, R2: MMR & Batch Receipts, R3: Async WASM Driver Pipeline & IPC, R4: Decentralized Agent Pact & Dispute Engine, R5: Cluster Simulator & Swarm Benchmarking).
+Lead the full realization of the rivun Next-Gen Frontier upgrade based on ORIGINAL_REQUEST.md (R1: P2P Swarm Gossip Consensus, R2: MMR & Batch Receipts, R3: Async WASM Driver Pipeline & IPC, R4: Decentralized Agent Pact & Dispute Engine, R5: Cluster Simulator & Swarm Benchmarking).
 
 ## 🔒 My Identity
 - Archetype: Project Orchestrator
 - Roles: orchestrator, user_liaison, human_reporter, successor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator
 - Original parent: caller agent (id: ef2e6b8c-65c6-4c75-8035-05bef4dd3003)
 - Original parent conversation ID: ef2e6b8c-65c6-4c75-8035-05bef4dd3003
 
 ## 🔒 My Workflow
 - **Pattern**: Project Pattern (Survey -> Decompose & Delegate / Dual Track -> Implementation & E2E Testing)
-- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\PROJECT.md
+- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\PROJECT.md
 1. **Decompose**: Survey completed. Milestones M1-M6 defined. Dual track active.
 2. **Dispatch & Execute**:
    - Status Audit complete.
-   - Remediation Worker (`4ea5b36a-2258-43ac-b704-0df71ff108fa`): Applying targeted fixes to `zap-net`, `zap-driver-sdk`, `zap-ledger`, and `sdks/rust`, then running full test & clippy suite.
+   - Remediation Worker (`4ea5b36a-2258-43ac-b704-0df71ff108fa`): Applying targeted fixes to `rivun-net`, `rivun-driver-sdk`, `rivun-ledger`, and `sdks/rust`, then running full test & clippy suite.
    - Reviewers, Challengers, and Forensic Auditor gate verification.
 3. **On failure**:
    - Retry: nudge stuck agent or re-send task
@@ -48,7 +48,7 @@ Lead the full realization of the ZAP Next-Gen Frontier upgrade based on ORIGINAL
 - Updated: 2026-08-15T20:07:18Z
 
 ## Key Decisions Made
-- Status audit identified 4 precise fix locations: `zap-net` (Serde bounds, typo, format string), `zap-driver-sdk` (`hex` dependency, `IpcMessage` usage, lifetimes), `zap-ledger` (batch seal test signature), `sdks/rust` (envelope error mapping).
+- Status audit identified 4 precise fix locations: `rivun-net` (Serde bounds, typo, format string), `rivun-driver-sdk` (`hex` dependency, `IpcMessage` usage, lifetimes), `rivun-ledger` (batch seal test signature), `sdks/rust` (envelope error mapping).
 - Dispatched Remediation Worker (`4ea5b36a-2258-43ac-b704-0df71ff108fa`) to apply fixes and run full workspace tests (`cargo test --workspace --all-targets`) and clippy (`cargo clippy --workspace --all-targets -- -D warnings`).
 
 ## Team Roster
@@ -69,10 +69,11 @@ Lead the full realization of the ZAP Next-Gen Frontier upgrade based on ORIGINAL
 - Safety timer: none
 
 ## Artifact Index
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\ORIGINAL_REQUEST.md` — Original User Request Specification
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\PROJECT.md` — Master Project Architecture & Feature Inventory
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\TEST_READY.md` — E2E Test Suite Readiness Report
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\DISPATCH.md` — Dispatch message log
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\BRIEFING.md` — Orchestrator briefing and state memory
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\progress.md` — Workflow progress tracker
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\plan.md` — Orchestration master plan
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\ORIGINAL_REQUEST.md` — Original User Request Specification
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\PROJECT.md` — Master Project Architecture & Feature Inventory
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\TEST_READY.md` — E2E Test Suite Readiness Report
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\DISPATCH.md` — Dispatch message log
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\BRIEFING.md` — Orchestrator briefing and state memory
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\progress.md` — Workflow progress tracker
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\plan.md` — Orchestration master plan
+

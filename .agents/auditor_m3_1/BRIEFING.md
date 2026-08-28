@@ -1,14 +1,14 @@
 # BRIEFING — 2026-08-14T19:14:00Z
 
 ## Mission
-Forensic audit of Milestone 3 implementation in crates/zap-telemetry, crates/zap-node, and crates/zap-cli. Verify empirical truth, no facade/mock/hardcoded test returns, genuine FleetDoctor checks, ProcessState, SecretRedactor, Gzip tarballs, and Prometheus metrics.
+Forensic audit of Milestone 3 implementation in crates/rivun-telemetry, crates/rivun-node, and crates/rivun-cli. Verify empirical truth, no facade/mock/hardcoded test returns, genuine FleetDoctor checks, ProcessState, SecretRedactor, Gzip tarballs, and Prometheus metrics.
 
 ## 🔒 My Identity
 - Archetype: forensic_auditor
 - Roles: critic, specialist, auditor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\auditor_m3_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\auditor_m3_1
 - Original parent: af9ffcbe-7c8d-446c-a0a8-f72a3e173c84
-- Target: Milestone 3 (zap-telemetry, zap-node, zap-cli)
+- Target: Milestone 3 (rivun-telemetry, rivun-node, rivun-cli)
 
 ## 🔒 Key Constraints
 - Audit-only — do NOT modify implementation code
@@ -21,7 +21,7 @@ Forensic audit of Milestone 3 implementation in crates/zap-telemetry, crates/zap
 - Updated: 2026-08-14T19:14:00Z
 
 ## Audit Scope
-- **Work product**: crates/zap-telemetry, crates/zap-node, crates/zap-cli
+- **Work product**: crates/rivun-telemetry, crates/rivun-node, crates/rivun-cli
 - **Profile loaded**: General Project (Integrity Forensics)
 - **Audit type**: forensic integrity check
 
@@ -30,7 +30,7 @@ Forensic audit of Milestone 3 implementation in crates/zap-telemetry, crates/zap
 - **Checks completed**:
   - Read ORIGINAL_REQUEST.md, PROJECT.md, and worker_m3_fix handoff
   - Source code analysis (facade, hardcoding, mock detection)
-  - Behavioral verification & tests execution (cargo test -p zap-telemetry, cargo test -p zap-node, cargo test -p zap-cli)
+  - Behavioral verification & tests execution (cargo test -p rivun-telemetry, cargo test -p rivun-node, cargo test -p rivun-cli)
   - Detailed inspection of FleetDoctor, ProcessState, SecretRedactor, Tarball creation/extraction, Prometheus parity
   - Adversarial review & stress testing
 - **Findings so far**: CLEAN — 0 integrity violations
@@ -56,3 +56,4 @@ Forensic audit of Milestone 3 implementation in crates/zap-telemetry, crates/zap
 - BRIEFING.md — persistent state and context
 - progress.md — liveness and step-by-step progress
 - handoff.md — final audit report (Verdict: CLEAN)
+

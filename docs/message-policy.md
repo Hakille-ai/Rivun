@@ -1,8 +1,8 @@
 # Message Policy
 
-ZAP does not compile natural language into actions. AI models, operator tools,
+rivun does not compile natural language into actions. AI models, operator tools,
 or gateways should emit strict typed messages: `kind`, `subject`,
-`content_type`, and payload bytes. ZAP then signs, encrypts, routes, audits, and
+`content_type`, and payload bytes. rivun then signs, encrypts, routes, audits, and
 enforces deterministic policy on those messages.
 
 ## Sending Typed Actions
@@ -10,7 +10,7 @@ enforces deterministic policy on those messages.
 Send an action envelope directly:
 
 ```bash
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
+cargo run -p rivun-cli -- send --config rivun.toml --target <uuid> \
   --kind action --subject thermostat.setpoint \
   --payload '{"temperature_c":20}' --content-type application/json
 ```
@@ -19,7 +19,7 @@ For actions that must carry a Proof-of-Action certificate, mark the frame as
 consensus-protected:
 
 ```bash
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> \
+cargo run -p rivun-cli -- send --config rivun.toml --target <uuid> \
   --kind action --subject safety.emergency_stop \
   --payload '{"reason":"operator_request"}' --content-type application/json \
   --requires-consensus --poa-network
@@ -73,7 +73,7 @@ Decisions:
 - `simulate_first`: fail closed until a trusted simulation subsystem supplies
   successful simulation evidence.
 
-This keeps model-specific planning outside the protocol while preserving ZAP's
+This keeps model-specific planning outside the protocol while preserving rivun's
 receiver-side safety boundary.
 
 ## Typed Message Contracts
@@ -105,8 +105,8 @@ required_json_fields = ["source"]
 Validate an encoded `ZENV` payload:
 
 ```bash
-cargo run -p zap-cli -- schema validate \
-  --contract thermostat.contract.toml --envelope action.zenv --json
+cargo run -p rivun-cli -- schema validate \
+  --contract thermostat.contract.toml --envelope action.ZENV --json
 ```
 
 Enable receiver-side schema enforcement:
@@ -141,7 +141,8 @@ reason = "safety actions require validator quorum"
 Evaluate before deployment:
 
 ```bash
-cargo run -p zap-cli -- policy evaluate --policy policy.toml \
+cargo run -p rivun-cli -- policy evaluate --policy policy.toml \
   --kind action --subject safety.emergency_stop \
   --requires-consensus --strict --json
 ```
+

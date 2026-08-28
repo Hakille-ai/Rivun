@@ -2,33 +2,33 @@
 
 ## 1. Observation
 
-A comprehensive, independent re-review was conducted on the Milestone 2 remediation fixes implemented across `crates/zap-store`, `crates/zap-pack`, and `crates/zap-cli`.
+A comprehensive, independent re-review was conducted on the Milestone 2 remediation fixes implemented across `crates/rivun-store`, `crates/rivun-pack`, and `crates/rivun-cli`.
 
 ### Verified Code Components:
-1. **Struct & Enum Alignment (`crates/zap-store/src/lib.rs`)**:
+1. **Struct & Enum Alignment (`crates/rivun-store/src/lib.rs`)**:
    - `DomainPackStatus`: Verified `Draft` variant (`Active`, `Deprecated`, `Revoked`, `Draft`) present in `lib.rs:514-520`.
-   - `DomainPackCompatibility`: Verified fields `zap_version_req: String`, `abi_version_req: String`, `capabilities_required: Vec<String>`, `capabilities_provided: Vec<String>` in `lib.rs:533-550`.
+   - `DomainPackCompatibility`: Verified fields `@@rivun_HEADER@@version_req: String`, `abi_version_req: String`, `capabilities_required: Vec<String>`, `capabilities_provided: Vec<String>` in `lib.rs:533-550`.
    - `DomainPackArtifact`: Verified `relative_path: Option<String>` and `sha256_hex: Option<String>` with `.path()` and `.hash()` accessor methods handling backward/forward schema compatibility in `lib.rs:553-588`.
    - `DomainPackRegistryEntry`: Verified `author_node_id`, `drivers`, `metadata`, `dependencies`, `description`, `deprecated_reason`, `revoked_reason`, and `labels` in `lib.rs:591-622`.
-   - Call site updates in `crates/zap-cli/src/main.rs:7795-7830`, `crates/zap-store/tests/pack_tests.rs:125-160`, and `crates/zap-store/tests/adversarial_m2_tests.rs:103-163` were verified for struct alignment.
+   - Call site updates in `crates/rivun-cli/src/main.rs:7795-7830`, `crates/rivun-store/tests/pack_tests.rs:125-160`, and `crates/rivun-store/tests/adversarial_m2_tests.rs:103-163` were verified for struct alignment.
 
-2. **Zip Slip Sanitization (`crates/zap-store/src/bundle.rs`)**:
+2. **Zip Slip Sanitization (`crates/rivun-store/src/bundle.rs`)**:
    - `DomainPackBundle::decode_bytes`: Verified component check rejecting `ParentDir`, `RootDir`, and `Prefix` in `bundle.rs:421-432`.
    - `DomainPackBundle::extract_to_dir`: Verified path component inspection rejecting relative/absolute traversal, target directory creation & canonicalization, parent directory canonicalization, and `canonical_parent.starts_with(&canonical_target)` prefix verification in `bundle.rs:507-560`.
 
-3. **Public Key Base64/Hex Parsing (`crates/zap-store/src/bundle.rs`)**:
+3. **Public Key Base64/Hex Parsing (`crates/rivun-store/src/bundle.rs`)**:
    - `parse_public_key_str`: Decodes hex (if 32 bytes) or Base64 (if 32 bytes) into `[u8; 32]` array in `bundle.rs:183-200`.
    - `verify_against_trusted_keys`: Converts both `signer_public_key` and candidate trusted keys via `parse_public_key_str` to compare raw public key bytes `sig_bytes == trust_bytes` in `bundle.rs:152-177`.
 
-4. **SemVer Matching & Transitive Dependency Resolution (`crates/zap-store/src/resolver.rs`)**:
+4. **SemVer Matching & Transitive Dependency Resolution (`crates/rivun-store/src/resolver.rs`)**:
    - `matches_version_req`: Verified SemVer 0.x breaking change rules (`^0.1.0` vs `0.2.0`), `>=`/`=` prefix handling, bare version exact matching, and `false` return on unparseable requirements in `resolver.rs:40-76`.
    - `resolve_dep`: Verified depth-first recursive traversal over `entry.dependencies` before appending entries to `install_order`, ensuring transitive dependencies (e.g. A -> B -> C) are resolved in correct topological order in `resolver.rs:129-178`.
 
-5. **Policy Validator & Audit Status Checks (`crates/zap-store/src/validator.rs` & `audit.rs`)**:
+5. **Policy Validator & Audit Status Checks (`crates/rivun-store/src/validator.rs` & `audit.rs`)**:
    - `DomainPackPolicyValidator`: Verified `extract_declared_paths_from_toml` extracts declared `[[policies]]`, `[[routes]]`, and `[[schemas]]` tables from `pack.toml`, ensuring custom policy/route file paths are validated in `validator.rs:22-51`.
    - `audit_pack_dir`: Evaluates `status` field in `pack.toml` (setting `DomainPackRisk::Medium` for `deprecated` and `DomainPackRisk::Critical` for `revoked`) in `audit.rs:57-77`.
 
-6. **CLI Commands (`crates/zap-cli/src/main.rs`)**:
+6. **CLI Commands (`crates/rivun-cli/src/main.rs`)**:
    - `pack_verify`: Invokes `bundle.verify_integrity()`, populates `integrity_ok`, records errors on missing signature files when requested, and performs policy checks in `main.rs:7617-7698`.
    - `pack_install`: Parses declared dependencies from `pack.toml`, resolves dependency tree via `DomainPackDependencyResolver`, records `installed_dependencies`, and saves `dependencies` in the registry entry in `main.rs:7700-7855`.
 
@@ -61,8 +61,8 @@ A comprehensive, independent re-review was conducted on the Milestone 2 remediat
 ## 3. Caveats
 
 1. **Environment Command Timeout**: Terminal execution permissions in the environment timed out during `run_command` invocation. Verification was completed via meticulous static analysis of code, logic, and test suites.
-2. **Minor Observation — Audit Bundle Status Risk Update**: In `crates/zap-store/src/audit.rs:127-133`, when `bundle.manifest.status == DomainPackStatus::Deprecated`, `audit_bundle` pushes an `AuditIssue` with `Medium` severity, but does not explicitly bump `highest_risk` to `DomainPackRisk::Medium` (unlike `audit_pack_dir`). This is a minor non-blocking inconsistency.
-3. **Minor Observation — Integer Bounds in Bundle Decoding**: In `crates/zap-store/src/bundle.rs:440`, `offset + content_len` relies on standard `+` operator. For malformed/untrusted inputs on 64-bit systems, using `checked_add` or checking `content_len > (bytes.len() - offset) as u64` is recommended for extra hardening.
+2. **Minor Observation — Audit Bundle Status Risk Update**: In `crates/rivun-store/src/audit.rs:127-133`, when `bundle.manifest.status == DomainPackStatus::Deprecated`, `audit_bundle` pushes an `AuditIssue` with `Medium` severity, but does not explicitly bump `highest_risk` to `DomainPackRisk::Medium` (unlike `audit_pack_dir`). This is a minor non-blocking inconsistency.
+3. **Minor Observation — Integer Bounds in Bundle Decoding**: In `crates/rivun-store/src/bundle.rs:440`, `offset + content_len` relies on standard `+` operator. For malformed/untrusted inputs on 64-bit systems, using `checked_add` or checking `content_len > (bytes.len() - offset) as u64` is recommended for extra hardening.
 
 ---
 
@@ -80,8 +80,9 @@ To independently execute build, tests, and static checks, run the following comm
 
 ```powershell
 # 1. Run store, pack, and CLI unit & adversarial test suites
-cargo test -p zap-store -p zap-pack -p zap-cli --all-targets
+cargo test -p rivun-store -p rivun-pack -p rivun-cli --all-targets
 
 # 2. Run clippy warnings check across workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+

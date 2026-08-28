@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from uuid import UUID
 
-from zap_sdk import (
+from rivun_sdk import (
     AGENT_CONTENT_TYPE,
     AGENT_INTENT_SUBJECT,
     MissingCryptoBackend,
@@ -26,10 +26,10 @@ from zap_sdk import (
     DriverRegistryMigration,
     RegistryInstallPlanEntry,
     RegistryInstallPlanRequest,
-    ZapStoreClient,
-    ZapEnvelope,
-    ZapMessageKind,
-    ZapUdpClient,
+    RivunStoreClient,
+    RivunEnvelope,
+    RivunMessageKind,
+    RivunUdpClient,
     pact_hash,
     registry_index_request_frame,
     registry_bundle_manifest_request_frame,
@@ -42,7 +42,7 @@ from zap_sdk import (
     verify_signature_placeholder,
     verify_pact,
     verify_pact_bundle,
-    zap_domain_message,
+    rivun_domain_message,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -57,7 +57,7 @@ def load_fixture(name: str) -> dict:
 
 class ProtocolTests(unittest.TestCase):
     def test_registry_bundle_manifest_request_control_frame_round_trips(self):
-        frame = ZapStoreClient().registry_bundle_manifest_request(require_publication=True, require_drivers=True)
+        frame = RivunStoreClient().registry_bundle_manifest_request(require_publication=True, require_drivers=True)
 
         encoded = frame.encode()
         decoded = ControlFrame.decode(encoded)
@@ -118,8 +118,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(fixture["fixture_schema_version"], 1)
         self.assertEqual(envelope["magic"], "ZENV")
         self.assertEqual(envelope["version"], 1)
-        self.assertEqual(envelope["kind_name"], ZapMessageKind.CONTROL.protocol_name)
-        self.assertEqual(envelope["kind_value"], int(ZapMessageKind.CONTROL))
+        self.assertEqual(envelope["kind_name"], RivunMessageKind.CONTROL.protocol_name)
+        self.assertEqual(envelope["kind_value"], int(RivunMessageKind.CONTROL))
         self.assertEqual(decoded.subject, envelope["subject"])
         self.assertEqual(decoded.content_type, envelope["content_type"])
         self.assertEqual(decoded.json_body(), envelope["body_json"])
@@ -141,8 +141,8 @@ class ProtocolTests(unittest.TestCase):
         decoded_payload = decoded.json_body()["payload"]
 
         self.assertEqual(fixture["fixture_schema_version"], 1)
-        self.assertEqual(decoded.subject, "zap.agent.intent")
-        self.assertEqual(decoded.content_type, "application/zap-agent+json")
+        self.assertEqual(decoded.subject, "rivun.agent.intent")
+        self.assertEqual(decoded.content_type, "application/rivun-agent+json")
         self.assertEqual(decoded.json_body()["type"], "intent")
         self.assertEqual(decoded_payload["schema_version"], 1)
         self.assertEqual(UUID(decoded_payload["intent_id"]), UUID(payload["intent_id"]))
@@ -165,10 +165,10 @@ class ProtocolTests(unittest.TestCase):
             body=frame.body,
             id=UUID(envelope["id"]),
         )
-        decoded = ZapEnvelope.decode(deterministic.encode())
+        decoded = RivunEnvelope.decode(deterministic.encode())
 
         self.assertEqual(fixture["fixture_schema_version"], 1)
-        self.assertEqual(decoded.kind, ZapMessageKind.CONTROL)
+        self.assertEqual(decoded.kind, RivunMessageKind.CONTROL)
         self.assertEqual(decoded.id, UUID(envelope["id"]))
         self.assertIsNone(decoded.correlation_id)
         self.assertIsNone(decoded.causation_id)
@@ -189,8 +189,8 @@ class ProtocolTests(unittest.TestCase):
         frame = ControlFrame.json(fixture["subject"], fixture["content_type"], body)
         decoded = ControlFrame.decode(frame.encode())
 
-        self.assertEqual(decoded.subject, "zap.receipts.response")
-        self.assertEqual(decoded.content_type, "application/zap-receipts+json")
+        self.assertEqual(decoded.subject, "rivun.receipts.response")
+        self.assertEqual(decoded.content_type, "application/rivun-receipts+json")
         self.assertEqual(decoded.json_body(), body)
         self.assertEqual(body["schema_version"], 1)
         self.assertFalse(body["truncated"])
@@ -214,8 +214,8 @@ class ProtocolTests(unittest.TestCase):
         self.assertIn(b'"signer_node_id":"11111111-1111-4111-8111-111111111111"', message)
         self.assertNotIn(b'"signature"', message)
         self.assertEqual(
-            zap_domain_message(b"ZAP-TEST-v1", b"payload"),
-            b"ZAP-TEST-v1\x00payload",
+            rivun_domain_message(b"rivun-TEST-v1", b"payload"),
+            b"rivun-TEST-v1\x00payload",
         )
         try:
             self.assertRegex(receipt_body_hash(b"receipt-body"), r"^blake3:[0-9a-f]{64}$")
@@ -223,8 +223,8 @@ class ProtocolTests(unittest.TestCase):
             self.assertIn("BLAKE3", str(exc))
         self.assertEqual(fixture["subject"], RECEIPT_REPLICATION_RESPONSE_SUBJECT)
         self.assertEqual(fixture["content_type"], RECEIPT_REPLICATION_CONTENT_TYPE)
-        self.assertEqual(AGENT_INTENT_SUBJECT, "zap.agent.intent")
-        self.assertEqual(AGENT_CONTENT_TYPE, "application/zap-agent+json")
+        self.assertEqual(AGENT_INTENT_SUBJECT, "rivun.agent.intent")
+        self.assertEqual(AGENT_CONTENT_TYPE, "application/rivun-agent+json")
 
     def test_pact_fixtures_reproduce_hash_and_verify(self):
         record = load_fixture("pact-record-v1.json")
@@ -262,7 +262,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(signed["security"]["auth_trailer"]["algorithm"], "ed25519")
         self.assertTrue(poa["security"]["signed"])
         self.assertEqual(poa["security"]["poa_trailer"]["threshold"], 1)
-        self.assertEqual(capability["subject"], "zap.capability.response")
+        self.assertEqual(capability["subject"], "rivun.capability.response")
         self.assertIn("driver.execute:echo", capability["body_json"]["capabilities"])
         self.assertEqual(datagram["cipher"], "ChaCha20-Poly1305")
         self.assertEqual(len(datagram["nonce_hex"]), 24)
@@ -325,7 +325,7 @@ class ProtocolTests(unittest.TestCase):
 
         thread = threading.Thread(target=serve)
         thread.start()
-        with ZapUdpClient(timeout=2.0) as client:
+        with RivunUdpClient(timeout=2.0) as client:
             response = client.request_control(
                 registry_bundle_manifest_request_frame(require_drivers=True),
                 server.getsockname(),

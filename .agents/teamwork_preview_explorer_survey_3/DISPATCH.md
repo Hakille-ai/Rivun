@@ -6,5 +6,6 @@ Investigate:
 3. Current state of SDKs (Rust, TS, Python, Go) and missing conformance features.
 4. Benchmarks, smoke tests, and verification scripts.
 
-Write a complete handoff report to `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_explorer_survey_3\handoff.md`.
+Write a complete handoff report to `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_explorer_survey_3\handoff.md`.
 Include file paths for SDKs, fixtures, test harnesses, and missing conformance requirements. Notify orchestrator via send_message when complete.
+

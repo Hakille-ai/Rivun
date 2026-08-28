@@ -1,22 +1,22 @@
-# ZAP Echo WASM Driver Example
+# Rivun Echo WASM Driver Example
 
-This folder contains a simple WebAssembly Text (WAT) driver representing the minimal implementation of the ZAP Driver ABI v1.
+This folder contains a simple WebAssembly Text (WAT) driver representing the minimal implementation of the Rivun Driver ABI v1.
 
 ## What it does
-The driver exports the required memory and allocation helper functions (`zap_alloc` and `zap_dealloc`), and the execution entry point `zap_execute`. 
+The driver exports the required memory and allocation helper functions (`rivun_alloc` and `rivun_dealloc`), and the execution entry point `rivun_execute`. 
 Upon invocation, it takes the input payload and returns it directly back to the host, acting as a basic echo service.
 
 ## Code walkthrough (`echo.wat`)
 ```wat
 (module
-  ;; 1. Export the module's linear memory so the ZAP host can read/write data
+  ;; 1. Export the module's linear memory so the Rivun host can read/write data
   (memory (export "memory") 1)
 
   ;; 2. A simple global pointer representing the current end of our heap
   (global $heap (mut i32) (i32.const 1024))
 
   ;; 3. Allocation hook: called by the host node to reserve space for payload & action parameters
-  (func (export "zap_alloc") (param $len i32) (result i32)
+  (func (export "rivun_alloc") (param $len i32) (result i32)
     global.get $heap
     global.get $heap
     local.get $len
@@ -24,11 +24,11 @@ Upon invocation, it takes the input payload and returns it directly back to the 
     global.set $heap)
 
   ;; 4. Deallocation hook (no-op in this basic heap design)
-  (func (export "zap_dealloc") (param i32 i32))
+  (func (export "rivun_dealloc") (param i32 i32))
 
   ;; 5. Execution hook: receives pointers and lengths of the target action and payload
   ;; Returns a single packed i64: (result_pointer << 32) | result_length
-  (func (export "zap_execute")
+  (func (export "rivun_execute")
     (param $action_ptr i32) (param $action_len i32)
     (param $payload_ptr i32) (param $payload_len i32)
     (result i64)
@@ -43,15 +43,15 @@ Upon invocation, it takes the input payload and returns it directly back to the 
     i64.or))
 ```
 
-## How to use it in ZAP
+## How to use it in Rivun
 
 1. **Sign the manifest**:
    Before a node will load a driver, it must have a signed manifest. Run this to sign the driver:
    ```bash
-   cargo run -p zap-cli -- driver-manifest create \
+   cargo run -p rivun-cli -- driver-manifest create \
      --driver examples/wasm-drivers/echo/echo.wat \
      --action echo \
-     --author-key .zap/node.key \
+     --author-key .rivun/node.key \
      --out examples/wasm-drivers/echo/echo.manifest.toml
    ```
 
@@ -65,11 +65,11 @@ Upon invocation, it takes the input payload and returns it directly back to the 
    ```
    Start the node daemon:
    ```bash
-   cargo run -p zap-cli -- run --config zap.toml
+   cargo run -p rivun-cli -- run --config rivun.toml
    ```
 
 3. **Send an action**:
    Send a message to invoke the driver:
    ```bash
-   cargo run -p zap-cli -- send --config client.toml --target <gateway-uuid> --action echo --payload "hello"
+   cargo run -p rivun-cli -- send --config client.toml --target <gateway-uuid> --action echo --payload "hello"
    ```

@@ -6,7 +6,7 @@ Investigate Milestone 2 failures based on four reviewer/challenger reports and c
 ## 🔒 My Identity
 - Archetype: Explorer
 - Roles: Explorer 1 for Milestone 2 remediation
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_m2_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_m2_1
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 2 Remediation
 
@@ -21,18 +21,18 @@ Investigate Milestone 2 failures based on four reviewer/challenger reports and c
 
 ## Investigation State
 - **Explored paths**:
-  - `crates/zap-store/src/lib.rs` (structs & enums)
-  - `crates/zap-store/src/bundle.rs` (Zip Slip, public key matching)
-  - `crates/zap-store/src/resolver.rs` (semver matching, transitive resolution)
-  - `crates/zap-store/src/validator.rs` (declared policies matching)
-  - `crates/zap-store/src/audit.rs` (audit pack dir status check)
-  - `crates/zap-cli/src/main.rs` (`pack_verify`, `pack_install`)
-  - `crates/zap-store/tests/pack_tests.rs` & `crates/zap-store/tests/adversarial_m2_tests.rs`
+  - `crates/rivun-store/src/lib.rs` (structs & enums)
+  - `crates/rivun-store/src/bundle.rs` (Zip Slip, public key matching)
+  - `crates/rivun-store/src/resolver.rs` (semver matching, transitive resolution)
+  - `crates/rivun-store/src/validator.rs` (declared policies matching)
+  - `crates/rivun-store/src/audit.rs` (audit pack dir status check)
+  - `crates/rivun-cli/src/main.rs` (`pack_verify`, `pack_install`)
+  - `crates/rivun-store/tests/pack_tests.rs` & `crates/rivun-store/tests/adversarial_m2_tests.rs`
 - **Key findings**:
   1. Workspace fails compilation due to missing `DomainPackStatus::Draft`, missing fields on `DomainPackCompatibility`, `DomainPackRegistryEntry`, and `DomainPackArtifact`.
   2. Critical Zip Slip path traversal flaw in `DomainPackBundle::extract_to_dir`.
-  3. `zap pack verify` hardcodes `integrity_ok: true` and passes on missing `.sig` files.
-  4. `zap pack install` does not enforce dependency checks.
+  3. `rivun pack verify` hardcodes `integrity_ok: true` and passes on missing `.sig` files.
+  4. `rivun pack install` does not enforce dependency checks.
   5. Dependency resolver lacks transitive recursion, caret 0.x logic, and returns `true` on unparsed strings.
   6. Policy validator skips non-"policy" named files even when declared in `pack.toml`.
   7. Audit pack dir ignores `status = "revoked"`.
@@ -46,3 +46,4 @@ Investigate Milestone 2 failures based on four reviewer/challenger reports and c
 - DISPATCH.md — Dispatch history
 - BRIEFING.md — Working memory index
 - handoff.md — Comprehensive 5-component handoff report and fix strategy
+

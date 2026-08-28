@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-15T20:20:25Z
 
 ## Mission
-Perform comprehensive, independent review and adversarial challenge of E2E testing suite (Tier 1-4, TEST_INFRA.md, TEST_READY.md) across all 15 features in ZAP Next-Gen Frontier.
+Perform comprehensive, independent review and adversarial challenge of E2E testing suite (Tier 1-4, TEST_INFRA.md, TEST_READY.md) across all 15 features in rivun Next-Gen Frontier.
 
 ## 🔒 My Identity
 - Archetype: reviewer
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_e2e_2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_e2e_2
 - Original parent: ee5a2dcd-2673-4c47-a848-1f6357282214
 - Milestone: Review E2E Testing Track
 - Instance: 2 of 2
@@ -21,7 +21,7 @@ Perform comprehensive, independent review and adversarial challenge of E2E testi
 - Updated: 2026-08-15T20:20:25Z
 
 ## Review Scope
-- **Files to review**: `tests/e2e/**`, `TEST_INFRA.md`, `TEST_READY.md`, `crates/zap-e2e/**`
+- **Files to review**: `tests/e2e/**`, `TEST_INFRA.md`, `TEST_READY.md`, `crates/rivun-e2e/**`
 - **Interface contracts**: `PROJECT.md`, `.agents/sub_orch_e2e/SCOPE.md`, `.agents/worker_e2e_1/handoff.md`
 - **Review criteria**: 
   1. Feature coverage completeness (all 15 features in PROJECT.md § Feature Inventory)
@@ -31,7 +31,7 @@ Perform comprehensive, independent review and adversarial challenge of E2E testi
   5. Tier 4: >=8 real-world application scenarios
   6. Quality and integrity: real assertions, real logic, no dummy/facade shortcuts, no bypasses
   7. Accurate documentation in TEST_INFRA.md and TEST_READY.md
-  8. Compilation and successful run of `cargo test -p zap-e2e`
+  8. Compilation and successful run of `cargo test -p rivun-e2e`
 
 ## Review Checklist
 - **Items reviewed**: [TBD]
@@ -50,3 +50,4 @@ Perform comprehensive, independent review and adversarial challenge of E2E testi
 - `.agents/reviewer_e2e_2/DISPATCH.md` — Inbound message log
 - `.agents/reviewer_e2e_2/progress.md` — Liveness & heartbeat
 - `.agents/reviewer_e2e_2/handoff.md` — Final review report
+

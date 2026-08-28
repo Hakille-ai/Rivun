@@ -13,26 +13,26 @@ use std::{
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use zap_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder, ProvenanceStage};
-use zap_capability::{CapabilityId, DriverPermissions};
-use zap_core::{ZapFlags, ZapFrame, now_micros};
-use zap_crypto::{sign_frame, verify_frame};
-use zap_ledger::{
+use rivun_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder, ProvenanceStage};
+use rivun_capability::{CapabilityId, DriverPermissions};
+use rivun_core::{RivunFlags, RivunFrame, now_micros};
+use rivun_crypto::{sign_frame, verify_frame};
+use rivun_ledger::{
     MerkleMountainRange, PoaReceipt, ReceiptJournalStore, ReceiptReplicationRequest,
     SignedActionReceipt,
 };
-use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{GossipMesh, Peer, PeerHealth, VectorClock, ZapEndpoint, ZapEndpointConfig};
-use zap_node::ZapNodeConfig;
-use zap_pact::{Validate, ZapPact, ZapPactBundle, ZapPactRevocation, ZapPactStatus};
-use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
-use zap_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
-use zap_telemetry::{
+use rivun_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
+use rivun_net::{GossipMesh, Peer, PeerHealth, VectorClock, RivunEndpoint, RivunEndpointConfig};
+use rivun_node::RivunNodeConfig;
+use rivun_pact::{Validate, RivunPact, RivunPactBundle, RivunPactRevocation, RivunPactStatus};
+use rivun_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
+use rivun_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
+use rivun_telemetry::{
     FleetDoctor, FleetNodeHealth, FleetNodeState, FleetTopology, IncidentCapturer,
-    PrometheusExporter, ZapNodeMetricsSnapshot,
+    PrometheusExporter, RivunNodeMetricsSnapshot,
 };
 
-use zap_e2e::harness::*;
+use rivun_e2e::harness::*;
 
 // ============================================================================
 // FEATURE 1: P2P Swarm Gossip Protocol
@@ -62,12 +62,12 @@ fn tc_f01_02_vector_clock_merge_and_causal_comparison() {
     let mut clock2 = VectorClock::new();
     clock2.increment(node_b);
 
-    assert_eq!(clock1.compare(&clock2), zap_net::Causality::Concurrent);
+    assert_eq!(clock1.compare(&clock2), rivun_net::Causality::Concurrent);
 
     clock1.merge(&clock2);
     assert_eq!(clock1.get(&node_a), 1);
     assert_eq!(clock1.get(&node_b), 1);
-    assert_eq!(clock1.compare(&clock2), zap_net::Causality::StrictlyAfter);
+    assert_eq!(clock1.compare(&clock2), rivun_net::Causality::StrictlyAfter);
 }
 
 #[test]
@@ -109,9 +109,9 @@ async fn tc_f01_05_encrypted_p2p_datagram_exchange() -> Result<()> {
     let id_b = Uuid::new_v4();
 
     let endpoint_a =
-        ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, id_a)).await?;
+        RivunEndpoint::bind(RivunEndpointConfig::new("127.0.0.1:0".parse()?, id_a)).await?;
     let endpoint_b =
-        ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, id_b)).await?;
+        RivunEndpoint::bind(RivunEndpointConfig::new("127.0.0.1:0".parse()?, id_b)).await?;
 
     endpoint_a
         .add_peer(Peer::new(id_b, endpoint_b.local_addr()?, key))
@@ -204,15 +204,15 @@ fn tc_f02_04_proposer_consensus_helper_in_simulated_cluster() -> Result<()> {
 fn tc_f02_05_frame_signing_with_consensus_flags() -> Result<()> {
     let key = generate_keypair();
     let payload = Bytes::from("action_critical_payload");
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         key.node_id(),
         Uuid::new_v4(),
-        ZapFlags::SIGNED | ZapFlags::REQUIRES_CONSENSUS,
+        RivunFlags::SIGNED | RivunFlags::REQUIRES_CONSENSUS,
         payload,
     )?;
     let signed = sign_frame(&key, &frame)?;
 
-    assert!(signed.header.flags.contains(ZapFlags::REQUIRES_CONSENSUS));
+    assert!(signed.header.flags.contains(RivunFlags::REQUIRES_CONSENSUS));
     assert!(verify_frame(&key.verifying_key(), &signed).is_ok());
     Ok(())
 }
@@ -313,7 +313,7 @@ fn tc_f04_01_mmr_append_leaf_sequential_indices() {
 fn tc_f04_02_mmr_single_leaf_root_equals_leaf_hash() {
     let mut mmr = MerkleMountainRange::new();
     let data = b"single_receipt_commitment";
-    let expected_leaf_hash = zap_ledger::hash_leaf(data);
+    let expected_leaf_hash = rivun_ledger::hash_leaf(data);
 
     mmr.append_bytes(data);
     assert_eq!(mmr.root(), expected_leaf_hash);
@@ -393,10 +393,10 @@ fn tc_f05_02_mmr_large_batch_proof_verification_100_leaves() -> Result<()> {
 #[test]
 fn tc_f05_03_signed_action_receipt_serialization_and_verification() -> Result<()> {
     let key = generate_keypair();
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         key.node_id(),
         Uuid::nil(),
-        ZapFlags::SIGNED,
+        RivunFlags::SIGNED,
         Bytes::from_static(b"payload_bytes"),
     )?;
     let signed = SignedActionReceipt::new(
@@ -431,10 +431,10 @@ fn tc_f05_05_journal_segment_rotation_and_manifest() -> Result<()> {
     let key = generate_keypair();
     let journal = ReceiptJournalStore::open_with_keypair(dir.path().join("receipts"), key.clone());
 
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         key.node_id(),
         Uuid::nil(),
-        ZapFlags::SIGNED,
+        RivunFlags::SIGNED,
         Bytes::from_static(b"sensor_reading_temp"),
     )?;
     let signed = SignedActionReceipt::new(
@@ -485,11 +485,11 @@ fn tc_f06_02_rollup_commitment_leaf_hashes() -> Result<()> {
     let commitment = mmr.create_rollup_commitment(100, 200)?;
     assert_eq!(
         commitment.first_leaf_hash,
-        hex::encode(zap_ledger::hash_leaf(first))
+        hex::encode(rivun_ledger::hash_leaf(first))
     );
     assert_eq!(
         commitment.last_leaf_hash,
-        hex::encode(zap_ledger::hash_leaf(last))
+        hex::encode(rivun_ledger::hash_leaf(last))
     );
     Ok(())
 }
@@ -520,10 +520,10 @@ fn tc_f06_04_multi_segment_receipt_rollup_aggregation() -> Result<()> {
     let mut min_processed_at = u64::MAX;
     let mut max_processed_at = 0;
     for i in 0..15 {
-        let frame = ZapFrame::new(
+        let frame = RivunFrame::new(
             key.node_id(),
             Uuid::nil(),
-            ZapFlags::SIGNED,
+            RivunFlags::SIGNED,
             Bytes::from(format!("payload_{i}")),
         )?;
         let processed_at = now_micros()?.max(frame.header.timestamp_micros);
@@ -699,10 +699,10 @@ fn tc_f08_03_receipt_journal_stream_replication() -> Result<()> {
     let journal = ReceiptJournalStore::open_with_keypair(dir.path().join("receipts"), key.clone());
 
     for i in 0..5 {
-        let frame = ZapFrame::new(
+        let frame = RivunFrame::new(
             key.node_id(),
             Uuid::nil(),
-            ZapFlags::SIGNED,
+            RivunFlags::SIGNED,
             Bytes::from(format!("chunk_{i}")),
         )?;
         let signed = SignedActionReceipt::new_message(
@@ -942,12 +942,12 @@ fn tc_f09_05_driver_pipeline_stage_result_metrics() -> Result<()> {
 #[test]
 fn tc_f10_01_create_and_sign_pact() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("agent.buyer", "agent.seller", "buy_power", 1_700_000);
+    let mut pact = RivunPact::new("agent.buyer", "agent.seller", "buy_power", 1_700_000);
     pact.object = serde_json::json!({"kw": 50});
-    pact.terms = serde_json::json!({"price_zap": 100});
+    pact.terms = serde_json::json!({"price_rivun": 100});
     pact.sign(&key)?;
 
-    assert_eq!(pact.status, ZapPactStatus::Active);
+    assert_eq!(pact.status, RivunPactStatus::Active);
     assert!(pact.signature.is_some());
     assert!(pact.hash.is_some());
     Ok(())
@@ -967,11 +967,11 @@ fn tc_f10_02_verify_signed_pact_offline() -> Result<()> {
 #[test]
 fn tc_f10_03_pact_draft_to_active_status_transition() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("agent.1", "agent.2", "task", 1000);
-    assert_eq!(pact.status, ZapPactStatus::Draft);
+    let mut pact = RivunPact::new("agent.1", "agent.2", "task", 1000);
+    assert_eq!(pact.status, RivunPactStatus::Draft);
 
     pact.sign(&key)?;
-    assert_eq!(pact.status, ZapPactStatus::Active);
+    assert_eq!(pact.status, RivunPactStatus::Active);
     Ok(())
 }
 
@@ -979,7 +979,7 @@ fn tc_f10_03_pact_draft_to_active_status_transition() -> Result<()> {
 fn tc_f10_04_pact_bundle_packaging_and_verification() -> Result<()> {
     let key = generate_keypair();
     let pact = create_test_pact("agent.x", "agent.y", "service", &key)?;
-    let bundle = ZapPactBundle::new(pact);
+    let bundle = RivunPactBundle::new(pact);
 
     let verif = bundle.verify(Some(now_micros()? + 1000))?;
     assert!(verif.valid);
@@ -989,10 +989,10 @@ fn tc_f10_04_pact_bundle_packaging_and_verification() -> Result<()> {
 #[test]
 fn tc_f10_05_canonical_pact_hashing_key_order_independence() -> Result<()> {
     let now = now_micros()?;
-    let mut p1 = ZapPact::new("a", "b", "c", now);
+    let mut p1 = RivunPact::new("a", "b", "c", now);
     p1.object = serde_json::json!({"alpha": 1, "beta": 2});
 
-    let mut p2 = ZapPact::new("a", "b", "c", now);
+    let mut p2 = RivunPact::new("a", "b", "c", now);
     p2.pact_id = p1.pact_id;
     p2.object = serde_json::json!({"beta": 2, "alpha": 1});
 
@@ -1148,7 +1148,7 @@ fn tc_f11_04_policy_require_grant_verifies_capabilities() -> Result<()> {
 fn tc_f11_05_pact_signed_revocation_evidence() -> Result<()> {
     let key = generate_keypair();
     let pact_id = Uuid::new_v4();
-    let mut revocation = ZapPactRevocation::new(
+    let mut revocation = RivunPactRevocation::new(
         pact_id,
         "arbitrator.ops",
         "SLA violation: timeout",
@@ -1251,7 +1251,7 @@ fn tc_f12_04_provenance_chain_root_hash_computation() -> Result<()> {
         .with_intent(&intent)?
         .build_and_sign(&key)?;
 
-    let root = zap_agent::compute_root_hash(&chain.steps);
+    let root = rivun_agent::compute_root_hash(&chain.steps);
     assert_eq!(chain.root_hash, root);
     Ok(())
 }
@@ -1340,7 +1340,7 @@ fn tc_f13_04_node_config_generation_and_loading() -> Result<()> {
         "bind = \"{addr}\"\nkey_file = \"{}\"\n",
         key_path.display().to_string().replace('\\', "/")
     );
-    let parsed = ZapNodeConfig::from_toml_str(&toml)?;
+    let parsed = RivunNodeConfig::from_toml_str(&toml)?;
     assert_eq!(parsed.bind, addr);
     Ok(())
 }
@@ -1426,7 +1426,7 @@ fn tc_f14_03_multi_node_heartbeat_gossip_broadcast() -> Result<()> {
 #[test]
 fn tc_f14_04_prometheus_metrics_snapshot_export() -> Result<()> {
     let node_id = Uuid::new_v4();
-    let snap = ZapNodeMetricsSnapshot {
+    let snap = RivunNodeMetricsSnapshot {
         node_id,
         replay_rejections_total: 5,
         journal_segment_rotations_total: 2,
@@ -1438,22 +1438,22 @@ fn tc_f14_04_prometheus_metrics_snapshot_export() -> Result<()> {
 
     let text = PrometheusExporter::export(&snap);
     assert!(text.contains(&format!(
-        "zap_replay_rejections_total{{node_id=\"{node_id}\"}} 5"
+        "rivun_replay_rejections_total{{node_id=\"{node_id}\"}} 5"
     )));
     assert!(text.contains(&format!(
-        "zap_journal_segment_rotations_total{{node_id=\"{node_id}\"}} 2"
+        "rivun_journal_segment_rotations_total{{node_id=\"{node_id}\"}} 2"
     )));
     assert!(text.contains(&format!(
-        "zap_agent_sessions_active{{node_id=\"{node_id}\"}} 3"
+        "rivun_agent_sessions_active{{node_id=\"{node_id}\"}} 3"
     )));
-    assert!(text.contains(&format!("zap_peers_active{{node_id=\"{node_id}\"}} 4")));
+    assert!(text.contains(&format!("rivun_peers_active{{node_id=\"{node_id}\"}} 4")));
     Ok(())
 }
 
 #[test]
 fn tc_f14_05_incident_snapshot_capture_and_archive() -> Result<()> {
     let node_id = Uuid::new_v4();
-    let snap = IncidentCapturer::capture(node_id, "zap_replay_rejections_total 0\n", None);
+    let snap = IncidentCapturer::capture(node_id, "rivun_replay_rejections_total 0\n", None);
     assert_eq!(snap.node_id, node_id);
 
     let tar_bytes = IncidentCapturer::build_tar_archive(&snap)?;

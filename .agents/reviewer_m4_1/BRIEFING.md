@@ -6,7 +6,7 @@ Review Milestone 4 (AI Agent Gateway & Multi-Transport Integration) implementati
 ## 🔒 My Identity
 - Archetype: reviewer_critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m4_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m4_1
 - Original parent: 93ddb720-b792-416a-9e98-289b84dbd0f2
 - Milestone: Milestone 4 (AI Agent Gateway & Multi-Transport Integration)
 - Instance: 1 of 1
@@ -23,16 +23,16 @@ Review Milestone 4 (AI Agent Gateway & Multi-Transport Integration) implementati
 
 ## Review Scope
 - **Files reviewed**:
-  - `crates/zap-agent/src/provenance.rs`
-  - `crates/zap-agent/src/lib.rs`
-  - `crates/zap-gateway/src/lib.rs`
-  - `crates/zap-gateway/src/config.rs`
-  - `crates/zap-gateway/src/error.rs`
-  - `crates/zap-gateway/src/server.rs`
-  - `crates/zap-gateway/src/mcp/*` (`protocol.rs`, `tools.rs`, `resources.rs`, `prompts.rs`, `stdio.rs`, `mod.rs`)
-  - `crates/zap-gateway/src/transports/*` (`http.rs`, `sse.rs`, `ws.rs`, `mod.rs`)
-  - `crates/zap-gateway/src/provenance/mod.rs`
-  - `crates/zap-gateway/tests/*` (`gateway_tests.rs`, `adversarial_challenger_m4_2.rs`, `adversarial_stress_tests.rs`)
+  - `crates/rivun-agent/src/provenance.rs`
+  - `crates/rivun-agent/src/lib.rs`
+  - `crates/rivun-gateway/src/lib.rs`
+  - `crates/rivun-gateway/src/config.rs`
+  - `crates/rivun-gateway/src/error.rs`
+  - `crates/rivun-gateway/src/server.rs`
+  - `crates/rivun-gateway/src/mcp/*` (`protocol.rs`, `tools.rs`, `resources.rs`, `prompts.rs`, `stdio.rs`, `mod.rs`)
+  - `crates/rivun-gateway/src/transports/*` (`http.rs`, `sse.rs`, `ws.rs`, `mod.rs`)
+  - `crates/rivun-gateway/src/provenance/mod.rs`
+  - `crates/rivun-gateway/tests/*` (`gateway_tests.rs`, `adversarial_challenger_m4_2.rs`, `adversarial_stress_tests.rs`)
   - `tests/e2e/tests/e2e_suite.rs`
 - **Interface contracts**: `ORIGINAL_REQUEST.md` (R4), `PROJECT.md`
 - **Review criteria**: correctness, style, conformance, adversarial robustness, integrity
@@ -59,3 +59,4 @@ Review Milestone 4 (AI Agent Gateway & Multi-Transport Integration) implementati
 ## Artifact Index
 - `.agents/reviewer_m4_1/handoff.md` — Final review and challenge report
 - `.agents/reviewer_m4_1/progress.md` — Progress tracker
+

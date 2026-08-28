@@ -6,7 +6,7 @@ Code quality & correctness review for Milestone 1 Remediation (Iteration 2).
 ## 🔒 My Identity
 - Archetype: reviewer_critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_reviewer_m1_fix1_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_reviewer_m1_fix1_1
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Milestone: Milestone 1 Remediation Iteration 2
 - Instance: 1 of 1
@@ -21,12 +21,12 @@ Code quality & correctness review for Milestone 1 Remediation (Iteration 2).
 - Updated: 2026-08-14T00:01:00Z
 
 ## Review Scope
-- **Files to review**: `crates/zap-net`, `crates/zap-node`, `crates/zap-journal`, `crates/zap-ledger`
+- **Files to review**: `crates/rivun-net`, `crates/rivun-node`, `crates/rivun-journal`, `crates/rivun-ledger`
 - **Interface contracts**: `ORIGINAL_REQUEST.md`, `PROJECT.md`
 - **Review criteria**: correctness, style, integrity, safety, edge cases, tests
 
 ## Review Checklist
-- **Items reviewed**: `crates/zap-net/src/durable_replay.rs`, `crates/zap-net/src/lib.rs`, `crates/zap-node/src/durable_replay.rs`, `crates/zap-journal/src/lib.rs`, `crates/zap-ledger/src/lib.rs`, `m1_journal_stress.rs`, `m1_challenger_stress.rs`
+- **Items reviewed**: `crates/rivun-net/src/durable_replay.rs`, `crates/rivun-net/src/lib.rs`, `crates/rivun-node/src/durable_replay.rs`, `crates/rivun-journal/src/lib.rs`, `crates/rivun-ledger/src/lib.rs`, `m1_journal_stress.rs`, `m1_challenger_stress.rs`
 - **Verdict**: APPROVE
 - **Unverified claims**: None (all claims verified independently)
 
@@ -49,3 +49,4 @@ Code quality & correctness review for Milestone 1 Remediation (Iteration 2).
 - `.agents/teamwork_preview_reviewer_m1_fix1_1/DISPATCH.md` — Record of dispatch instructions
 - `.agents/teamwork_preview_reviewer_m1_fix1_1/BRIEFING.md` — Agent briefing & state
 - `.agents/teamwork_preview_reviewer_m1_fix1_1/handoff.md` — Handoff report with APPROVE verdict
+

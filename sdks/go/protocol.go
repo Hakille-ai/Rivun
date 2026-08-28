@@ -1,4 +1,4 @@
-package zap
+package rivun
 
 import (
 	"crypto/rand"
@@ -21,12 +21,12 @@ const (
 	MaxMetadataLen               = 64 * 1024
 	MaxBodyLen                   = 16 * 1024 * 1024
 	DefaultContentType           = "application/octet-stream"
-	RegistryIndexContentType     = "application/zap-registry-index+json"
-	RegistryBundleContentType    = "application/zap-registry-bundle-manifest+json"
-	RegistryIndexRequestSubject  = "zap.registry.index.request"
-	RegistryIndexResponseSubject = "zap.registry.index.response"
-	BundleManifestRequestSubject = "zap.registry.bundle.manifest.request"
-	BundleManifestResponseSubject = "zap.registry.bundle.manifest.response"
+	RegistryIndexContentType     = "application/rivun-registry-index+json"
+	RegistryBundleContentType    = "application/rivun-registry-bundle-manifest+json"
+	RegistryIndexRequestSubject  = "rivun.registry.index.request"
+	RegistryIndexResponseSubject = "rivun.registry.index.response"
+	BundleManifestRequestSubject = "rivun.registry.bundle.manifest.request"
+	BundleManifestResponseSubject = "rivun.registry.bundle.manifest.response"
 )
 
 type MessageKind uint16

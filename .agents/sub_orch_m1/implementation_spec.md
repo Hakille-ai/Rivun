@@ -1,11 +1,11 @@
 # Milestone 1 (R1) Implementation Specification
 
 ## Overview
-Milestone 1 implements the complete P2P Swarm Gossip Consensus, Adaptive Quorum Mesh, Swarm Agent Coordinator, and Concurrent Tokio Node Actor Daemon for the ZAP Next-Gen Frontier project.
+Milestone 1 implements the complete P2P Swarm Gossip Consensus, Adaptive Quorum Mesh, Swarm Agent Coordinator, and Concurrent Tokio Node Actor Daemon for the rivun Next-Gen Frontier project.
 
 ## Target Crates & File Boundaries
-1. **`crates/zap-net/`**:
-   - `Cargo.toml`: Add necessary workspace dependencies (`ed25519-dalek` with batch feature, `zap-crypto` if needed).
+1. **`crates/rivun-net/`**:
+   - `Cargo.toml`: Add necessary workspace dependencies (`ed25519-dalek` with batch feature, `rivun-crypto` if needed).
    - `src/gossip/mod.rs` (or `src/gossip/*.rs`):
      - Wire magic `ZGSP`, version 1.
      - `GossipMessageId`, `GossipEnvelope` (origin, topic, sequence, max_hops, current_hop, timestamp, payload, signature).
@@ -27,7 +27,7 @@ Milestone 1 implements the complete P2P Swarm Gossip Consensus, Adaptive Quorum 
      - Dynamic 2-hop failover relay routing (`ZapRelayEnvelope` with magic `ZRLY`, forwarding trust checks, loop prevention).
    - `src/lib.rs`: Expose modules, maintain full backwards compatibility for `ZapEndpoint` and existing public API.
 
-2. **`crates/zap-agent/`**:
+2. **`crates/rivun-agent/`**:
    - `src/swarm.rs`:
      - `SwarmAgentCoordinator` managing `AgentIntent` lifecycle through consensus.
      - `SwarmCapabilityIndex` with multi-factor scoring formula ($\text{Score} = w_1 \cdot \text{Trust} + w_2 \cdot (1 - \text{Latency}) + w_3 \cdot \text{Load}$).
@@ -37,7 +37,7 @@ Milestone 1 implements the complete P2P Swarm Gossip Consensus, Adaptive Quorum 
      - Add `ProvenanceChainBuilder::with_consensus()` cryptographically binding certificate hash, epoch, round, threshold, validator count, and signer bitmask.
    - `src/lib.rs`: Expose `swarm` module and updated provenance methods.
 
-3. **`crates/zap-node/`**:
+3. **`crates/rivun-node/`**:
    - `src/config.rs`: Add `SwarmConfig`, `GossipConfig`, `MeshConfig` to `ZapNodeConfig` with `#[serde(default)]`.
    - `src/node.rs` / `src/actors/`:
      - Concurrent Tokio actor daemon architecture: `UdpRxTask`, `GossipTask`, `ConsensusTask`, `MeshTask`, `ExecutionTask`.
@@ -53,4 +53,5 @@ Milestone 1 implements the complete P2P Swarm Gossip Consensus, Adaptive Quorum 
      - Network partition degradation & post-partition healing.
      - Dynamic 2-hop relay routing.
      - Provenance consensus chain verification.
-   - Ensure `cargo test -p zap-net -p zap-agent -p zap-node` passes with 0 failures and `cargo clippy` has 0 warnings.
+   - Ensure `cargo test -p rivun-net -p rivun-agent -p rivun-node` passes with 0 failures and `cargo clippy` has 0 warnings.
+

@@ -1,14 +1,14 @@
 # BRIEFING — 2026-08-14T23:14:00Z
 
 ## Mission
-Forensic integrity audit of Milestone 4 (crates/zap-agent provenance and crates/zap-gateway MCP + multi-transport bridge).
+Forensic integrity audit of Milestone 4 (crates/rivun-agent provenance and crates/rivun-gateway MCP + multi-transport bridge).
 
 ## 🔒 My Identity
 - Archetype: forensic_auditor
 - Roles: critic, specialist, auditor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\auditor_m4_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\auditor_m4_1
 - Original parent: 93ddb720-b792-416a-9e98-289b84dbd0f2
-- Target: Milestone 4 (crates/zap-agent, crates/zap-gateway)
+- Target: Milestone 4 (crates/rivun-agent, crates/rivun-gateway)
 
 ## 🔒 Key Constraints
 - Audit-only — do NOT modify implementation code
@@ -20,17 +20,17 @@ Forensic integrity audit of Milestone 4 (crates/zap-agent provenance and crates/
 - Updated: 2026-08-14T23:14:00Z
 
 ## Audit Scope
-- **Work product**: crates/zap-agent (provenance engine), crates/zap-gateway (MCP and multi-transport gateway)
+- **Work product**: crates/rivun-agent (provenance engine), crates/rivun-gateway (MCP and multi-transport gateway)
 - **Profile loaded**: General Project
 - **Audit type**: forensic integrity check
 
 ## Audit Progress
 - **Phase**: reporting
 - **Checks completed**:
-  - Source Code Analysis: Verified `zap-agent` and `zap-gateway` for hardcoded strings, dummy facades, pre-populated logs.
+  - Source Code Analysis: Verified `rivun-agent` and `rivun-gateway` for hardcoded strings, dummy facades, pre-populated logs.
   - Cryptographic Verification: Verified SHA256 causal chaining, Merkle root calculation, Ed25519 dalek signing and verification.
   - Transport & MCP Inspection: Verified RFC 6455 WebSocket framing, SHA-1 accept generation, frame size limits, SSE broker, HTTP REST status codes, JSON-RPC 2.0 error codes.
-  - Behavioral Tests: `cargo test -p zap-agent --all-targets` (PASS), `cargo test -p zap-gateway --test gateway_tests --test adversarial_challenger_m4_2` (PASS), `cargo clippy -p zap-agent -p zap-gateway --all-targets -- -D warnings` (PASS).
+  - Behavioral Tests: `cargo test -p rivun-agent --all-targets` (PASS), `cargo test -p rivun-gateway --test gateway_tests --test adversarial_challenger_m4_2` (PASS), `cargo clippy -p rivun-agent -p rivun-gateway --all-targets -- -D warnings` (PASS).
   - Identified Test Issue: `adversarial_stress_tests.rs` line 363 content-length mismatch (15 vs 14 bytes).
   - Workspace e2e compilation issue: `tests/e2e/tests/e2e_suite.rs` contains outdated signatures for other workspace crates.
 - **Findings so far**: CLEAN integrity verdict on Milestone 4 implementation.
@@ -58,3 +58,4 @@ Forensic integrity audit of Milestone 4 (crates/zap-agent provenance and crates/
 - `.agents/auditor_m4_1/DISPATCH.md` — Dispatch record
 - `.agents/auditor_m4_1/progress.md` — Progress tracker
 - `.agents/auditor_m4_1/handoff.md` — Final audit report
+

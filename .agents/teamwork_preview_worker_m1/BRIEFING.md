@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-14T01:41:25Z
 
 ## Mission
-Implement Milestone 1 (R1: High-Performance Durable Core & Replay Protection) for ZAP.
+Implement Milestone 1 (R1: High-Performance Durable Core & Replay Protection) for rivun.
 
 ## 🔒 My Identity
 - Archetype: worker
 - Roles: implementer, qa, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_worker_m1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_worker_m1
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Milestone: M1
 
@@ -21,21 +21,21 @@ Implement Milestone 1 (R1: High-Performance Durable Core & Replay Protection) fo
 - Updated: 2026-08-14T01:41:25Z
 
 ## Task Summary
-- **What to build**: Durable Replay Protection (`DurableNonceStore` in `zap-net`, `DurableReplayStore` in `zap-node`), Journal Segment Rotation & Cryptographic Sealing (`zap-journal`), Signed Segment Manifests (`zap-ledger`), Fast Indexed Queries (`zap-journal`/`zap-ledger`).
-- **Success criteria**: All tests pass in `zap-net`, `zap-node`, `zap-journal`, `zap-ledger`; clippy runs cleanly; no replay attacks after reboot; segment rotation & signed manifests verified.
+- **What to build**: Durable Replay Protection (`DurableNonceStore` in `rivun-net`, `DurableReplayStore` in `rivun-node`), Journal Segment Rotation & Cryptographic Sealing (`rivun-journal`), Signed Segment Manifests (`rivun-ledger`), Fast Indexed Queries (`rivun-journal`/`rivun-ledger`).
+- **Success criteria**: All tests pass in `rivun-net`, `rivun-node`, `rivun-journal`, `rivun-ledger`; clippy runs cleanly; no replay attacks after reboot; segment rotation & signed manifests verified.
 - **Interface contracts**: PROJECT.md section Interface Contracts.
 - **Code layout**: PROJECT.md § Code Layout.
 
 ## Change Tracker
 - **Files modified**:
-  - `crates/zap-net/src/durable_replay.rs`: Implemented `DurableNonceStore` with WAL append log, magic header, restart recovery, auto-compaction.
-  - `crates/zap-net/src/lib.rs`: Integrated `DurableNonceStore` into `ZapEndpoint` and `NonceReplayCache`.
-  - `crates/zap-net/Cargo.toml`: Added `tempfile.workspace = true` to `[dev-dependencies]`.
-  - `crates/zap-node/src/durable_replay.rs`: Implemented `DurableReplayStore` with BLAKE3 16-byte frame fingerprints, clock skew checks, WAL persistence.
-  - `crates/zap-node/src/lib.rs`: Integrated `DurableReplayStore` into `SecurityConfig` and `ReplayGuard`.
-  - `crates/zap-journal/src/lib.rs`: Implemented `max_segment_count`, `max_segment_records`, automatic segment rotation, `rotate_and_seal()`, timestamp window manifest pruning, and `query_filtered`.
-  - `crates/zap-ledger/src/lib.rs`: Implemented keypair-signed segment manifests (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`), `ReceiptJournalStore` keypair integration, and `query_fast` indexed replication queries.
-- **Build status**: PASS (116 tests passed across `zap-net`, `zap-node`, `zap-journal`, `zap-ledger`).
+  - `crates/rivun-net/src/durable_replay.rs`: Implemented `DurableNonceStore` with WAL append log, magic header, restart recovery, auto-compaction.
+  - `crates/rivun-net/src/lib.rs`: Integrated `DurableNonceStore` into `ZapEndpoint` and `NonceReplayCache`.
+  - `crates/rivun-net/Cargo.toml`: Added `tempfile.workspace = true` to `[dev-dependencies]`.
+  - `crates/rivun-node/src/durable_replay.rs`: Implemented `DurableReplayStore` with BLAKE3 16-byte frame fingerprints, clock skew checks, WAL persistence.
+  - `crates/rivun-node/src/lib.rs`: Integrated `DurableReplayStore` into `SecurityConfig` and `ReplayGuard`.
+  - `crates/rivun-journal/src/lib.rs`: Implemented `max_segment_count`, `max_segment_records`, automatic segment rotation, `rotate_and_seal()`, timestamp window manifest pruning, and `query_filtered`.
+  - `crates/rivun-ledger/src/lib.rs`: Implemented keypair-signed segment manifests (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`), `ReceiptJournalStore` keypair integration, and `query_fast` indexed replication queries.
+- **Build status**: PASS (116 tests passed across `rivun-net`, `rivun-node`, `rivun-journal`, `rivun-ledger`).
 - **Pending issues**: None.
 
 ## Quality Status
@@ -45,3 +45,4 @@ Implement Milestone 1 (R1: High-Performance Durable Core & Replay Protection) fo
 
 ## Loaded Skills
 - None
+

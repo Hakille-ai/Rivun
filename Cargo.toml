@@ -1,28 +1,28 @@
 [workspace]
 members = [
-    "crates/zap-agent",
-    "crates/zap-capability",
-    "crates/zap-cli",
-    "crates/zap-core",
-    "crates/zap-crypto",
-    "crates/zap-driver-sdk",
-    "crates/zap-envelope",
-    "crates/zap-gateway",
-    "crates/zap-journal",
-    "crates/zap-ledger",
-    "crates/zap-machine",
-    "crates/zap-memory",
-    "crates/zap-net",
-    "crates/zap-node",
-    "crates/zap-ops",
-    "crates/zap-pact",
-    "crates/zap-pack",
-    "crates/zap-policy",
-    "crates/zap-router",
-    "crates/zap-runtime",
-    "crates/zap-schema",
-    "crates/zap-store",
-    "crates/zap-telemetry",
+    "crates/rivun-agent",
+    "crates/rivun-capability",
+    "crates/rivun-cli",
+    "crates/rivun-core",
+    "crates/rivun-crypto",
+    "crates/rivun-driver-sdk",
+    "crates/rivun-envelope",
+    "crates/rivun-gateway",
+    "crates/rivun-journal",
+    "crates/rivun-ledger",
+    "crates/rivun-machine",
+    "crates/rivun-memory",
+    "crates/rivun-net",
+    "crates/rivun-node",
+    "crates/rivun-ops",
+    "crates/rivun-pact",
+    "crates/rivun-pack",
+    "crates/rivun-policy",
+    "crates/rivun-router",
+    "crates/rivun-runtime",
+    "crates/rivun-schema",
+    "crates/rivun-store",
+    "crates/rivun-telemetry",
     "examples",
     "tests/e2e",
     "tools/xtask",
@@ -63,18 +63,18 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1", features = ["serde", "v4", "v5"] }
 wasmtime = { version = "45.0.1", default-features = false, features = ["async", "cranelift", "runtime", "std", "wat"] }
 wat = "1"
-zap-agent = { path = "crates/zap-agent" }
-zap-capability = { path = "crates/zap-capability" }
-zap-gateway = { path = "crates/zap-gateway" }
-zap-journal = { path = "crates/zap-journal" }
-zap-memory = { path = "crates/zap-memory" }
-zap-ops = { path = "crates/zap-ops" }
-zap-pact = { path = "crates/zap-pact" }
-zap-pack = { path = "crates/zap-pack" }
-zap-policy = { path = "crates/zap-policy" }
-zap-router = { path = "crates/zap-router" }
-zap-schema = { path = "crates/zap-schema" }
-zap-telemetry = { path = "crates/zap-telemetry" }
+rivun-agent = { path = "crates/rivun-agent" }
+rivun-capability = { path = "crates/rivun-capability" }
+rivun-gateway = { path = "crates/rivun-gateway" }
+rivun-journal = { path = "crates/rivun-journal" }
+rivun-memory = { path = "crates/rivun-memory" }
+rivun-ops = { path = "crates/rivun-ops" }
+rivun-pact = { path = "crates/rivun-pact" }
+rivun-pack = { path = "crates/rivun-pack" }
+rivun-policy = { path = "crates/rivun-policy" }
+rivun-router = { path = "crates/rivun-router" }
+rivun-schema = { path = "crates/rivun-schema" }
+rivun-telemetry = { path = "crates/rivun-telemetry" }
 
 [profile.release]
 codegen-units = 1

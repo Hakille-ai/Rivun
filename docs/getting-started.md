@@ -1,10 +1,10 @@
-# Getting Started with ZAP
+# Getting Started with rivun
 
-This five-minute path gets a fresh checkout to a verified local ZAP toolchain.
+This five-minute path gets a fresh checkout to a verified local rivun toolchain.
 It focuses on deterministic checks first, then points to the two-node smoke
 test for live dispatch.
 
-For install variants and Docker packaging, see [Install ZAP](install.md).
+For install variants and Docker packaging, see [Install rivun](install.md).
 
 ## Prerequisites
 
@@ -19,9 +19,9 @@ For install variants and Docker packaging, see [Install ZAP](install.md).
 Clone and build the CLI:
 
 ```bash
-git clone https://github.com/Hakille-ai/ZAP.git
-cd ZAP
-cargo build --locked -p zap-cli
+git clone https://github.com/Hakille-ai/Rivun.git
+cd rivun
+cargo build --locked -p rivun-cli
 ```
 
 Expected result:
@@ -33,7 +33,7 @@ Finished dev [unoptimized + debuginfo] target(s)
 Verify the stable protocol fixtures:
 
 ```bash
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures
 ```
 
 Expected result:
@@ -45,7 +45,7 @@ fixtures=fixtures files=17 valid=true
 Validate the bundled domain packs:
 
 ```bash
-cargo run --locked -p zap-cli -- pack list --root examples/domain-packs
+cargo run --locked -p rivun-cli -- pack list --root examples/domain-packs
 ```
 
 Expected result:
@@ -68,15 +68,15 @@ test result: ok
 
 ## PACT Profile Check
 
-PACT records are signed action records carried inside normal ZAP envelopes.
+PACT records are signed action records carried inside normal rivun envelopes.
 They reuse the same Ed25519 key files and BLAKE3 hashing rules as the rest of
 the protocol.
 
 Create, sign, and verify a local PACT record:
 
 ```bash
-cargo run --locked -p zap-cli -- keygen --out .zap/pact-demo.key --force
-cargo run --locked -p zap-cli -- pact create \
+cargo run --locked -p rivun-cli -- keygen --out .rivun/pact-demo.key --force
+cargo run --locked -p rivun-cli -- pact create \
   --actor agent.alpha \
   --target driver.valve \
   --intent valve.open \
@@ -85,12 +85,12 @@ cargo run --locked -p zap-cli -- pact create \
   --created-at-micros 1893456000000000 \
   --out pact-unsigned.json \
   --force
-cargo run --locked -p zap-cli -- pact sign \
+cargo run --locked -p rivun-cli -- pact sign \
   --input pact-unsigned.json \
-  --key .zap/pact-demo.key \
+  --key .rivun/pact-demo.key \
   --out pact-signed.json \
   --force
-cargo run --locked -p zap-cli -- pact verify \
+cargo run --locked -p rivun-cli -- pact verify \
   --input pact-signed.json \
   --now-micros 1893457000000000 \
   --json
@@ -105,17 +105,17 @@ Expected result includes:
 }
 ```
 
-For the full profile, see [ZAP PACT Profile](pact.md).
+For the full profile, see [rivun PACT Profile](pact.md).
 
 ## Config Checks
 
 The example configs are useful for operator validation, but they reference local
-state under `.zap/`, which is intentionally ignored by Git. In a prepared local
+state under `.rivun/`, which is intentionally ignored by Git. In a prepared local
 checkout with matching sample keys, validate them with:
 
 ```bash
-cargo run --locked -p zap-cli -- check-config --config examples/configs/node-a.toml
-cargo run --locked -p zap-cli -- check-config --config examples/configs/node-b.toml
+cargo run --locked -p rivun-cli -- check-config --config examples/configs/node-a.toml
+cargo run --locked -p rivun-cli -- check-config --config examples/configs/node-b.toml
 ```
 
 Expected result in a prepared checkout:
@@ -129,7 +129,7 @@ keys and configs automatically. Use `doctor` when you want the production
 readiness score and warnings for a prepared config:
 
 ```bash
-cargo run --locked -p zap-cli -- doctor --config examples/configs/node-a.toml
+cargo run --locked -p rivun-cli -- doctor --config examples/configs/node-a.toml
 ```
 
 `doctor --strict` is intentionally stronger than syntax validation. It can fail
@@ -149,20 +149,20 @@ requiring manual key or peer editing.
 To run the nodes yourself, use the checked configs as templates:
 
 ```bash
-cargo run --locked -p zap-cli -- run --config examples/configs/node-a.toml
+cargo run --locked -p rivun-cli -- run --config examples/configs/node-a.toml
 ```
 
 In another terminal:
 
 ```bash
-cargo run --locked -p zap-cli -- send --config examples/configs/node-b.toml \
+cargo run --locked -p rivun-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> \
   --action echo \
-  --payload "Hello ZAP"
+  --payload "Hello rivun"
 ```
 
-Do not run `zap run` and `zap send` from the same config at the same time:
-`zap send` binds to the config `bind` address so the receiver can enforce static
+Do not run `rivun run` and `rivun send` from the same config at the same time:
+`rivun send` binds to the config `bind` address so the receiver can enforce static
 peer addresses.
 
 ## SDK Conformance
@@ -170,10 +170,10 @@ peer addresses.
 Run the shared fixture verifier against an SDK path:
 
 ```bash
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/typescript --json
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/python --json
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/go --json
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/rust --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/typescript --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/python --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/go --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/rust --json
 ```
 
 Then run each SDK's native test command:
@@ -187,12 +187,13 @@ go test ./sdks/go/...
 cargo test --manifest-path sdks/rust/Cargo.toml
 ```
 
-## When to Use ZAP
+## When to Use rivun
 
-Use ZAP when you need typed messages, cryptographic node identity, deterministic
+Use rivun when you need typed messages, cryptographic node identity, deterministic
 policy, sandboxed execution, replay protection, Proof-of-Action gates, or signed
 receipts around distributed actions.
 
-Do not use ZAP as a general database, a natural-language agent planner, a
+Do not use rivun as a general database, a natural-language agent planner, a
 financial ledger, a replacement for every broker/RPC stack, or a way to bypass
 the identity, policy, PoA, grant, and receipt model.
+

@@ -1,6 +1,6 @@
-# ZAP Telemetry
+# rivun Telemetry
 
-`zap-telemetry` is the fleet observability library: diagnostic checks,
+`rivun-telemetry` is the fleet observability library: diagnostic checks,
 incident snapshots, Prometheus metrics, and fleet topology. It complements the
 operator contract documented in [Observability](observability.md), which
 defines the metrics and alert surface that production deployments should keep
@@ -8,13 +8,13 @@ stable.
 
 ## Fleet doctor
 
-`zap fleet doctor` aggregates readiness across **6 core criteria** for the
+`rivun fleet doctor` aggregates readiness across **6 core criteria** for the
 local node and (optionally) a peer:
 
 ```bash
-cargo run -p zap-cli -- fleet doctor --config zap.toml --json
-cargo run -p zap-cli -- fleet doctor --config zap.toml --strict --json
-cargo run -p zap-cli -- fleet doctor --config zap.toml --peer <uuid> --json
+cargo run -p rivun-cli -- fleet doctor --config rivun.toml --json
+cargo run -p rivun-cli -- fleet doctor --config rivun.toml --strict --json
+cargo run -p rivun-cli -- fleet doctor --config rivun.toml --peer <uuid> --json
 ```
 
 The underlying `FleetDoctor` runs checks over:
@@ -27,22 +27,22 @@ The underlying `FleetDoctor` runs checks over:
 
 Each check is a `FleetDoctorCheck { category, name, status, summary, detail }`
 with statuses `Passed`/`Warning`/`Failed`; results merge across scopes.
-`--strict` exits non-zero on any failure. Local `zap doctor` remains the
+`--strict` exits non-zero on any failure. Local `rivun doctor` remains the
 single-node readiness gate; `fleet doctor` is the multi-node view.
 
 ## Incident snapshots
 
-`zap incident snapshot` captures a bounded, redacted evidence bundle for
+`rivun incident snapshot` captures a bounded, redacted evidence bundle for
 triage and postmortems:
 
 ```bash
-cargo run -p zap-cli -- incident snapshot \
-  --config /etc/zap/zap.toml \
+cargo run -p rivun-cli -- incident snapshot \
+  --config /etc/rivun/rivun.toml \
   --out incidents/$(date +%Y%m%d-%H%M%S)-snapshot.json
 
 # Or as a tar archive
-cargo run -p zap-cli -- incident snapshot \
-  --config /etc/zap/zap.toml --format tar \
+cargo run -p rivun-cli -- incident snapshot \
+  --config /etc/rivun/rivun.toml --format tar \
   --out incidents/$(date +%Y%m%d-%H%M%S)-snapshot.tar
 ```
 
@@ -78,7 +78,7 @@ memory metadata, raw receipt signatures, and live packet captures by design.
 - gateway requests.
 
 `PrometheusExporter` renders the snapshot as Prometheus text. The CLI-level
-gateway metrics (`zap_gateway_*`) are exposed by `zap-gateway`; the daemon
+gateway metrics (`@@rivun_HEADER@@gateway_*`) are exposed by `rivun-gateway`; the daemon
 endpoints `/metrics`, `/healthz`, `/healthz.json` are documented in
 [Observability](observability.md).
 
@@ -90,12 +90,12 @@ endpoints `/metrics`, `/healthz`, `/healthz.json` are documented in
 - `FleetNodeHealth`: `Healthy` / `Degraded` / `Critical` / `Unreachable`;
 - the local node auto-registers; `FleetNodeHealth` merges peer reports.
 
-Gateway resources expose it as `zap://fleet/status` and
-`zap://fleet/topology` (see [Gateway](gateway.md)).
+Gateway resources expose it as `rivun://fleet/status` and
+`rivun://fleet/topology` (see [Gateway](gateway.md)).
 
 ## Testing
 
-`crates/zap-telemetry/tests/` covers doctor status derivation, incident
+`crates/rivun-telemetry/tests/` covers doctor status derivation, incident
 redaction and tar output, Prometheus rendering (including zero-metric case),
 topology merging, and adversarial scenarios (tampered journals, bad manifests,
 secret leaks).

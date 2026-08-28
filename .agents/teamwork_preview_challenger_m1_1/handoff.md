@@ -6,24 +6,24 @@
 
 ## 1. Observation
 
-Adversarial stress testing was conducted against `DurableNonceStore` (`crates/zap-net/src/durable_replay.rs`) and `DurableReplayStore` (`crates/zap-node/src/durable_replay.rs`). Two dedicated stress test suites were added to the codebase:
-- `crates/zap-net/tests/durable_replay_stress.rs`
-- `crates/zap-node/tests/durable_replay_stress.rs`
+Adversarial stress testing was conducted against `DurableNonceStore` (`crates/rivun-net/src/durable_replay.rs`) and `DurableReplayStore` (`crates/rivun-node/src/durable_replay.rs`). Two dedicated stress test suites were added to the codebase:
+- `crates/rivun-net/tests/durable_replay_stress.rs`
+- `crates/rivun-node/tests/durable_replay_stress.rs`
 
 ### Summary of Empirical Results
 
 | Test Suite | Scenario | Result | Failure Mode / Observed Error |
 |---|---|---|---|
-| `zap-net` | Crash / Restart Replay Flood (10,000 nonces) | PASSED | 100% of replayed nonces rejected after clean restart |
-| `zap-net` | WAL Compaction Under Load (2,000 nonces) | PASSED | 100% of nonces preserved and rejected post-compaction |
-| `zap-net` | Multi-Thread Concurrent Access (5,000 nonces) | PASSED | Thread-safe, 100% replay rejection post-restart |
-| `zap-net` | Clock Skew / Jump Bounds | PASSED | Valid nonces retained, old nonces pruned |
-| `zap-net` | **Partial Write File Corruption Resilience** | **FAILED** | `Partial write test: has_n1=true, has_n2=false` |
-| `zap-node` | Crash / Restart Replay Flood (10,000 frames) | PASSED | 100% of replayed frames rejected after clean restart |
-| `zap-node` | WAL Compaction Under Load (2,000 frames) | PASSED | 100% of frames preserved and rejected post-compaction |
-| `zap-node` | Multi-Thread Concurrent Access (5,000 frames) | PASSED | Thread-safe, 100% replay rejection post-restart |
-| `zap-node` | **Clock Skew Bounds & Integer Overflow** | **FAILED** | `panicked at crates\zap-node\src\durable_replay.rs:81:17: attempt to add with overflow` |
-| `zap-node` | **Partial Write File Corruption Resilience** | **FAILED** | `ReplayStore partial write test: f1_rej=true, f2_rej=false` |
+| `rivun-net` | Crash / Restart Replay Flood (10,000 nonces) | PASSED | 100% of replayed nonces rejected after clean restart |
+| `rivun-net` | WAL Compaction Under Load (2,000 nonces) | PASSED | 100% of nonces preserved and rejected post-compaction |
+| `rivun-net` | Multi-Thread Concurrent Access (5,000 nonces) | PASSED | Thread-safe, 100% replay rejection post-restart |
+| `rivun-net` | Clock Skew / Jump Bounds | PASSED | Valid nonces retained, old nonces pruned |
+| `rivun-net` | **Partial Write File Corruption Resilience** | **FAILED** | `Partial write test: has_n1=true, has_n2=false` |
+| `rivun-node` | Crash / Restart Replay Flood (10,000 frames) | PASSED | 100% of replayed frames rejected after clean restart |
+| `rivun-node` | WAL Compaction Under Load (2,000 frames) | PASSED | 100% of frames preserved and rejected post-compaction |
+| `rivun-node` | Multi-Thread Concurrent Access (5,000 frames) | PASSED | Thread-safe, 100% replay rejection post-restart |
+| `rivun-node` | **Clock Skew Bounds & Integer Overflow** | **FAILED** | `panicked at crates\rivun-node\src\durable_replay.rs:81:17: attempt to add with overflow` |
+| `rivun-node` | **Partial Write File Corruption Resilience** | **FAILED** | `ReplayStore partial write test: f1_rej=true, f2_rej=false` |
 
 ---
 
@@ -32,10 +32,10 @@ Adversarial stress testing was conducted against `DurableNonceStore` (`crates/za
 #### Finding 1: Partial Write WAL File Alignment Corruption Vulnerability (Critical)
 
 **Files**:
-- `crates/zap-net/src/durable_replay.rs:46-62`
-- `crates/zap-node/src/durable_replay.rs:38-57`
+- `crates/rivun-net/src/durable_replay.rs:46-62`
+- `crates/rivun-node/src/durable_replay.rs:38-57`
 
-**Code Snippet (`crates/zap-net/src/durable_replay.rs`)**:
+**Code Snippet (`crates/rivun-net/src/durable_replay.rs`)**:
 ```rust
 41:        if path.exists() {
 42:            let mut file = File::open(&path)?;
@@ -56,13 +56,13 @@ Adversarial stress testing was conducted against `DurableNonceStore` (`crates/za
 61:            .open(&path)?;
 ```
 
-**Verbatim Test Output (`cargo test -p zap-net --test durable_replay_stress`)**:
+**Verbatim Test Output (`cargo test -p rivun-net --test durable_replay_stress`)**:
 ```text
 running 5 tests
 test stress_test_nonce_store_clock_jumps ... ok
 Partial write test: has_n1=true, has_n2=false
 
-thread 'stress_test_nonce_store_partial_write_corruption' (18232) panicked at crates\zap-net\tests\durable_replay_stress.rs:210:9:
+thread 'stress_test_nonce_store_partial_write_corruption' (18232) panicked at crates\rivun-net\tests\durable_replay_stress.rs:210:9:
 nonce2 appended after corruption must be preserved
 test stress_test_nonce_store_partial_write_corruption ... FAILED
 ```
@@ -71,7 +71,7 @@ test stress_test_nonce_store_partial_write_corruption ... FAILED
 
 #### Finding 2: Unhandled Integer Overflow Panic / Denial of Service (Critical)
 
-**File**: `crates/zap-node/src/durable_replay.rs:81`
+**File**: `crates/rivun-node/src/durable_replay.rs:81`
 
 **Code Snippet**:
 ```rust
@@ -84,9 +84,9 @@ test stress_test_nonce_store_partial_write_corruption ... FAILED
 85:        }
 ```
 
-**Verbatim Test Output (`cargo test -p zap-node --test durable_replay_stress`)**:
+**Verbatim Test Output (`cargo test -p rivun-node --test durable_replay_stress`)**:
 ```text
-thread 'stress_test_replay_store_clock_jumps_and_overflow' (27516) panicked at crates\zap-node\src\durable_replay.rs:81:17:
+thread 'stress_test_replay_store_clock_jumps_and_overflow' (27516) panicked at crates\rivun-node\src\durable_replay.rs:81:17:
 attempt to add with overflow
 ```
 
@@ -94,7 +94,7 @@ attempt to add with overflow
 
 #### Finding 3: Shared WAL Path Collision & Silent Initialization Failure (High)
 
-**File**: `crates/zap-net/src/lib.rs:309-319`
+**File**: `crates/rivun-net/src/lib.rs:309-319`
 
 **Code Snippet**:
 ```rust
@@ -169,14 +169,15 @@ Milestone 1 Durable Replay Protection MUST BE REJECTED until the following fixes
 
 To independently verify this challenge:
 
-1. Run the stress test suite for `zap-net`:
+1. Run the stress test suite for `rivun-net`:
    ```powershell
-   cargo test -p zap-net --test durable_replay_stress -- --nocapture
+   cargo test -p rivun-net --test durable_replay_stress -- --nocapture
    ```
    *Expected result*: `stress_test_nonce_store_partial_write_corruption` fails due to unaligned file corruption.
 
-2. Run the stress test suite for `zap-node`:
+2. Run the stress test suite for `rivun-node`:
    ```powershell
-   cargo test -p zap-node --test durable_replay_stress -- --nocapture
+   cargo test -p rivun-node --test durable_replay_stress -- --nocapture
    ```
    *Expected result*: `stress_test_replay_store_clock_jumps_and_overflow` panics on integer overflow, and `stress_test_replay_store_partial_write_corruption` fails due to unaligned file corruption.
+

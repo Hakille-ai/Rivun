@@ -18,8 +18,8 @@ import {
   RECEIPT_REPLICATION_CONTENT_TYPE,
   RECEIPT_REPLICATION_RESPONSE_SUBJECT,
   VERSION,
-  ZapEnvelope,
-  ZapMessageKind,
+  RivunEnvelope,
+  RivunMessageKind,
   pactHash,
   receiptSigningMessage,
   registryBundleManifestRequestFrame,
@@ -144,7 +144,7 @@ type ReceiptSampleFixture = {
   };
 };
 
-test("registry bundle manifest fixture matches TypeScript ZapStore helper", async () => {
+test("registry bundle manifest fixture matches TypeScript RivunStore helper", async () => {
   const fixture = await loadRootFixture<RegistryBundleManifestRequestFixture>(
     "zenv-control-registry-bundle-manifest-request.json",
   );
@@ -153,7 +153,7 @@ test("registry bundle manifest fixture matches TypeScript ZapStore helper", asyn
   assert.equal(fixture.envelope.magic, MAGIC);
   assert.equal(fixture.envelope.version, VERSION);
   assert.equal(fixture.envelope.kind_name, "control");
-  assert.equal(fixture.envelope.kind_value, ZapMessageKind.control);
+  assert.equal(fixture.envelope.kind_value, RivunMessageKind.control);
   assert.equal(fixture.envelope.reserved, 0);
   assert.equal(fixture.envelope.subject, REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT);
   assert.equal(fixture.envelope.content_type, REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE);
@@ -181,7 +181,7 @@ test("control subject fixture contains SDK registry subjects and is frame-compat
   assert.equal(fixture.envelope.magic, MAGIC);
   assert.equal(fixture.envelope.version, VERSION);
   assert.equal(fixture.envelope.kind_name, "control");
-  assert.equal(fixture.envelope.kind_value, ZapMessageKind.control);
+  assert.equal(fixture.envelope.kind_value, RivunMessageKind.control);
 
   const subjects = new Map(fixture.subjects.map((entry) => [entry.subject, entry.content_type]));
   assert.equal(subjects.get(REGISTRY_INDEX_REQUEST_SUBJECT), REGISTRY_INDEX_CONTENT_TYPE);
@@ -204,22 +204,22 @@ test("agent intent fixture can be carried by TypeScript protocol envelopes", asy
   const fixture = await loadRootFixture<AgentIntentFixture>("agent-intent-message-v1.json");
 
   assert.equal(fixture.fixture_schema_version, 1);
-  assert.equal(fixture.subject, "zap.agent.intent");
-  assert.equal(fixture.content_type, "application/zap-agent+json");
+  assert.equal(fixture.subject, "rivun.agent.intent");
+  assert.equal(fixture.content_type, "application/rivun-agent+json");
   assert.equal(fixture.body_json.type, "intent");
   assert.equal(fixture.body_json.payload.schema_version, 1);
   assert.equal(fixture.body_json.payload.kind, "act");
   assert.deepEqual(fixture.body_json.payload.required_capabilities, ["driver.execute:valve.open"]);
 
-  const envelope = new ZapEnvelope({
-    kind: ZapMessageKind.action,
+  const envelope = new RivunEnvelope({
+    kind: RivunMessageKind.action,
     subject: fixture.subject,
     contentType: fixture.content_type,
     body: JSON.stringify(fixture.body_json),
   });
-  const decoded = ZapEnvelope.decode(envelope.encode());
+  const decoded = RivunEnvelope.decode(envelope.encode());
 
-  assert.equal(decoded.kind, ZapMessageKind.action);
+  assert.equal(decoded.kind, RivunMessageKind.action);
   assert.equal(decoded.subject, fixture.subject);
   assert.equal(decoded.contentType, fixture.content_type);
   assert.deepEqual(JSON.parse(Buffer.from(decoded.body).toString("utf8")), fixture.body_json);
@@ -234,7 +234,7 @@ test("unsigned control frame fixture round-trips without security trailers", asy
   assert.equal(fixture.envelope.magic, MAGIC);
   assert.equal(fixture.envelope.version, VERSION);
   assert.equal(fixture.envelope.kind_name, "control");
-  assert.equal(fixture.envelope.kind_value, ZapMessageKind.control);
+  assert.equal(fixture.envelope.kind_value, RivunMessageKind.control);
   assert.equal(fixture.envelope.subject, REGISTRY_INDEX_REQUEST_SUBJECT);
   assert.equal(fixture.envelope.content_type, REGISTRY_INDEX_CONTENT_TYPE);
 
@@ -245,9 +245,9 @@ test("unsigned control frame fixture round-trips without security trailers", asy
     body: frame.body,
     id: fixture.envelope.id,
   });
-  const decoded = ZapEnvelope.decode(deterministic.encode());
+  const decoded = RivunEnvelope.decode(deterministic.encode());
 
-  assert.equal(decoded.kind, ZapMessageKind.control);
+  assert.equal(decoded.kind, RivunMessageKind.control);
   assert.equal(decoded.id, fixture.envelope.id);
   assert.equal(decoded.correlationId, null);
   assert.equal(decoded.causationId, null);
@@ -311,8 +311,8 @@ test("security protocol fixtures cover signed, PoA, capability, and datagram sha
   assert.equal(signed.security.auth_trailer.algorithm, "ed25519");
   assert.equal(poa.security.signed, true);
   assert.equal(poa.security.poa_trailer.threshold, 1);
-  assert.equal(capability.subject, "zap.capability.response");
-  assert.equal(capability.content_type, "application/zap-capability+json");
+  assert.equal(capability.subject, "rivun.capability.response");
+  assert.equal(capability.content_type, "application/rivun-capability+json");
   assert.equal(capability.body_json.capabilities.includes("driver.execute:echo"), true);
   assert.equal(datagram.cipher, "ChaCha20-Poly1305");
   assert.equal(datagram.nonce_hex.length, 24);

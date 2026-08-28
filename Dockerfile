@@ -10,24 +10,24 @@ COPY examples ./examples
 COPY tests ./tests
 COPY tools ./tools
 
-RUN cargo build --locked --release -p zap-cli
+RUN cargo build --locked --release -p rivun-cli
 
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates tini \
     && rm -rf /var/lib/apt/lists/* \
-    && groupadd --system --gid 10001 zap \
-    && useradd --system --uid 10001 --gid zap --home-dir /var/lib/zap --shell /usr/sbin/nologin zap \
-    && mkdir -p /etc/zap /var/lib/zap /var/log/zap /opt/zap/drivers \
-    && chown -R zap:zap /etc/zap /var/lib/zap /var/log/zap /opt/zap/drivers
+    && groupadd --system --gid 10001 rivun \
+    && useradd --system --uid 10001 --gid rivun --home-dir /var/lib/rivun --shell /usr/sbin/nologin rivun \
+    && mkdir -p /etc/rivun /var/lib/rivun /var/log/rivun /opt/rivun/drivers \
+    && chown -R rivun:rivun /etc/rivun /var/lib/rivun /var/log/rivun /opt/rivun/drivers
 
-COPY --from=builder /workspace/target/release/zap /usr/local/bin/zap
+COPY --from=builder /workspace/target/release/rivun /usr/local/bin/rivun
 
-USER zap
-WORKDIR /var/lib/zap
+USER rivun
+WORKDIR /var/lib/rivun
 
 EXPOSE 7000/udp
 
-ENTRYPOINT ["/usr/bin/tini", "--", "zap"]
-CMD ["run", "--config", "/etc/zap/zap.toml"]
+ENTRYPOINT ["/usr/bin/tini", "--", "rivun"]
+CMD ["run", "--config", "/etc/rivun/rivun.toml"]

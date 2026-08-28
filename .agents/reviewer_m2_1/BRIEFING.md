@@ -6,7 +6,7 @@ Review Milestone 2 (Signed Domain Pack Lifecycle & Marketplace) implementation f
 ## 🔒 My Identity
 - Archetype: reviewer / critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m2_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m2_1
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 2 (Signed Domain Pack Lifecycle & Marketplace)
 - Instance: 1 of 2
@@ -22,14 +22,14 @@ Review Milestone 2 (Signed Domain Pack Lifecycle & Marketplace) implementation f
 
 ## Review Scope
 - **Files to review**:
-  - `crates/zap-cli` (`zap pack` commands)
-  - `crates/zap-store` and `crates/zap-pack` (`DomainPackBundle`, offline verification, Ed25519 signature checks)
+  - `crates/rivun-cli` (`rivun pack` commands)
+  - `crates/rivun-store` and `crates/rivun-pack` (`DomainPackBundle`, offline verification, Ed25519 signature checks)
   - `DomainPackDependencyResolver`, `DomainPackPolicyValidator`, security auditor (`audit_pack_dir`, `audit_bundle`)
 - **Interface contracts**: `PROJECT.md`, `ORIGINAL_REQUEST.md`
 - **Review criteria**: Correctness, completeness, security, test coverage, code quality, integrity
 
 ## Review Checklist
-- **Items reviewed**: `crates/zap-store`, `crates/zap-pack`, `crates/zap-cli`, unit/integration tests
+- **Items reviewed**: `crates/rivun-store`, `crates/rivun-pack`, `crates/rivun-cli`, unit/integration tests
 - **Verdict**: REQUEST_CHANGES
 - **Unverified claims**: Worker handoff claims rejected due to compilation failure
 
@@ -47,4 +47,5 @@ Review Milestone 2 (Signed Domain Pack Lifecycle & Marketplace) implementation f
 - Detailed findings written to `handoff.md`.
 
 ## Artifact Index
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m2_1\handoff.md` — Handoff report with findings and verdict
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m2_1\handoff.md` — Handoff report with findings and verdict
+

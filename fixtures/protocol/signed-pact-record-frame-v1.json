@@ -10,8 +10,8 @@
                      "id":  "44444444-4444-4444-8444-444444444444",
                      "correlation_id":  "00000000-0000-0000-0000-000000000000",
                      "causation_id":  "00000000-0000-0000-0000-000000000000",
-                     "subject":  "zap.pact.record",
-                     "content_type":  "application/zap-pact+json",
+                     "subject":  "rivun.pact.record",
+                     "content_type":  "application/rivun-pact+json",
                      "metadata_base64":  "",
                      "body_json":  {
                                        "schema_version":  1,

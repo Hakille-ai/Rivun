@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-14T21:11:15Z
 
 ## Mission
-Investigate crates/zap-agent and crates/zap-gateway for Milestone 4 (AI Agent Gateway & MCP Server), mapping architecture, JSON-RPC 2.0 MCP server handlers, transport protocols (HTTP REST, SSE streaming, WebSocket bridge), provenance chain digest generation, and identifying missing features/bugs/facades.
+Investigate crates/rivun-agent and crates/rivun-gateway for Milestone 4 (AI Agent Gateway & MCP Server), mapping architecture, JSON-RPC 2.0 MCP server handlers, transport protocols (HTTP REST, SSE streaming, WebSocket bridge), provenance chain digest generation, and identifying missing features/bugs/facades.
 
 ## 🔒 My Identity
 - Archetype: teamwork_preview_explorer
 - Roles: explorer
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_m4_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_m4_1
 - Original parent: af9ffcbe-7c8d-446c-a0a8-f72a3e173c84
 - Milestone: M4
 
@@ -20,13 +20,13 @@ Investigate crates/zap-agent and crates/zap-gateway for Milestone 4 (AI Agent Ga
 - Updated: 2026-08-14T21:11:15Z
 
 ## Investigation State
-- **Explored paths**: `ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md`, `Cargo.toml`, `crates/zap-agent`, `crates/zap-node`, `crates/zap-ledger`, `crates/zap-policy`, `crates/zap-memory`, `crates/zap-runtime`, `crates/zap-telemetry`, `crates/zap-cli`, `tests/e2e`.
+- **Explored paths**: `ORIGINAL_REQUEST.md`, `PROJECT.md`, `TEST_INFRA.md`, `Cargo.toml`, `crates/rivun-agent`, `crates/rivun-node`, `crates/rivun-ledger`, `crates/rivun-policy`, `crates/rivun-memory`, `crates/rivun-runtime`, `crates/rivun-telemetry`, `crates/rivun-cli`, `tests/e2e`.
 - **Key findings**:
-  1. `crates/zap-agent` provides schemas and serialization for agent message types, but lacks runtime/gateway capabilities.
-  2. `crates/zap-gateway` does NOT exist in the repository or `Cargo.toml`. It needs to be created to implement JSON-RPC 2.0 MCP server, multi-transport gateway (HTTP REST, SSE streaming, WebSocket bridge), and Provenance Chain engine.
-  3. `ActionReceipt` in `crates/zap-ledger` lacks provenance linking fields (`provenance_chain_digest`, `session_id`, `intent_id`, `negotiation_id`, `policy_decision`).
+  1. `crates/rivun-agent` provides schemas and serialization for agent message types, but lacks runtime/gateway capabilities.
+  2. `crates/rivun-gateway` does NOT exist in the repository or `Cargo.toml`. It needs to be created to implement JSON-RPC 2.0 MCP server, multi-transport gateway (HTTP REST, SSE streaming, WebSocket bridge), and Provenance Chain engine.
+  3. `ActionReceipt` in `crates/rivun-ledger` lacks provenance linking fields (`provenance_chain_digest`, `session_id`, `intent_id`, `negotiation_id`, `policy_decision`).
   4. `tests/e2e/tests/e2e_suite.rs` has 71 compilation errors due to schema mismatches, and tests for F09, F10, F11 are facade tests with trivial assertions.
-  5. CLI subcommands for `zap gateway` and `zap provenance verify` are missing in `crates/zap-cli`.
+  5. CLI subcommands for `rivun gateway` and `rivun provenance verify` are missing in `crates/rivun-cli`.
 - **Unexplored areas**: None for M4 scope. Ready to draft comprehensive handoff report.
 
 ## Key Decisions Made
@@ -37,3 +37,4 @@ Investigate crates/zap-agent and crates/zap-gateway for Milestone 4 (AI Agent Ga
 - `.agents/explorer_m4_1/progress.md` — Progress tracker
 - `.agents/explorer_m4_1/BRIEFING.md` — Agent working memory
 - `.agents/explorer_m4_1/handoff.md` — Investigation report (to be created)
+

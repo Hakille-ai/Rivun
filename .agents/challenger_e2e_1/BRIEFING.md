@@ -6,7 +6,7 @@ Adversarial empirical challenge of the E2E test suite (174 tests across 4 tiers,
 ## 🔒 My Identity
 - Archetype: Empirical Challenger
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_e2e_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_e2e_1
 - Original parent: ee5a2dcd-2673-4c47-a848-1f6357282214
 - Milestone: e2e_verification_and_challenge
 - Instance: 1 of 1
@@ -37,7 +37,7 @@ Adversarial empirical challenge of the E2E test suite (174 tests across 4 tiers,
   - Real execution vs mocks/tautologies (no dummy `assert!(true)`)
   - Oracle fidelity: Mutate/invert assertions to prove tests fail
   - Edge cases, concurrency safety, determinism
-  - Clean execution with `cargo test -p zap-e2e`
+  - Clean execution with `cargo test -p rivun-e2e`
 
 ## Key Decisions Made
 - Established plan for comprehensive empirical analysis and mutation testing.
@@ -53,3 +53,4 @@ Adversarial empirical challenge of the E2E test suite (174 tests across 4 tiers,
 
 ## Loaded Skills
 - None required directly (pure Rust testing / adversarial analysis)
+

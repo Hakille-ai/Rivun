@@ -1505,6 +1505,496 @@ dependencies = [
 ]
 
 [[package]]
+name = "rivun-agent"
+version = "0.1.0"
+dependencies = [
+ "ed25519-dalek",
+ "hex",
+ "rivun-capability",
+ "rivun-core",
+ "rivun-crypto",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-capability"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "criterion",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "clap",
+ "flate2",
+ "hex",
+ "rand_core 0.6.4",
+ "rivun-agent",
+ "rivun-capability",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-envelope",
+ "rivun-gateway",
+ "rivun-ledger",
+ "rivun-memory",
+ "rivun-net",
+ "rivun-node",
+ "rivun-pack",
+ "rivun-pact",
+ "rivun-policy",
+ "rivun-router",
+ "rivun-runtime",
+ "rivun-schema",
+ "rivun-store",
+ "rivun-telemetry",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-core"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "bytes",
+ "criterion",
+ "hex",
+ "proptest",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-crypto"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "bytes",
+ "criterion",
+ "ed25519-dalek",
+ "rand_core 0.6.4",
+ "rivun-core",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-driver-sdk"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
+ "blake3",
+ "bytes",
+ "criterion",
+ "hex",
+ "rivun-capability",
+ "serde",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rivun-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "blake3",
+ "bytes",
+ "ed25519-dalek",
+ "hex",
+ "rivun-agent",
+ "rivun-capability",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-driver-sdk",
+ "rivun-envelope",
+ "rivun-gateway",
+ "rivun-journal",
+ "rivun-ledger",
+ "rivun-memory",
+ "rivun-net",
+ "rivun-node",
+ "rivun-ops",
+ "rivun-pact",
+ "rivun-policy",
+ "rivun-router",
+ "rivun-runtime",
+ "rivun-schema",
+ "rivun-store",
+ "rivun-telemetry",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "toml",
+ "uuid",
+ "wat",
+]
+
+[[package]]
+name = "rivun-envelope"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "criterion",
+ "rivun-core",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-examples"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "rivun-capability",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-driver-sdk",
+ "rivun-envelope",
+ "rivun-memory",
+ "rivun-net",
+ "rivun-node",
+ "rivun-runtime",
+ "rivun-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-gateway"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "ed25519-dalek",
+ "hex",
+ "rand_core 0.6.4",
+ "rivun-agent",
+ "rivun-capability",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-envelope",
+ "rivun-journal",
+ "rivun-ledger",
+ "rivun-memory",
+ "rivun-node",
+ "rivun-pack",
+ "rivun-pact",
+ "rivun-policy",
+ "rivun-router",
+ "rivun-runtime",
+ "rivun-schema",
+ "rivun-store",
+ "rivun-telemetry",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-journal"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "memmap2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-ledger"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "bytes",
+ "criterion",
+ "ed25519-dalek",
+ "hex",
+ "rayon",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-journal",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-machine"
+version = "0.1.0"
+dependencies = [
+ "rivun-capability",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "rivun-memory"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "criterion",
+ "rivun-journal",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-net"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytes",
+ "chacha20poly1305",
+ "criterion",
+ "ed25519-dalek",
+ "hex",
+ "rand_core 0.6.4",
+ "rivun-core",
+ "rivun-crypto",
+ "serde",
+ "serde_json",
+ "snow",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-node"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "blake3",
+ "bytes",
+ "criterion",
+ "hex",
+ "rivun-agent",
+ "rivun-capability",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-envelope",
+ "rivun-ledger",
+ "rivun-memory",
+ "rivun-net",
+ "rivun-pact",
+ "rivun-policy",
+ "rivun-router",
+ "rivun-runtime",
+ "rivun-schema",
+ "rivun-store",
+ "rivun-telemetry",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-ops"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-pack"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "rivun-capability",
+ "rivun-crypto",
+ "rivun-policy",
+ "rivun-router",
+ "rivun-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-pact"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "hex",
+ "rivun-crypto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-policy"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rivun-capability",
+ "serde",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-router"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rivun-capability",
+ "serde",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-runtime"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "bytes",
+ "criterion",
+ "rivun-capability",
+ "rivun-driver-sdk",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+ "wasmtime",
+ "wat",
+]
+
+[[package]]
+name = "rivun-schema"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "rivun-envelope",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "rivun-store"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "blake3",
+ "criterion",
+ "ed25519-dalek",
+ "hex",
+ "rivun-capability",
+ "rivun-crypto",
+ "rivun-policy",
+ "rivun-router",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "rivun-telemetry"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "flate2",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-journal",
+ "rivun-ledger",
+ "rivun-net",
+ "rivun-pact",
+ "rivun-store",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2661,496 +3151,6 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
-]
-
-[[package]]
-name = "zap-agent"
-version = "0.1.0"
-dependencies = [
- "ed25519-dalek",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "uuid",
- "zap-capability",
- "zap-core",
- "zap-crypto",
-]
-
-[[package]]
-name = "zap-capability"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "criterion",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "zap-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "clap",
- "flate2",
- "hex",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "tracing-subscriber",
- "uuid",
- "zap-agent",
- "zap-capability",
- "zap-core",
- "zap-crypto",
- "zap-envelope",
- "zap-gateway",
- "zap-ledger",
- "zap-memory",
- "zap-net",
- "zap-node",
- "zap-pack",
- "zap-pact",
- "zap-policy",
- "zap-router",
- "zap-runtime",
- "zap-schema",
- "zap-store",
- "zap-telemetry",
-]
-
-[[package]]
-name = "zap-core"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "bytes",
- "criterion",
- "hex",
- "proptest",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "zap-crypto"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake3",
- "bytes",
- "criterion",
- "ed25519-dalek",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "thiserror",
- "toml",
- "uuid",
- "zap-core",
-]
-
-[[package]]
-name = "zap-driver-sdk"
-version = "0.1.0"
-dependencies = [
- "bitflags",
- "blake3",
- "bytes",
- "criterion",
- "hex",
- "serde",
- "thiserror",
- "tokio",
- "zap-capability",
-]
-
-[[package]]
-name = "zap-e2e"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "blake3",
- "bytes",
- "ed25519-dalek",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "toml",
- "uuid",
- "wat",
- "zap-agent",
- "zap-capability",
- "zap-core",
- "zap-crypto",
- "zap-driver-sdk",
- "zap-envelope",
- "zap-gateway",
- "zap-journal",
- "zap-ledger",
- "zap-memory",
- "zap-net",
- "zap-node",
- "zap-ops",
- "zap-pact",
- "zap-policy",
- "zap-router",
- "zap-runtime",
- "zap-schema",
- "zap-store",
- "zap-telemetry",
-]
-
-[[package]]
-name = "zap-envelope"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "criterion",
- "thiserror",
- "uuid",
- "zap-core",
-]
-
-[[package]]
-name = "zap-examples"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "uuid",
- "zap-capability",
- "zap-core",
- "zap-crypto",
- "zap-driver-sdk",
- "zap-envelope",
- "zap-memory",
- "zap-net",
- "zap-node",
- "zap-runtime",
- "zap-store",
-]
-
-[[package]]
-name = "zap-gateway"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "ed25519-dalek",
- "hex",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "uuid",
- "zap-agent",
- "zap-capability",
- "zap-core",
- "zap-crypto",
- "zap-envelope",
- "zap-journal",
- "zap-ledger",
- "zap-memory",
- "zap-node",
- "zap-pack",
- "zap-pact",
- "zap-policy",
- "zap-router",
- "zap-runtime",
- "zap-schema",
- "zap-store",
- "zap-telemetry",
-]
-
-[[package]]
-name = "zap-journal"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "memmap2",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "zap-ledger"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake3",
- "bytes",
- "criterion",
- "ed25519-dalek",
- "hex",
- "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "uuid",
- "zap-core",
- "zap-crypto",
- "zap-journal",
-]
-
-[[package]]
-name = "zap-machine"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "zap-capability",
-]
-
-[[package]]
-name = "zap-memory"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake3",
- "criterion",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "uuid",
- "zap-journal",
-]
-
-[[package]]
-name = "zap-net"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "bytes",
- "chacha20poly1305",
- "criterion",
- "ed25519-dalek",
- "hex",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "snow",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
- "zap-core",
- "zap-crypto",
-]
-
-[[package]]
-name = "zap-node"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "blake3",
- "bytes",
- "criterion",
- "hex",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "uuid",
- "zap-agent",
- "zap-capability",
- "zap-core",
- "zap-crypto",
- "zap-envelope",
- "zap-ledger",
- "zap-memory",
- "zap-net",
- "zap-pact",
- "zap-policy",
- "zap-router",
- "zap-runtime",
- "zap-schema",
- "zap-store",
- "zap-telemetry",
-]
-
-[[package]]
-name = "zap-ops"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "zap-pack"
-version = "0.1.0"
-dependencies = [
- "base64",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "toml",
- "uuid",
- "zap-capability",
- "zap-crypto",
- "zap-policy",
- "zap-router",
- "zap-store",
-]
-
-[[package]]
-name = "zap-pact"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake3",
- "hex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "uuid",
- "zap-crypto",
-]
-
-[[package]]
-name = "zap-policy"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "serde",
- "thiserror",
- "toml",
- "uuid",
- "zap-capability",
-]
-
-[[package]]
-name = "zap-router"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "serde",
- "thiserror",
- "uuid",
- "zap-capability",
-]
-
-[[package]]
-name = "zap-runtime"
-version = "0.1.0"
-dependencies = [
- "blake3",
- "bytes",
- "criterion",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
- "wasmtime",
- "wat",
- "zap-capability",
- "zap-driver-sdk",
-]
-
-[[package]]
-name = "zap-schema"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "serde",
- "serde_json",
- "thiserror",
- "toml",
- "zap-envelope",
-]
-
-[[package]]
-name = "zap-store"
-version = "0.1.0"
-dependencies = [
- "base64",
- "blake3",
- "criterion",
- "ed25519-dalek",
- "hex",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "toml",
- "uuid",
- "zap-capability",
- "zap-crypto",
- "zap-policy",
- "zap-router",
-]
-
-[[package]]
-name = "zap-telemetry"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "flate2",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "tracing",
- "uuid",
- "zap-core",
- "zap-crypto",
- "zap-journal",
- "zap-ledger",
- "zap-net",
- "zap-pact",
- "zap-store",
 ]
 
 [[package]]

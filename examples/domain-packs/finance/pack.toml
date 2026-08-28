@@ -1,12 +1,12 @@
 schema_version = 1
-id = "zap-pack-finance"
+id = "rivun-pack-finance"
 name = "Finance"
 version = "0.1.0"
 status = "preview"
 description = "Auditable finance workflows for proposals, risk checks, approvals, execution, reconciliation, and regulator-friendly evidence."
 
 [compatibility]
-zap_protocol = ">=0.1.0,<1.0.0"
+rivun_protocol = ">=0.1.0,<1.0.0"
 driver_abi = ">=1,<=2"
 
 [[capabilities]]

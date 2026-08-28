@@ -7,7 +7,7 @@
 ## 1. Observation
 
 ### A. FleetDoctor Dynamic Health Checks & Edge Case Resilience
-- **Location**: `crates/zap-telemetry/src/doctor.rs:97-594`
+- **Location**: `crates/rivun-telemetry/src/doctor.rs:97-594`
 - **Replay Guard WAL Verification** (Lines 295–318):
   ```rust
   let mut magic = [0u8; 8];
@@ -47,22 +47,22 @@
   - Computes `quorum_threshold = (total_nodes * 2 / 3) + 1`. If $T > N$, returns `FleetDoctorStatus::Failed` ("Validator set quorum threshold unsatisfiable: T > N"). If active nodes $< T$, returns `FleetDoctorStatus::Warning`.
 
 ### B. Prometheus Exporter & Atomic Counter Increments
-- **Location**: `crates/zap-telemetry/src/metrics.rs:94-279` and `crates/zap-node/src/lib.rs:1505-1523, 2248-2253`
+- **Location**: `crates/rivun-telemetry/src/metrics.rs:94-279` and `crates/rivun-node/src/lib.rs:1505-1523, 2248-2253`
 - `ZapNodeMetricsSnapshot::to_prometheus_text()` formats all 17 metrics according to official Prometheus text exposition standards with `# HELP` and `# TYPE` annotations.
-- `zap_replay_drops_total` counter is explicitly emitted:
+- `@@rivun_HEADER@@replay_drops_total` counter is explicitly emitted:
   ```rust
-  output.push_str("# HELP zap_replay_drops_total Total replay drops recorded.\n");
-  output.push_str("# TYPE zap_replay_drops_total counter\n");
+  output.push_str("# HELP @@rivun_HEADER@@replay_drops_total Total replay drops recorded.\n");
+  output.push_str("# TYPE @@rivun_HEADER@@replay_drops_total counter\n");
   output.push_str(&format!(
-      "zap_replay_drops_total{{node_id=\"{}\"}} {}\n",
+      "@@rivun_HEADER@@replay_drops_total{{node_id=\"{}\"}} {}\n",
       self.node_id, self.replay_drops_total
   ));
   ```
-- In `zap-node`, `record_replay_drop()` acquires `self.metrics.lock()` and atomically increments both `counters.replay_drops_total` and `counters.replay_rejections_total`.
+- In `rivun-node`, `record_replay_drop()` acquires `self.metrics.lock()` and atomically increments both `counters.replay_drops_total` and `counters.replay_rejections_total`.
 
 ### C. Test Suites & Coverage
-- `crates/zap-telemetry/tests/adversarial_m3_tests.rs`: Tests secret redaction leak prevention across transport keys, PEM private key blocks, API tokens, JSON delimiters, and 512-byte POSIX ustar alignment with Gzip decompression.
-- `crates/zap-telemetry/tests/telemetry_tests.rs`: Tests all 17 metrics parity, 6 FleetDoctor criteria, tar archive generation, and corrupted WAL / manifest failure modes.
+- `crates/rivun-telemetry/tests/adversarial_m3_tests.rs`: Tests secret redaction leak prevention across transport keys, PEM private key blocks, API tokens, JSON delimiters, and 512-byte POSIX ustar alignment with Gzip decompression.
+- `crates/rivun-telemetry/tests/telemetry_tests.rs`: Tests all 17 metrics parity, 6 FleetDoctor criteria, tar archive generation, and corrupted WAL / manifest failure modes.
 - `tests/e2e/tests/e2e_suite.rs`:
   - `tc_f06_001` through `tc_f06_005`: Peer discovery, doctor healthy run, doctor strict warnings, peer unreachable telemetry, capability aggregation.
   - `tc_f07_001` through `tc_f07_005`: Incident snapshot tar generation, secret redaction, socket state, live process metrics, peer mesh capture.
@@ -72,9 +72,9 @@
 
 ## 2. Logic Chain
 
-1. **Adversarial Verification of Doctor Checks**: Inspection of `crates/zap-telemetry/src/doctor.rs` confirms that all 6 categories perform genuine I/O and cryptographic checks against real filesystem artifacts. Corrupted WAL headers (`b"ZAPFRM01"` mismatch), invalid manifest signatures, unparseable registry JSON, keypair ID mismatches, and unsatisfiable quorum thresholds all branch to `FleetDoctorStatus::Failed`.
-2. **Observability and Metrics Format Compliance**: Inspection of `crates/zap-telemetry/src/metrics.rs` confirms standard Prometheus syntax, proper string escaping via `prometheus_escape`, and parity across all required metrics.
-3. **Atomic State Synchronization**: Inspection of `crates/zap-node/src/lib.rs` confirms mutex-guarded atomic updates for `replay_drops_total`, preventing race conditions during concurrent frame processing.
+1. **Adversarial Verification of Doctor Checks**: Inspection of `crates/rivun-telemetry/src/doctor.rs` confirms that all 6 categories perform genuine I/O and cryptographic checks against real filesystem artifacts. Corrupted WAL headers (`b"ZAPFRM01"` mismatch), invalid manifest signatures, unparseable registry JSON, keypair ID mismatches, and unsatisfiable quorum thresholds all branch to `FleetDoctorStatus::Failed`.
+2. **Observability and Metrics Format Compliance**: Inspection of `crates/rivun-telemetry/src/metrics.rs` confirms standard Prometheus syntax, proper string escaping via `prometheus_escape`, and parity across all required metrics.
+3. **Atomic State Synchronization**: Inspection of `crates/rivun-node/src/lib.rs` confirms mutex-guarded atomic updates for `replay_drops_total`, preventing race conditions during concurrent frame processing.
 4. **Conclusion Support**: All edge cases, failure modes, and metrics requirements specified in the Milestone 3 gate evaluation criteria are fully implemented and verified.
 
 ---
@@ -98,14 +98,15 @@ Milestone 3 remediation fixes satisfy all functional, structural, cryptographic,
 
 To independently verify all Milestone 3 components and test suites:
 ```bash
-cargo test -p zap-telemetry -p zap-node -p zap-cli
+cargo test -p rivun-telemetry -p rivun-node -p rivun-cli
 cargo test --test e2e tc_f06 tc_f07 tc_f08
-cargo clippy -p zap-telemetry -p zap-node -p zap-cli --all-targets -- -D warnings
+cargo clippy -p rivun-telemetry -p rivun-node -p rivun-cli --all-targets -- -D warnings
 ```
 Files inspected:
-- `crates/zap-telemetry/src/doctor.rs`
-- `crates/zap-telemetry/src/incident.rs`
-- `crates/zap-telemetry/src/metrics.rs`
-- `crates/zap-node/src/lib.rs`
-- `crates/zap-cli/src/main.rs`
+- `crates/rivun-telemetry/src/doctor.rs`
+- `crates/rivun-telemetry/src/incident.rs`
+- `crates/rivun-telemetry/src/metrics.rs`
+- `crates/rivun-node/src/lib.rs`
+- `crates/rivun-cli/src/main.rs`
 - `tests/e2e/tests/e2e_suite.rs`
+

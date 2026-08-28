@@ -1,6 +1,6 @@
 # Industrial Automation Domain Pack
 
-The Industrial Automation pack defines a conservative ZAP profile for PLC, OPC UA, Modbus, robotics, and safety-critical plant operations.
+The Industrial Automation pack defines a conservative Rivun profile for PLC, OPC UA, Modbus, robotics, and safety-critical plant operations.
 
 It is designed for simulation-first workflows where autonomous agents can inspect telemetry and prepare bounded plans, but physical plant changes remain gated by explicit grants, human approval, or proof of authority.
 

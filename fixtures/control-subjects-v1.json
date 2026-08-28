@@ -9,68 +9,68 @@
   },
   "subjects": [
     {
-      "subject": "zap.capability.query",
-      "content_type": "application/zap-capability+json",
+      "subject": "rivun.capability.query",
+      "content_type": "application/rivun-capability+json",
       "purpose": "Ask a peer for advertised capabilities and grants."
     },
     {
-      "subject": "zap.capability.response",
-      "content_type": "application/zap-capability+json",
+      "subject": "rivun.capability.response",
+      "content_type": "application/rivun-capability+json",
       "purpose": "Return a signed peer capability advertisement."
     },
     {
-      "subject": "zap.poa.validator_set.request",
-      "content_type": "application/zap-poa-validator-set+json",
+      "subject": "rivun.poa.validator_set.request",
+      "content_type": "application/rivun-poa-validator-set+json",
       "purpose": "Request a signed versioned PoA validator set from a peer."
     },
     {
-      "subject": "zap.poa.validator_set.response",
-      "content_type": "application/zap-poa-validator-set+json",
+      "subject": "rivun.poa.validator_set.response",
+      "content_type": "application/rivun-poa-validator-set+json",
       "purpose": "Return a signed PoA validator set or an unavailable reason."
     },
     {
-      "subject": "zap.pact.verify",
-      "content_type": "application/zap-pact+json",
+      "subject": "rivun.pact.verify",
+      "content_type": "application/rivun-pact+json",
       "purpose": "Exchange offline PACT verification requests or results."
     },
     {
-      "subject": "zap.pact.revoke",
-      "content_type": "application/zap-pact+json",
+      "subject": "rivun.pact.revoke",
+      "content_type": "application/rivun-pact+json",
       "purpose": "Exchange signed PACT revocation evidence."
     },
     {
-      "subject": "zap.pact.bundle",
-      "content_type": "application/zap-pact+json",
+      "subject": "rivun.pact.bundle",
+      "content_type": "application/rivun-pact+json",
       "purpose": "Exchange portable PACT bundles for offline verification."
     },
     {
-      "subject": "zap.registry.index.request",
-      "content_type": "application/zap-registry-index+json",
-      "purpose": "Request a peer's ZapStore registry index."
+      "subject": "rivun.registry.index.request",
+      "content_type": "application/rivun-registry-index+json",
+      "purpose": "Request a peer's RivunStore registry index."
     },
     {
-      "subject": "zap.registry.index.response",
-      "content_type": "application/zap-registry-index+json",
+      "subject": "rivun.registry.index.response",
+      "content_type": "application/rivun-registry-index+json",
       "purpose": "Return a registry index or an unavailable reason."
     },
     {
-      "subject": "zap.registry.bundle.manifest.request",
-      "content_type": "application/zap-registry-bundle-manifest+json",
-      "purpose": "Request a peer's ZapStore bundle manifest."
+      "subject": "rivun.registry.bundle.manifest.request",
+      "content_type": "application/rivun-registry-bundle-manifest+json",
+      "purpose": "Request a peer's RivunStore bundle manifest."
     },
     {
-      "subject": "zap.registry.bundle.manifest.response",
-      "content_type": "application/zap-registry-bundle-manifest+json",
+      "subject": "rivun.registry.bundle.manifest.response",
+      "content_type": "application/rivun-registry-bundle-manifest+json",
       "purpose": "Return a bundle manifest or an unavailable reason."
     },
     {
-      "subject": "zap.receipts.request",
-      "content_type": "application/zap-receipts+json",
+      "subject": "rivun.receipts.request",
+      "content_type": "application/rivun-receipts+json",
       "purpose": "Request signed receipts from a peer receipt log."
     },
     {
-      "subject": "zap.receipts.response",
-      "content_type": "application/zap-receipts+json",
+      "subject": "rivun.receipts.response",
+      "content_type": "application/rivun-receipts+json",
       "purpose": "Return verified signed receipts, with a truncation flag."
     }
   ]

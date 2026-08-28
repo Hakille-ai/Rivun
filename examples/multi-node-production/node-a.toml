@@ -1,5 +1,5 @@
 bind = "127.0.0.1:7100"
-key_file = "../../.zap/node-a.key"
+key_file = "../../.rivun/node-a.key"
 require_signed = true
 
 [[peers]]
@@ -32,21 +32,21 @@ max_clock_skew_micros = 300000000
 replay_cache_capacity = 4096
 
 [receipts]
-dir = "../../.zap/examples/node-a-receipts"
+dir = "../../.rivun/examples/node-a-receipts"
 
 [registry]
 path = "registry.index.toml"
 require_signature = true
-bundle_path = "zapstore-bundle"
+bundle_path = "rivunstore-bundle"
 
 [memory]
-dir = "../../.zap/examples/node-a-memory"
+dir = "../../.rivun/examples/node-a-memory"
 max_record_bytes = 1048576
 allow_driver_read = false
 allow_driver_write = false
 
 [capability_cache]
-path = "../../.zap/examples/node-a-capabilities.jsonl"
+path = "../../.rivun/examples/node-a-capabilities.jsonl"
 max_age_micros = 86400000000
 
 [[routes]]

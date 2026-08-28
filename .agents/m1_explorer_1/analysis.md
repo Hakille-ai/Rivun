@@ -1,8 +1,8 @@
-# Implementation Blueprint & Technical Architecture: `crates/zap-net`
+# Implementation Blueprint & Technical Architecture: `crates/rivun-net`
 ## Milestone 1 (R1) — P2P Swarm Gossip Consensus & Adaptive Quorum Mesh
 
-**Document Reference**: `ZAP-NET-M1-BLUEPRINT-2026`  
-**Target Crate**: `crates/zap-net` (with integration bindings for `crates/zap-agent`, `crates/zap-node`, `crates/zap-crypto`, `crates/zap-core`)  
+**Document Reference**: `rivun-NET-M1-BLUEPRINT-2026`  
+**Target Crate**: `crates/rivun-net` (with integration bindings for `crates/rivun-agent`, `crates/rivun-node`, `crates/rivun-crypto`, `crates/rivun-core`)  
 **Author**: Explorer 1 (Milestone 1)  
 **Status**: Comprehensive Technical Specification & Implementation Plan  
 
@@ -10,12 +10,12 @@
 
 ## 1. Executive Summary & Problem Scope
 
-The **Milestone 1 (R1)** objective is to engineer a resilient, hyper-scalable, decentralized P2P networking and consensus engine in `crates/zap-net`. This engine transforms ZAP from a static, point-to-point UDP transport into an autonomous multi-agent swarm fabric with epidemic state broadcast, Byzantine Fault Tolerant (BFT) swarm consensus, adaptive mesh failure detection, and automatic 2-hop failover relay routing.
+The **Milestone 1 (R1)** objective is to engineer a resilient, hyper-scalable, decentralized P2P networking and consensus engine in `crates/rivun-net`. This engine transforms rivun from a static, point-to-point UDP transport into an autonomous multi-agent swarm fabric with epidemic state broadcast, Byzantine Fault Tolerant (BFT) swarm consensus, adaptive mesh failure detection, and automatic 2-hop failover relay routing.
 
 ### Scope Breakdown & Architecture
 ```
                                      +-------------------------------------------------------------+
-                                     |                     crates/zap-net                          |
+                                     |                     crates/rivun-net                          |
                                      +-------------------------------------------------------------+
                                      |                                                             |
                  +-------------------+-----------------------------+-------------------------------+
@@ -45,7 +45,7 @@ The **Milestone 1 (R1)** objective is to engineer a resilient, hyper-scalable, d
 
 ## 2. Existing Codebase Audit & Backward Compatibility Guardrails
 
-### 2.1 Existing Structure in `crates/zap-net`
+### 2.1 Existing Structure in `crates/rivun-net`
 1. **`src/lib.rs` (1,140 lines)**:
    - Contains `ZapEndpoint`, `ZapEndpointConfig`, `Peer`, `TransportKey`, `InboundZap`, `DatagramEnvelope`, `NonceReplayCache`, Noise handshake helper (`noise::NoiseHandshake`).
    - Uses ChaCha20-Poly1305 AEAD over UDP with 52-byte header (`ZAPD` magic, version 1, source/target UUIDs, 12-byte nonce).
@@ -60,9 +60,9 @@ The **Milestone 1 (R1)** objective is to engineer a resilient, hyper-scalable, d
    - Benchmark in `benches/round_trip.rs`.
 
 ### 2.2 Backward Compatibility Requirements
-- All existing public symbols in `zap-net` root (`ZapEndpoint`, `ZapEndpointConfig`, `Peer`, `TransportKey`, `InboundZap`, `MAX_DATAGRAM_SIZE`, `ZapNetError`) **must remain strictly unchanged** in signature and behavior.
-- Existing tests across `zap-cli`, `zap-node`, `zap-agent`, and `tests/e2e` must continue to pass without modification.
-- New modules will be exposed under `zap_net::gossip`, `zap_net::consensus`, and `zap_net::mesh`. Legacy types (`VectorClock`, `PeerHealth`, `QuorumProposal`, `GossipMesh`) will be migrated/aliased so no downstream imports break.
+- All existing public symbols in `rivun-net` root (`ZapEndpoint`, `ZapEndpointConfig`, `Peer`, `TransportKey`, `InboundZap`, `MAX_DATAGRAM_SIZE`, `ZapNetError`) **must remain strictly unchanged** in signature and behavior.
+- Existing tests across `rivun-cli`, `rivun-node`, `rivun-agent`, and `tests/e2e` must continue to pass without modification.
+- New modules will be exposed under `@@rivun_HEADER@@net::gossip`, `@@rivun_HEADER@@net::consensus`, and `@@rivun_HEADER@@net::mesh`. Legacy types (`VectorClock`, `PeerHealth`, `QuorumProposal`, `GossipMesh`) will be migrated/aliased so no downstream imports break.
 
 ---
 
@@ -73,14 +73,14 @@ The **Milestone 1 (R1)** objective is to engineer a resilient, hyper-scalable, d
    For any broadcast wave on topic $T$, node $u$ randomly selects $k$ peers from its Active View ($k_{\text{active}} \in [6, 8]$):
    $$k = \min\left(k_{\text{active}}, \max\left(3, \lceil \log_2 N \rceil + 1\right)\right)$$
 2. **Message Identification & Deduplication**:
-   $$M_{\text{id}} = \text{Blake3}(\text{"ZAP-GOSSIP-MSG-v1"} \parallel \text{topic} \parallel \text{origin\_node} \parallel \text{seq} \parallel \text{payload\_digest})$$
+   $$M_{\text{id}} = \text{Blake3}(\text{"rivun-GOSSIP-MSG-v1"} \parallel \text{topic} \parallel \text{origin\_node} \parallel \text{seq} \parallel \text{payload\_digest})$$
    - Cache capacity: 65,536 message IDs with 60-second sliding TTL window.
 3. **Hop Count & TTL Damping**:
    - `max_hops = 16`, `current_hop` incremented at each hop. If `current_hop >= max_hops`, the envelope is dropped immediately to prevent network amplification loops.
 
 ### 3.2 File Layout for `src/gossip/`
 ```
-crates/zap-net/src/gossip/
+crates/rivun-net/src/gossip/
 ├── mod.rs             // Module exports, constants, GossipError taxonomy
 ├── envelope.rs        // GossipEnvelope wire struct, signing, verification, hop management
 ├── cache.rs           // GossipDeduplicationCache (LRU + TTL sliding window)
@@ -101,7 +101,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
 
 pub const GOSSIP_ENVELOPE_MAGIC: [u8; 4] = *b"ZGSP";
 pub const GOSSIP_ENVELOPE_VERSION: u8 = 1;
-pub const GOSSIP_SIGNING_DOMAIN: &[u8] = b"ZAP-GOSSIP-ENVELOPE-v1";
+pub const GOSSIP_SIGNING_DOMAIN: &[u8] = b"rivun-GOSSIP-ENVELOPE-v1";
 pub const DEFAULT_MAX_HOPS: u8 = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -402,7 +402,7 @@ pub trait SwarmGossipEngine: Send + Sync {
 
 ### 4.2 File Layout for `src/consensus/`
 ```
-crates/zap-net/src/consensus/
+crates/rivun-net/src/consensus/
 ├── mod.rs             // Module exports, consensus errors, constants
 ├── proposal.rs        // SwarmProposal struct, validation, proposer rotation
 ├── vote.rs            // SwarmVote, VoteKind (Prevote, Precommit), signing
@@ -437,7 +437,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
 
-pub const PROPOSAL_DOMAIN: &[u8] = b"ZAP-SWARM-PROPOSAL-v1";
+pub const PROPOSAL_DOMAIN: &[u8] = b"rivun-SWARM-PROPOSAL-v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SwarmProposal {
@@ -540,7 +540,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
 
-pub const VOTE_DOMAIN: &[u8] = b"ZAP-SWARM-VOTE-v1";
+pub const VOTE_DOMAIN: &[u8] = b"rivun-SWARM-VOTE-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -788,7 +788,7 @@ pub fn verify_threshold_signatures(
     let mut dalek_signatures: Vec<DalekSignature> = Vec::with_capacity(signatures.len());
 
     for (vk, sig_bytes) in verifying_keys.iter().zip(signatures.iter()) {
-        let node_id = zap_crypto::node_id_from_public_key(&vk.to_bytes());
+        let node_id = @@rivun_HEADER@@crypto::node_id_from_public_key(&vk.to_bytes());
         // In commit cert, the signing message is the vote precommit digest
         let msg_digest = SwarmVote::compute_digest(
             epoch,
@@ -898,7 +898,7 @@ The Phi Accrual failure detector computes a continuous suspicion metric $\Phi$ r
 
 ### 5.2 File Layout for `src/mesh/`
 ```
-crates/zap-net/src/mesh/
+crates/rivun-net/src/mesh/
 ├── mod.rs             // Module exports, constants, MeshError taxonomy
 ├── phi_detector.rs    // PhiAccrualDetector sliding window & normal CDF
 ├── heartbeat.rs       // HeartbeatPing, HeartbeatAck, jittered scheduler
@@ -1114,7 +1114,7 @@ pub trait MeshTopology: Send + Sync {
 ```rust
 use thiserror::Error;
 use uuid::Uuid;
-use zap_core::ZapError as CoreError;
+use @@rivun_HEADER@@core::ZapError as CoreError;
 
 #[derive(Debug, Error)]
 pub enum GossipError {
@@ -1185,7 +1185,7 @@ pub enum MeshError {
 
 ## 7. Implementation Roadmap & Concrete File Plan
 
-### 7.1 `crates/zap-net/Cargo.toml` Additions
+### 7.1 `crates/rivun-net/Cargo.toml` Additions
 Ensure required workspace dependencies are activated:
 ```toml
 [dependencies]
@@ -1202,35 +1202,35 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-zap-core = { path = "../zap-core" }
-zap-crypto = { path = "../zap-crypto" }
+rivun-core = { path = "../rivun-core" }
+rivun-crypto = { path = "../rivun-crypto" }
 ```
 
 ### 7.2 File Creation & Modification Matrix
 | Action | File Path | Scope / Description |
 | :--- | :--- | :--- |
-| **Modify** | `crates/zap-net/src/lib.rs` | Register submodules (`pub mod gossip; pub mod consensus; pub mod mesh;`), export unified `ZapNetError`, integrate relay unwrap in `recv()`. |
-| **Create** | `crates/zap-net/src/gossip/mod.rs` | Submodule root, re-exports, `GossipError`. |
-| **Create** | `crates/zap-net/src/gossip/envelope.rs` | `GossipEnvelope`, `GossipMessageId`, signature & hop methods. |
-| **Create** | `crates/zap-net/src/gossip/cache.rs` | `GossipDeduplicationCache` (LRU + TTL). |
-| **Create** | `crates/zap-net/src/gossip/pex.rs` | `DiscoveredPeerEntry`, `PeerExchangeRequest/Response`, XOR metric. |
-| **Create** | `crates/zap-net/src/gossip/sync.rs` | `StateDigest`, `AntiEntropySync` protocols. |
-| **Create** | `crates/zap-net/src/gossip/vector_clock.rs` | `VectorClock`, `Causality` (migrated & enhanced from `src/gossip.rs`). |
-| **Create** | `crates/zap-net/src/gossip/engine.rs` | `SwarmGossipEngine` trait & dispatcher implementation. |
-| **Create** | `crates/zap-net/src/consensus/mod.rs` | Submodule root, `ConsensusError`. |
-| **Create** | `crates/zap-net/src/consensus/proposal.rs` | `SwarmProposal` with Ed25519 signing & digest computation. |
-| **Create** | `crates/zap-net/src/consensus/vote.rs` | `SwarmVote`, `VoteKind` (Prevote, Precommit). |
-| **Create** | `crates/zap-net/src/consensus/certificate.rs` | `SwarmCommitCertificate`, bitmask packing, `SwarmConsensusTrailer` (`ZSC1`). |
-| **Create** | `crates/zap-net/src/consensus/validator_set.rs` | `ValidatorSet`, `ValidatorEntry`, bitmask resolution. |
-| **Create** | `crates/zap-net/src/consensus/batch_verify.rs` | High-throughput `verify_threshold_signatures` using `ed25519_dalek::verify_batch`. |
-| **Create** | `crates/zap-net/src/consensus/equivocation.rs` | `EquivocationProof`, conflicting vote detector. |
-| **Create** | `crates/zap-net/src/consensus/engine.rs` | `SwarmConsensusEngine` state machine (Propose -> Prevote -> Precommit -> Finalize). |
-| **Create** | `crates/zap-net/src/mesh/mod.rs` | Submodule root, `MeshError`. |
-| **Create** | `crates/zap-net/src/mesh/phi_detector.rs` | `PhiAccrualDetector` with continuous erf normal distribution model. |
-| **Create** | `crates/zap-net/src/mesh/heartbeat.rs` | `HeartbeatPing`, `HeartbeatAck`, randomized jitter backoff. |
-| **Create** | `crates/zap-net/src/mesh/partition.rs` | `PartitionStatus`, minority degradation, quorum ratios. |
-| **Create** | `crates/zap-net/src/mesh/relay.rs` | `ZapRelayEnvelope` (`ZRLY`), 2-hop forwarding engine. |
-| **Create** | `crates/zap-net/src/mesh/topology.rs` | `MeshTopology` health tracker and route selector. |
+| **Modify** | `crates/rivun-net/src/lib.rs` | Register submodules (`pub mod gossip; pub mod consensus; pub mod mesh;`), export unified `ZapNetError`, integrate relay unwrap in `recv()`. |
+| **Create** | `crates/rivun-net/src/gossip/mod.rs` | Submodule root, re-exports, `GossipError`. |
+| **Create** | `crates/rivun-net/src/gossip/envelope.rs` | `GossipEnvelope`, `GossipMessageId`, signature & hop methods. |
+| **Create** | `crates/rivun-net/src/gossip/cache.rs` | `GossipDeduplicationCache` (LRU + TTL). |
+| **Create** | `crates/rivun-net/src/gossip/pex.rs` | `DiscoveredPeerEntry`, `PeerExchangeRequest/Response`, XOR metric. |
+| **Create** | `crates/rivun-net/src/gossip/sync.rs` | `StateDigest`, `AntiEntropySync` protocols. |
+| **Create** | `crates/rivun-net/src/gossip/vector_clock.rs` | `VectorClock`, `Causality` (migrated & enhanced from `src/gossip.rs`). |
+| **Create** | `crates/rivun-net/src/gossip/engine.rs` | `SwarmGossipEngine` trait & dispatcher implementation. |
+| **Create** | `crates/rivun-net/src/consensus/mod.rs` | Submodule root, `ConsensusError`. |
+| **Create** | `crates/rivun-net/src/consensus/proposal.rs` | `SwarmProposal` with Ed25519 signing & digest computation. |
+| **Create** | `crates/rivun-net/src/consensus/vote.rs` | `SwarmVote`, `VoteKind` (Prevote, Precommit). |
+| **Create** | `crates/rivun-net/src/consensus/certificate.rs` | `SwarmCommitCertificate`, bitmask packing, `SwarmConsensusTrailer` (`ZSC1`). |
+| **Create** | `crates/rivun-net/src/consensus/validator_set.rs` | `ValidatorSet`, `ValidatorEntry`, bitmask resolution. |
+| **Create** | `crates/rivun-net/src/consensus/batch_verify.rs` | High-throughput `verify_threshold_signatures` using `ed25519_dalek::verify_batch`. |
+| **Create** | `crates/rivun-net/src/consensus/equivocation.rs` | `EquivocationProof`, conflicting vote detector. |
+| **Create** | `crates/rivun-net/src/consensus/engine.rs` | `SwarmConsensusEngine` state machine (Propose -> Prevote -> Precommit -> Finalize). |
+| **Create** | `crates/rivun-net/src/mesh/mod.rs` | Submodule root, `MeshError`. |
+| **Create** | `crates/rivun-net/src/mesh/phi_detector.rs` | `PhiAccrualDetector` with continuous erf normal distribution model. |
+| **Create** | `crates/rivun-net/src/mesh/heartbeat.rs` | `HeartbeatPing`, `HeartbeatAck`, randomized jitter backoff. |
+| **Create** | `crates/rivun-net/src/mesh/partition.rs` | `PartitionStatus`, minority degradation, quorum ratios. |
+| **Create** | `crates/rivun-net/src/mesh/relay.rs` | `ZapRelayEnvelope` (`ZRLY`), 2-hop forwarding engine. |
+| **Create** | `crates/rivun-net/src/mesh/topology.rs` | `MeshTopology` health tracker and route selector. |
 
 ---
 
@@ -1238,7 +1238,7 @@ zap-crypto = { path = "../zap-crypto" }
 
 ### 8.1 Unit & Integration Test Specifications
 1. **Gossip Dissemination Test**:
-   - Create 5 in-memory connected nodes; publish on `zap.test.topic`.
+   - Create 5 in-memory connected nodes; publish on `rivun.test.topic`.
    - Assert all 5 nodes receive exactly 1 copy of the message within 100ms.
    - Assert duplicate transmissions are filtered by `GossipDeduplicationCache`.
 2. **Consensus Quorum & Dynamic Bitmask Test**:
@@ -1262,3 +1262,4 @@ zap-crypto = { path = "../zap-crypto" }
 
 ---
 *Document produced by Explorer 1 — Milestone 1 (R1).*
+

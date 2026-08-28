@@ -1,0 +1,75 @@
+groups:
+  - name: rivun-node-health
+    interval: 15s
+    rules:
+      - alert: ZapNodeDown
+        expr: up{job="rivun-node"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "rivun node target is not scrapeable"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapnodedown"
+
+      - alert: ZapReceiptAuditFailing
+        expr: increase(rivun_receipt_log_verify_failures_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Receipt log verification failed"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapreceiptauditfailing"
+
+      - alert: ZapRegistrySignatureInvalid
+        expr: (rivun_registry_signature_valid == 0) or absent(rivun_registry_signature_valid)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ZapStore registry signature is missing or invalid"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapregistrysignatureinvalid"
+
+      - alert: ZapCapabilityCacheStale
+        expr: rivun_capability_cache_age_seconds > 86400
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Capability cache has not been refreshed within 24 hours"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapcapabilitycachestale"
+
+      - alert: ZapDriverErrorRateHigh
+        expr: sum by (action) (rate(rivun_driver_execution_errors_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Driver execution errors are elevated for {{ $labels.action }}"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapdrivererrorratehigh"
+
+      - alert: ZapPoaAttestationFailures
+        expr: increase(rivun_poa_attestation_failures_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proof-of-Action attestation failures detected"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zappoaattestationfailures"
+
+      - alert: ZapFrameRejectRateHigh
+        expr: sum by (reason) (rate(rivun_frames_rejected_total[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Frame rejections are elevated for {{ $labels.reason }}"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapframerejectratehigh"
+
+      - alert: ZapReplaySpike
+        expr: sum by (reason) (rate(rivun_frames_rejected_total{reason=~".*(replay|nonce|fresh|stale).*"}[5m])) > 0.02
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Replay or freshness-related frame rejections are rising"
+          runbook_url: "https://github.com/hakille-ai/rivun/blob/main/docs/observability.md#zapreplayspike"

@@ -1,6 +1,6 @@
 # RFC and ZEP Process
 
-ZAP uses lightweight RFCs and ZAP Enhancement Proposals (ZEPs) for changes that
+rivun uses lightweight RFCs and rivun Enhancement Proposals (ZEPs) for changes that
 affect long-lived contracts. The goal is to make protocol, crypto, ABI, config,
 SDK, and domain pack decisions reviewable before implementation details harden.
 
@@ -9,7 +9,7 @@ SDK, and domain pack decisions reviewable before implementation details harden.
 Open a Security / Protocol Change issue first, then write a ZEP for any change
 that affects:
 
-- ZAP-Wire or `ZENV` binary layout, versioning, or negotiation;
+- @@@@rivun_HEADER@@WIRE@@ or `ZENV` binary layout, versioning, or negotiation;
 - cryptography, signatures, trust roots, replay protection, or key handling;
 - driver ABI, host imports, Wasm permissions, or sandbox boundaries;
 - node config defaults, policy defaults, governance controls, or release
@@ -64,7 +64,7 @@ fixtures, docs, and release notes land with the code.
 - Add or update protocol fixtures and golden vectors where applicable.
 - Update `docs/security.md`, `docs/operations.md`, SDK docs, or domain pack docs
   when their contracts change.
-- Validate example domain packs with `zap pack validate`.
+- Validate example domain packs with `rivun pack validate`.
 - Run workspace tests and targeted SDK or website checks for touched areas.
 - Record breaking changes in release notes and migration guidance.
 
@@ -97,3 +97,4 @@ fixtures, docs, and release notes land with the code.
 
 ## Open Questions
 ```
+

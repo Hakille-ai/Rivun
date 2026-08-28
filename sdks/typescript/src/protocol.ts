@@ -11,17 +11,17 @@ export const MAX_METADATA_LEN = 64 * 1024;
 export const MAX_BODY_LEN = 16 * 1024 * 1024;
 export const DEFAULT_CONTENT_TYPE = "application/octet-stream";
 
-export const REGISTRY_INDEX_CONTENT_TYPE = "application/zap-registry-index+json";
-export const REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE = "application/zap-registry-bundle-manifest+json";
-export const REGISTRY_INDEX_REQUEST_SUBJECT = "zap.registry.index.request";
-export const REGISTRY_INDEX_RESPONSE_SUBJECT = "zap.registry.index.response";
-export const REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT = "zap.registry.bundle.manifest.request";
-export const REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT = "zap.registry.bundle.manifest.response";
+export const REGISTRY_INDEX_CONTENT_TYPE = "application/rivun-registry-index+json";
+export const REGISTRY_BUNDLE_MANIFEST_CONTENT_TYPE = "application/rivun-registry-bundle-manifest+json";
+export const REGISTRY_INDEX_REQUEST_SUBJECT = "rivun.registry.index.request";
+export const REGISTRY_INDEX_RESPONSE_SUBJECT = "rivun.registry.index.response";
+export const REGISTRY_BUNDLE_MANIFEST_REQUEST_SUBJECT = "rivun.registry.bundle.manifest.request";
+export const REGISTRY_BUNDLE_MANIFEST_RESPONSE_SUBJECT = "rivun.registry.bundle.manifest.response";
 
 const UUID_RE = /^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 const fatalUtf8 = new TextDecoder("utf-8", { fatal: true });
 
-export const ZapMessageKind = {
+export const RivunMessageKind = {
   data: 1,
   event: 2,
   command: 3,
@@ -32,10 +32,10 @@ export const ZapMessageKind = {
   control: 8,
 } as const;
 
-export type ZapMessageKindValue = (typeof ZapMessageKind)[keyof typeof ZapMessageKind];
+export type RivunMessageKindValue = (typeof RivunMessageKind)[keyof typeof RivunMessageKind];
 
-export type ZapEnvelopeOptions = {
-  kind: ZapMessageKindValue;
+export type RivunEnvelopeOptions = {
+  kind: RivunMessageKindValue;
   subject: string;
   contentType: string;
   body?: Uint8Array | string;
@@ -45,8 +45,8 @@ export type ZapEnvelopeOptions = {
   causationId?: string | null;
 };
 
-export class ZapEnvelope {
-  kind: ZapMessageKindValue;
+export class RivunEnvelope {
+  kind: RivunMessageKindValue;
   subject: string;
   contentType: string;
   body: Uint8Array;
@@ -55,7 +55,7 @@ export class ZapEnvelope {
   correlationId: string | null;
   causationId: string | null;
 
-  constructor(options: ZapEnvelopeOptions) {
+  constructor(options: RivunEnvelopeOptions) {
     this.kind = options.kind;
     this.subject = options.subject;
     this.contentType = options.contentType;
@@ -85,7 +85,7 @@ export class ZapEnvelope {
     return Buffer.concat([header, subject, contentType, Buffer.from(this.metadata), Buffer.from(this.body)]);
   }
 
-  static decode(input: Uint8Array): ZapEnvelope {
+  static decode(input: Uint8Array): RivunEnvelope {
     const bytes = Buffer.from(input);
     if (bytes.byteLength < HEADER_LEN) {
       throw new Error(`envelope too short: expected at least ${HEADER_LEN}, got ${bytes.byteLength}`);
@@ -97,7 +97,7 @@ export class ZapEnvelope {
     if (version !== VERSION) {
       throw new Error(`unsupported envelope version ${version}`);
     }
-    const kind = bytes.readUInt16BE(6) as ZapMessageKindValue;
+    const kind = bytes.readUInt16BE(6) as RivunMessageKindValue;
     if (!isKnownKind(kind)) {
       throw new Error(`unknown envelope kind ${kind}`);
     }
@@ -121,7 +121,7 @@ export class ZapEnvelope {
     const contentTypeStart = subjectStart + subjectLen;
     const metadataStart = contentTypeStart + contentTypeLen;
     const bodyStart = metadataStart + metadataLen;
-    return new ZapEnvelope({
+    return new RivunEnvelope({
       kind,
       id,
       correlationId,
@@ -171,9 +171,9 @@ export class ControlFrame {
     });
   }
 
-  toEnvelope(): ZapEnvelope {
-    return new ZapEnvelope({
-      kind: ZapMessageKind.control,
+  toEnvelope(): RivunEnvelope {
+    return new RivunEnvelope({
+      kind: RivunMessageKind.control,
       subject: this.subject,
       contentType: this.contentType,
       body: this.body,
@@ -193,8 +193,8 @@ export class ControlFrame {
   }
 
   static decode(input: Uint8Array): ControlFrame {
-    const envelope = ZapEnvelope.decode(input);
-    if (envelope.kind !== ZapMessageKind.control) {
+    const envelope = RivunEnvelope.decode(input);
+    if (envelope.kind !== RivunMessageKind.control) {
       throw new Error(`expected control envelope, got kind ${envelope.kind}`);
     }
     return new ControlFrame({
@@ -214,7 +214,7 @@ export type UdpTarget = {
   port: number;
 };
 
-export class ZapUdpClient {
+export class RivunUdpClient {
   #socket: Socket;
 
   constructor(socket: Socket = createSocket("udp4")) {
@@ -233,7 +233,7 @@ export class ZapUdpClient {
     });
   }
 
-  sendEnvelope(envelope: ZapEnvelope, target: UdpTarget): Promise<number> {
+  sendEnvelope(envelope: RivunEnvelope, target: UdpTarget): Promise<number> {
     const payload = envelope.encode();
     return new Promise((resolve, reject) => {
       this.#socket.send(payload, target.port, target.host, (error, bytes) => {
@@ -247,16 +247,16 @@ export class ZapUdpClient {
     return this.sendEnvelope(frame.toEnvelope(), target);
   }
 
-  recvEnvelope(timeoutMs = 2000): Promise<ZapEnvelope> {
+  recvEnvelope(timeoutMs = 2000): Promise<RivunEnvelope> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
-        reject(new Error("timed out waiting for ZAP UDP envelope"));
+        reject(new Error("timed out waiting for Rivun UDP envelope"));
       }, timeoutMs);
       const onMessage = (message: Buffer): void => {
         cleanup();
         try {
-          resolve(ZapEnvelope.decode(message));
+          resolve(RivunEnvelope.decode(message));
         } catch (error) {
           reject(error);
         }
@@ -272,7 +272,7 @@ export class ZapUdpClient {
   async requestControl(frame: ControlFrame, target: UdpTarget, timeoutMs = 2000): Promise<ControlFrame> {
     await this.sendControl(frame, target);
     const envelope = await this.recvEnvelope(timeoutMs);
-    if (envelope.kind !== ZapMessageKind.control) {
+    if (envelope.kind !== RivunMessageKind.control) {
       throw new Error(`expected control response, got kind ${envelope.kind}`);
     }
     return ControlFrame.decode(envelope.encode());
@@ -284,7 +284,7 @@ export class ZapUdpClient {
 }
 
 function validateParts(
-  kind: ZapMessageKindValue,
+  kind: RivunMessageKindValue,
   subject: string,
   contentType: string,
   metadataLen: number,
@@ -294,7 +294,7 @@ function validateParts(
 }
 
 function validateLengths(
-  kind: ZapMessageKindValue,
+  kind: RivunMessageKindValue,
   subjectLen: number,
   contentTypeLen: number,
   metadataLen: number,
@@ -306,11 +306,11 @@ function validateLengths(
   }
   if (metadataLen > MAX_METADATA_LEN) throw new Error(`metadata length exceeds maximum ${MAX_METADATA_LEN}`);
   if (bodyLen > MAX_BODY_LEN) throw new Error(`body length exceeds maximum ${MAX_BODY_LEN}`);
-  if (kind !== ZapMessageKind.data && subjectLen === 0) throw new Error(`subject is required for kind ${kind}`);
+  if (kind !== RivunMessageKind.data && subjectLen === 0) throw new Error(`subject is required for kind ${kind}`);
 }
 
-function isKnownKind(kind: number): kind is ZapMessageKindValue {
-  return kind >= ZapMessageKind.data && kind <= ZapMessageKind.control;
+function isKnownKind(kind: number): kind is RivunMessageKindValue {
+  return kind >= RivunMessageKind.data && kind <= RivunMessageKind.control;
 }
 
 function utf8(value: string): Buffer {

@@ -1,12 +1,12 @@
 schema_version = 1
-id = "zap-pack-healthcare"
+id = "rivun-pack-healthcare"
 name = "Healthcare"
 version = "0.1.0"
 status = "preview"
 description = "Auditable healthcare coordination workflows for records, alerts, care tasks, devices, privacy, and strict evidence trails."
 
 [compatibility]
-zap_protocol = ">=0.1.0,<1.0.0"
+rivun_protocol = ">=0.1.0,<1.0.0"
 driver_abi = ">=1,<=2"
 
 [[capabilities]]

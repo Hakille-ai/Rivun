@@ -1,4 +1,4 @@
-# ZAP Protocol Fixtures
+# Rivun Protocol Fixtures
 
 This directory contains small, stable JSON fixtures for protocol and SDK
 interoperability work. They are intentionally human-readable descriptions of
@@ -11,24 +11,24 @@ and body field names.
 
 ## Files
 
-- `zenv-control-registry-bundle-manifest-request.json` describes a v1 `ZENV`
-  control envelope for `zap.registry.bundle.manifest.request`.
-- `agent-intent-message-v1.json` contains a v1 `application/zap-agent+json`
-  intent payload for the `zap.agent.intent` subject.
+- `ZENV-control-registry-bundle-manifest-request.json` describes a v1 `ZENV`
+  control envelope for `rivun.registry.bundle.manifest.request`.
+- `agent-intent-message-v1.json` contains a v1 `application/rivun-agent+json`
+  intent payload for the `rivun.agent.intent` subject.
 - `agent-session-message-v1.json` contains a v1 agent session payload for
-  `zap.agent.session`.
+  `rivun.agent.session`.
 - `agent-delegation-request-message-v1.json` and
   `agent-delegation-response-message-v1.json` contain v1 delegation contracts.
 - `agent-capability-negotiation-request-message-v1.json` and
   `agent-capability-negotiation-response-message-v1.json` contain v1 capability
   negotiation contracts.
-- `pact-record-v1.json` contains a signed v1 `application/zap-pact+json`
-  action record for the `zap.pact.record` subject.
+- `pact-record-v1.json` contains a signed v1 `application/rivun-pact+json`
+  action record for the `rivun.pact.record` subject.
 - `pact-bundle-v1.json` contains a portable v1 PACT bundle with the same signed
   record for offline verification tests.
 - `control-subjects-v1.json` lists the current v1 control subjects and media
   types documented in `docs/protocol.md`.
-- `protocol/zenv-unsigned-control-frame-v1.json` describes a deterministic
+- `protocol/ZENV-unsigned-control-frame-v1.json` describes a deterministic
   unsigned v1 control envelope with no auth or PoA trailer.
 - `protocol/signed-control-frame-v1.json` describes a signed control frame with
   an Ed25519 auth trailer.
@@ -41,7 +41,7 @@ and body field names.
 - `protocol/receipt-sample-v1.json` contains a deterministic receipts response
   body that SDKs can load without requiring live signing keys.
 - `protocol/signed-pact-record-frame-v1.json` describes a signed `ZENV` action
-  frame carrying `application/zap-pact+json`.
+  frame carrying `application/rivun-pact+json`.
 
 ## Conventions
 
@@ -54,6 +54,7 @@ and body field names.
 - Nested `protocol/` fixtures are golden interop samples. They are intentionally
   shaped for SDK and crate tests, while the top-level fixtures remain the stable
   set consumed by the current CLI fixture verifier.
-- `zap fixtures verify --fixtures fixtures` validates both top-level fixtures
+- `rivun fixtures verify --fixtures fixtures` validates both top-level fixtures
   and nested protocol fixtures. Add `--sdk <path>` to check that a local SDK has
   fixture conformance coverage for its language-specific test layout.
+

@@ -6,7 +6,7 @@ Investigate Milestone 5 (SDK Conformance & Workspace Verification) and Milestone
 ## 🔒 My Identity
 - Archetype: explorer
 - Roles: investigation, synthesis
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_m5
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_m5
 - Original parent: 93ddb720-b792-416a-9e98-289b84dbd0f2
 - Milestone: Milestone 5 & FINAL
 
@@ -25,14 +25,14 @@ Investigate Milestone 5 (SDK Conformance & Workspace Verification) and Milestone
 - **Explored paths**:
   - `sdks/rust`, `sdks/typescript`, `sdks/python`, `sdks/go`
   - `fixtures/` and `fixtures/protocol/`
-  - `crates/zap-cli/tests/cli.rs`, `crates/zap-cli/tests/gateway_cli_tests.rs`
-  - `crates/zap-gateway/src/transports/http.rs`, `crates/zap-gateway/src/server.rs`
+  - `crates/rivun-cli/tests/cli.rs`, `crates/rivun-cli/tests/gateway_cli_tests.rs`
+  - `crates/rivun-gateway/src/transports/http.rs`, `crates/rivun-gateway/src/server.rs`
   - `tests/e2e/tests/e2e_suite.rs`, `tests/e2e/Cargo.toml`
-  - `crates/zap-store/src/lib.rs`, `crates/zap-ledger/src/lib.rs`, `crates/zap-crypto/src/lib.rs`, `crates/zap-agent/src/lib.rs`, `crates/zap-pact/src/lib.rs`
+  - `crates/rivun-store/src/lib.rs`, `crates/rivun-ledger/src/lib.rs`, `crates/rivun-crypto/src/lib.rs`, `crates/rivun-agent/src/lib.rs`, `crates/rivun-pact/src/lib.rs`
 - **Key findings**:
-  - Go SDK `sdks/go/zapstore.go` is missing `ReceiptReplicationResponseBody`, `ReceiptSample`, `ReceiptSigningMessage`, `ValidateReceiptShape`, `ValidateReceiptResponseShape`, `ReceiptBodyHash`, and receipt constants.
+  - Go SDK `sdks/go/RivunStore.go` is missing `ReceiptReplicationResponseBody`, `ReceiptSample`, `ReceiptSigningMessage`, `ValidateReceiptShape`, `ValidateReceiptResponseShape`, `ReceiptBodyHash`, and receipt constants.
   - Rust SDK `sdks/rust` has no `ZapUdpClient` implementation.
-  - `crates/zap-cli/tests/gateway_cli_tests.rs` has a test startup race condition in `test_cli_gateway_status_query` (missing slight delay before client connects).
+  - `crates/rivun-cli/tests/gateway_cli_tests.rs` has a test startup race condition in `test_cli_gateway_status_query` (missing slight delay before client connects).
   - `tests/e2e/tests/e2e_suite.rs` has 61 compiler errors due to post-M1/M4 API discrepancies (`MemoryJournalStore::open` returns Self, `DriverManifest::new` has 7 parameters and returns Result, `DriverRegistry` methods, `ZapNodeConfig` missing Default, `Keypair` signing methods, `ZapPact` fields, `DelegationRequest` fields).
 - **Unexplored areas**: None. All requirements analyzed.
 
@@ -40,6 +40,7 @@ Investigate Milestone 5 (SDK Conformance & Workspace Verification) and Milestone
 - Producing comprehensive 5-component blueprint in `handoff.md` with complete evidence chain, exact error locations, root causes, and step-by-step remediation blueprints for M5 and FINAL implementers.
 
 ## Artifact Index
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_m5\handoff.md — Final handoff report
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_m5\progress.md — Liveness tracker
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_m5\DISPATCH.md — Received instructions
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_m5\handoff.md — Final handoff report
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_m5\progress.md — Liveness tracker
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_m5\DISPATCH.md — Received instructions
+

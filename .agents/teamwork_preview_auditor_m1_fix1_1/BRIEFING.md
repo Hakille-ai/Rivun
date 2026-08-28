@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-14T02:02:30Z
 
 ## Mission
-Forensic Integrity Audit of Milestone 1 Remediation (`zap-net`, `zap-node`, `zap-journal`, `zap-ledger`).
+Forensic Integrity Audit of Milestone 1 Remediation (`rivun-net`, `rivun-node`, `rivun-journal`, `rivun-ledger`).
 
 ## 🔒 My Identity
 - Archetype: forensic_auditor
 - Roles: critic, specialist, auditor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_auditor_m1_fix1_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_auditor_m1_fix1_1
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Target: Milestone 1 Remediation
 
@@ -21,7 +21,7 @@ Forensic Integrity Audit of Milestone 1 Remediation (`zap-net`, `zap-node`, `zap
 - Updated: 2026-08-14T02:02:30Z
 
 ## Audit Scope
-- **Work product**: Milestone 1 Remediation crates (`zap-net`, `zap-node`, `zap-journal`, `zap-ledger`)
+- **Work product**: Milestone 1 Remediation crates (`rivun-net`, `rivun-node`, `rivun-journal`, `rivun-ledger`)
 - **Profile loaded**: General Project / Integrity Forensics
 - **Audit type**: forensic integrity check
 
@@ -47,3 +47,4 @@ Forensic Integrity Audit of Milestone 1 Remediation (`zap-net`, `zap-node`, `zap
 
 ## Loaded Skills
 - None
+

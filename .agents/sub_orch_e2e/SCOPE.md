@@ -1,4 +1,4 @@
-# Scope: E2E Testing Track (ZAP Next-Gen Frontier)
+# Scope: E2E Testing Track (rivun Next-Gen Frontier)
 
 ## Architecture & Test Philosophy
 - **Opaque-Box & Requirement-Driven**: Tests are designed directly against `ORIGINAL_REQUEST.md` requirements and user-facing CLI/interfaces, independent of internal crate implementation details.
@@ -27,8 +27,8 @@
 | 10 | Multi-Party Conditional Pacts | `MultiPartyPact`, escrow locks, multi-sig release | >=5 | >=5 | Yes | Yes |
 | 11 | Dispute Resolution Engine | Deterministic adjudication, SLA breaches, slash | >=5 | >=5 | Yes | Yes |
 | 12 | Causal Execution Chains | Provenance causal binding (Pact -> Escrow -> MMR) | >=5 | >=5 | Yes | Yes |
-| 13 | Cluster Simulator CLI | `zap cluster up / status / down`, topology manager | >=5 | >=5 | Yes | Yes |
-| 14 | Swarm Benchmarking Tooling | `zap swarm bench / partition-test`, chaos fixtures | >=5 | >=5 | Yes | Yes |
+| 13 | Cluster Simulator CLI | `rivun cluster up / status / down`, topology manager | >=5 | >=5 | Yes | Yes |
+| 14 | Swarm Benchmarking Tooling | `rivun swarm bench / partition-test`, chaos fixtures | >=5 | >=5 | Yes | Yes |
 | 15 | E2E Integration & Audit | 100% E2E test pass, zero clippy warnings, integrity | >=5 | >=5 | Yes | Yes |
 
 ## Milestones & Work Items
@@ -45,3 +45,4 @@
 - `tests/e2e/**`: Owned exclusively by E2E test worker
 - `TEST_INFRA.md`: Project root E2E documentation
 - `TEST_READY.md`: Project root readiness signal
+

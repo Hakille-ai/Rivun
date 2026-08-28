@@ -969,7 +969,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zap-capability"
+name = "rivun-capability"
 version = "0.1.0"
 dependencies = [
  "blake3",
@@ -980,7 +980,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zap-core"
+name = "rivun-core"
 version = "0.1.0"
 dependencies = [
  "bitflags",
@@ -990,7 +990,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zap-crypto"
+name = "rivun-crypto"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -1003,21 +1003,21 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
- "zap-core",
+ "rivun-core",
 ]
 
 [[package]]
-name = "zap-envelope"
+name = "rivun-envelope"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "thiserror",
  "uuid",
- "zap-core",
+ "rivun-core",
 ]
 
 [[package]]
-name = "zap-journal"
+name = "rivun-journal"
 version = "0.1.0"
 dependencies = [
  "blake3",
@@ -1029,7 +1029,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zap-ledger"
+name = "rivun-ledger"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -1041,13 +1041,13 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uuid",
- "zap-core",
- "zap-crypto",
- "zap-journal",
+ "rivun-core",
+ "rivun-crypto",
+ "rivun-journal",
 ]
 
 [[package]]
-name = "zap-pact"
+name = "rivun-pact"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -1057,47 +1057,47 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uuid",
- "zap-crypto",
+ "rivun-crypto",
 ]
 
 [[package]]
-name = "zap-policy"
+name = "rivun-policy"
 version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror",
  "toml",
  "uuid",
- "zap-capability",
+ "rivun-capability",
 ]
 
 [[package]]
-name = "zap-router"
+name = "rivun-router"
 version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror",
  "uuid",
- "zap-capability",
+ "rivun-capability",
 ]
 
 [[package]]
-name = "zap-sdk"
+name = "rivun-sdk"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "serde",
  "serde_json",
  "uuid",
- "zap-core",
- "zap-envelope",
- "zap-ledger",
- "zap-pact",
- "zap-store",
+ "rivun-core",
+ "rivun-envelope",
+ "rivun-ledger",
+ "rivun-pact",
+ "rivun-store",
 ]
 
 [[package]]
-name = "zap-store"
+name = "rivun-store"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -1110,10 +1110,10 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
- "zap-capability",
- "zap-crypto",
- "zap-policy",
- "zap-router",
+ "rivun-capability",
+ "rivun-crypto",
+ "rivun-policy",
+ "rivun-router",
 ]
 
 [[package]]

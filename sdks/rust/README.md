@@ -1,29 +1,29 @@
-# ZAP Rust SDK
+# Rivun Rust SDK
 
-External Rust SDK for ZAP control envelopes and ZapStore payloads.
+External Rust SDK for Rivun control envelopes and RivunStore payloads.
 
 Unlike the dependency-free Python/TypeScript/Go SDKs, this crate reuses the
-canonical ZAP crates through path dependencies. It can therefore compute BLAKE3
-artifact hashes and call the existing ZapStore signature verification routines.
+canonical Rivun crates through path dependencies. It can therefore compute BLAKE3
+artifact hashes and call the existing RivunStore signature verification routines.
 
 ## Build a registry bundle manifest request
 
 ```rust
-use zap_sdk::{registry_bundle_manifest_request_frame, ControlFrame};
+use rivun_sdk::{registry_bundle_manifest_request_frame, ControlFrame};
 
 let frame = registry_bundle_manifest_request_frame(true, true)?;
 let payload = frame.encode();
 let parsed = ControlFrame::decode(&payload)?;
 
-assert_eq!(parsed.subject(), "zap.registry.bundle.manifest.request");
+assert_eq!(parsed.subject(), "rivun.registry.bundle.manifest.request");
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 ## Shared fixtures and conformance
 
-The Rust SDK reuses the canonical local ZAP crates through path dependencies,
+The Rust SDK reuses the canonical local Rivun crates through path dependencies,
 so its conformance coverage comes from those crates plus SDK round-trip tests.
-It currently covers ZENV control frame construction, ZapStore request/response
+It currently covers ZENV control frame construction, RivunStore request/response
 types, canonical artifact hashing, and signature verification through the
 reference implementation.
 
@@ -39,3 +39,4 @@ types.
 ```bash
 cargo test --manifest-path sdks/rust/Cargo.toml
 ```
+

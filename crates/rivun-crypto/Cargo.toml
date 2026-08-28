@@ -1,0 +1,27 @@
+[package]
+name = "rivun-crypto"
+description = "ZAP identity, signing, and verification primitives."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+blake3.workspace = true
+bytes.workspace = true
+ed25519-dalek.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+uuid.workspace = true
+rivun-core = { path = "../rivun-core" }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "signature"
+harness = false

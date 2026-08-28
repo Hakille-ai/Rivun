@@ -1,8 +1,8 @@
 {
   "fixture_schema_version": 1,
   "description": "Readable fixture for a v1 receipts response body with one deterministic signed receipt sample.",
-  "subject": "zap.receipts.response",
-  "content_type": "application/zap-receipts+json",
+  "subject": "rivun.receipts.response",
+  "content_type": "application/rivun-receipts+json",
   "body_json": {
     "schema_version": 1,
     "request_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
@@ -13,8 +13,8 @@
         "receipt_id": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         "node_id": "11111111-1111-4111-8111-111111111111",
         "frame_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        "subject": "zap.registry.index.request",
-        "content_type": "application/zap-registry-index+json",
+        "subject": "rivun.registry.index.request",
+        "content_type": "application/rivun-registry-index+json",
         "body_hash": "blake3:0000000000000000000000000000000000000000000000000000000000000000",
         "policy_decision": "allow",
         "outcome": "accepted",

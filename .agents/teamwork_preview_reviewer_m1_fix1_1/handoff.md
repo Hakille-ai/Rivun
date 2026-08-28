@@ -4,25 +4,25 @@
 
 ## 1. Observation
 
-All 5 core verification requirements and the 7 underlying remediation tasks for Milestone 1 were independently inspected and verified across `crates/zap-net`, `crates/zap-node`, `crates/zap-journal`, and `crates/zap-ledger`.
+All 5 core verification requirements and the 7 underlying remediation tasks for Milestone 1 were independently inspected and verified across `crates/rivun-net`, `crates/rivun-node`, `crates/rivun-journal`, and `crates/rivun-ledger`.
 
 ### Empirical Verification Results
 
-1. **`cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger`**:
+1. **`cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger`**:
    - **Command output**: `test result: ok. 65 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`.
-2. **`cargo test -p zap-journal --test m1_journal_stress -- --nocapture`**:
+2. **`cargo test -p rivun-journal --test m1_journal_stress -- --nocapture`**:
    - **Command output**: `test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`.
-3. **`cargo test -p zap-ledger --test m1_challenger_stress -- --nocapture`**:
+3. **`cargo test -p rivun-ledger --test m1_challenger_stress -- --nocapture`**:
    - **Command output**: `test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`.
-4. **`cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings`**:
+4. **`cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings`**:
    - **Command output**: `Finished dev profile [unoptimized + debuginfo] target(s) in 11.44s`, clean exit (code 0), 0 warnings, 0 errors.
 
 ### Direct Code Inspection Findings
 
 - **WAL Tail Truncation on Open**:
-  - `crates/zap-net/src/durable_replay.rs`: `DurableNonceStore::open` calculates `valid_len = 8 + (valid_records * DURABLE_NONCE_RECORD_LEN) as u64` and truncates unaligned/corrupted bytes with `file.set_len(valid_len)` when `file.metadata()?.len() > valid_len`.
-  - `crates/zap-node/src/durable_replay.rs`: `DurableReplayStore::open` performs identical tail truncation.
-  - `crates/zap-ledger/src/lib.rs`: `ReceiptJournalStore::recover_partial_tail()` provides explicit partial entry tail truncation and recovery. Verified via `test_corruption_recovery_and_tail_truncation`.
+  - `crates/rivun-net/src/durable_replay.rs`: `DurableNonceStore::open` calculates `valid_len = 8 + (valid_records * DURABLE_NONCE_RECORD_LEN) as u64` and truncates unaligned/corrupted bytes with `file.set_len(valid_len)` when `file.metadata()?.len() > valid_len`.
+  - `crates/rivun-node/src/durable_replay.rs`: `DurableReplayStore::open` performs identical tail truncation.
+  - `crates/rivun-ledger/src/lib.rs`: `ReceiptJournalStore::recover_partial_tail()` provides explicit partial entry tail truncation and recovery. Verified via `test_corruption_recovery_and_tail_truncation`.
 
 - **Compaction `node_id` Preservation**:
   - `DurableNonceStore` tracks `order: VecDeque<([u8; NONCE_LEN], Uuid, u64)>` preserving `(nonce, node_id, timestamp_micros)`.
@@ -34,10 +34,10 @@ All 5 core verification requirements and the 7 underlying remediation tasks for 
   - Safely handles extreme timestamp values (such as `u64::MAX`) without panicking on integer overflow.
 
 - **Hash Chain Verification Post-Pruning**:
-  - `crates/zap-journal/src/lib.rs`: `JournalStore::scan_records()` evaluates `else if segment.sequence == 0 && record.previous_entry_hash != hash_or_none(None)`. When `max_segment_count` prunes sequence 0, `segment.sequence > 0` bypasses this check for the first entry of the earliest surviving segment, adopting its entry hash as the chain anchor for subsequent segments. Verified via `test_rapid_rotation_with_segment_pruning`.
+  - `crates/rivun-journal/src/lib.rs`: `JournalStore::scan_records()` evaluates `else if segment.sequence == 0 && record.previous_entry_hash != hash_or_none(None)`. When `max_segment_count` prunes sequence 0, `segment.sequence > 0` bypasses this check for the first entry of the earliest surviving segment, adopting its entry hash as the chain anchor for subsequent segments. Verified via `test_rapid_rotation_with_segment_pruning`.
 
 - **Manifest Signing & Indexed Queries**:
-  - `crates/zap-ledger/src/lib.rs`: `build_and_verify_segment_index()` dynamically iterates all available disk segments (`self.journal.segments()?`).
+  - `crates/rivun-ledger/src/lib.rs`: `build_and_verify_segment_index()` dynamically iterates all available disk segments (`self.journal.segments()?`).
   - `rotate_and_seal_segment()` loads true `segment_id` from `self.journal.load_segment_index_by_sequence(sequence)`.
   - `append()` auto-invokes `ensure_sealed_segments_signed()`.
   - `query_fast()` uses `build_and_verify_segment_index()` for candidate segment lookup and candidate filtering.
@@ -70,7 +70,7 @@ All 5 core verification requirements and the 7 underlying remediation tasks for 
 
 ## 3. Caveats
 
-- Workspace-wide `cargo clippy --workspace` includes future milestone stub crates (e.g. `zap-e2e` for M2..M5) which are not yet fully implemented. Target crate clippy (`cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings`) passes cleanly with 0 errors and 0 warnings.
+- Workspace-wide `cargo clippy --workspace` includes future milestone stub crates (e.g. `rivun-e2e` for M2..M5) which are not yet fully implemented. Target crate clippy (`cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings`) passes cleanly with 0 errors and 0 warnings.
 
 ---
 
@@ -88,14 +88,15 @@ To independently re-verify the Milestone 1 review:
 
 1. **Run Unit & Integration Tests**:
    ```powershell
-   cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger
+   cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger
    ```
 2. **Run Stress Test Suites**:
    ```powershell
-   cargo test -p zap-journal --test m1_journal_stress -- --nocapture
-   cargo test -p zap-ledger --test m1_challenger_stress -- --nocapture
+   cargo test -p rivun-journal --test m1_journal_stress -- --nocapture
+   cargo test -p rivun-ledger --test m1_challenger_stress -- --nocapture
    ```
 3. **Run Clippy Verification**:
    ```powershell
-   cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings
+   cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings
    ```
+

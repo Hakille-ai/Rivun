@@ -6,7 +6,7 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
 ## 🔒 My Identity
 - Archetype: reviewer, critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_reviewer_m1_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_reviewer_m1_1
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Milestone: Milestone 1 (R1)
 - Instance: 1 of 1
@@ -22,9 +22,9 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
 - Updated: 2026-08-14T01:51:30Z
 
 ## Review Scope
-- **Files to review**: `crates/zap-net`, `crates/zap-node`, `crates/zap-journal`, `crates/zap-ledger`
-- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\ORIGINAL_REQUEST.md`, `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\PROJECT.md`
-- **Worker report**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_worker_m1\handoff.md`
+- **Files to review**: `crates/rivun-net`, `crates/rivun-node`, `crates/rivun-journal`, `crates/rivun-ledger`
+- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\ORIGINAL_REQUEST.md`, `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\PROJECT.md`
+- **Worker report**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_worker_m1\handoff.md`
 - **Review criteria**:
   1. Durable replay store correctly persists and re-hydrates across node restarts.
   2. Segment rotation, sealing, and signed segment manifests function properly.
@@ -32,7 +32,7 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
   4. Code quality, test passing, clippy cleanliness, integrity.
 
 ## Review Checklist
-- **Items reviewed**: `crates/zap-net`, `crates/zap-node`, `crates/zap-journal`, `crates/zap-ledger`
+- **Items reviewed**: `crates/rivun-net`, `crates/rivun-node`, `crates/rivun-journal`, `crates/rivun-ledger`
 - **Verdict**: APPROVE
 - **Unverified claims**: none (all claims verified)
 
@@ -42,11 +42,12 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
 - **Untested angles**: None.
 
 ## Key Decisions Made
-- Executed `cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger` (122/122 passed).
-- Executed `cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings` (0 warnings).
+- Executed `cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger` (122/122 passed).
+- Executed `cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings` (0 warnings).
 - Issued APPROVE verdict and wrote handoff report to `handoff.md`.
 
 ## Artifact Index
 - handoff.md — Review Handoff Report
 - BRIEFING.md — Persistent briefing index
 - DISPATCH.md — Received messages log
+

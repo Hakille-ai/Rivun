@@ -1,1 +1,2 @@
-# Explorer 2 Workspace — zap-agent & zap-node Integration & Actor Daemon
+# Explorer 2 Workspace — rivun-agent & rivun-node Integration & Actor Daemon
+

@@ -1,10 +1,10 @@
-# ZAP Network
+# rivun Network
 
-`zap-net` provides the encrypted UDP transport plus the distributed-network
+`rivun-net` provides the encrypted UDP transport plus the distributed-network
 subsystems built on top of it: BFT consensus, epidemic gossip, an adaptive
 mesh with failure detection, and restart-persistent anti-replay.
 
-The transport is the only hard dependency of a basic ZAP node. Consensus,
+The transport is the only hard dependency of a basic rivun node. Consensus,
 gossip, and mesh are optional subsystems that deployments enable when they
 need swarm coordination, discovery, or failover.
 
@@ -36,12 +36,12 @@ survives restarts. `compact` rewrites the log atomically. This closes the
 restart replay window for deployments that rotate process state frequently.
 
 ```bash
-cargo run -p zap-cli -- run --config zap.toml   # durable replay via config flag
+cargo run -p rivun-cli -- run --config rivun.toml   # durable replay via config flag
 ```
 
 ## BFT consensus
 
-`BftConsensusEngine` (`zap-net::consensus`) is a two-phase BFT consensus engine
+`BftConsensusEngine` (`rivun-net::consensus`) is a two-phase BFT consensus engine
 over the swarm protocol:
 
 ```text
@@ -59,14 +59,14 @@ proposal → pre-vote → polka (2/3) → pre-commit → commit certificate ("ZS
 - Epoch reconfiguration (`reconfigure_epoch`) supports validator set changes
   without stopping the engine.
 
-Swarm intents move through states published by `zap-agent::swarm`:
+Swarm intents move through states published by `rivun-agent::swarm`:
 `Submitted → Proposed → Prevoting → Precommitting → Committed → Executing →
 Finalized` (with `Rejected`/`TimedOut` terminal states). Commit certificates
 reference `{epoch, view, round, block_height}`.
 
 ## Gossip
 
-`SwarmGossipDispatcher` (`zap-net::gossip`) is an epidemic broadcast layer:
+`SwarmGossipDispatcher` (`rivun-net::gossip`) is an epidemic broadcast layer:
 
 - Signed envelopes (`ZGSP`) with BLAKE3 message ids and hop damping
   (default `MAX_HOPS = 16`);
@@ -83,12 +83,12 @@ partitions beyond 1/3 of the set, and can propose quorum-based actions.
 Example benchmark with the CLI:
 
 ```bash
-cargo run -p zap-cli -- swarm bench --nodes 4 --rate 1000 --duration-secs 3
+cargo run -p rivun-cli -- swarm bench --nodes 4 --rate 1000 --duration-secs 3
 ```
 
 ## Adaptive mesh
 
-`SwarmMeshTopology` (`zap-net::mesh`) supervises peer health and failover:
+`SwarmMeshTopology` (`rivun-net::mesh`) supervises peer health and failover:
 
 - `PhiAccrualDetector`: Gaussian phi-accrual failure detection (complementary
   error function with archived coefficients), thresholds 8/14;
@@ -102,15 +102,15 @@ cargo run -p zap-cli -- swarm bench --nodes 4 --rate 1000 --duration-secs 3
 
 | Subject | Content type | Purpose |
 | --- | --- | --- |
-| `zap.discovery.announce` | `application/zap-discovery+json` | Signed service/peer advertisement |
-| `zap.discovery.query` / `.response` | `application/zap-discovery+json` | Signed discovery request/response |
-| `zap.swarm.intent.propose` / `.commit` | `application/zap-swarm+json` | Swarm consensus proposals and commits |
+| `rivun.discovery.announce` | `application/rivun-discovery+json` | Signed service/peer advertisement |
+| `rivun.discovery.query` / `.response` | `application/rivun-discovery+json` | Signed discovery request/response |
+| `rivun.swarm.intent.propose` / `.commit` | `application/rivun-swarm+json` | Swarm consensus proposals and commits |
 
 See [Protocol](protocol.md) for the full control-subject catalogue.
 
 ## Testing
 
-`crates/zap-net/tests/`:
+`crates/rivun-net/tests/`:
 
 - `gossip_test.rs` — fan-out convergence, broadcast storms, TTL/hops, PEX,
   anti-entropy under loss, signature tampering;

@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible ZAP bug
+about: Report a reproducible Rivun bug
 labels: bug
 ---
 
@@ -22,7 +22,7 @@ What should have happened?
 
 Which area is affected?
 
-- [ ] ZAP-Wire / ZENV protocol
+- [ ] @@@@rivun_HEADER@@WIRE@@ / ZENV protocol
 - [ ] Agent protocol / intent messages
 - [ ] Node runtime, drivers, or Wasm permissions
 - [ ] Policy, config, or governance
@@ -33,7 +33,7 @@ Which area is affected?
 
 ## Environment
 
-- ZAP version or commit:
+- Rivun version or commit:
 - OS and architecture:
 - Rust version:
 - Running via Cargo or Docker:
@@ -49,3 +49,4 @@ Do not paste private keys, transport keys, production receipts, or secrets.
 
 - Last known good version or commit:
 - First known bad version or commit:
+

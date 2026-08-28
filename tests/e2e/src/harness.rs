@@ -1,4 +1,4 @@
-//! ZAP Next-Gen E2E Test Harness (`harness.rs`)
+//! Rivun Next-Gen E2E Test Harness (`harness.rs`)
 //!
 //! Provides opaque-box simulation utilities, mock cluster environments,
 //! simulated network topology, WASM driver fixtures, and assertion helpers.
@@ -10,13 +10,13 @@ use std::{collections::HashMap, fs, net::UdpSocket, path::PathBuf};
 use tempfile::{TempDir, tempdir};
 use uuid::Uuid;
 
-use zap_core::{ZapFlags, ZapFrame, now_micros};
-use zap_crypto::Keypair;
-use zap_ledger::{ReceiptJournalStore, SignedActionReceipt};
-use zap_memory::MemoryJournalStore;
-use zap_net::{GossipMesh, QuorumProposal};
-use zap_pact::ZapPact;
-use zap_telemetry::{FleetNodeHealth, FleetNodeState, FleetTopology};
+use rivun_core::{RivunFlags, RivunFrame, now_micros};
+use rivun_crypto::Keypair;
+use rivun_ledger::{ReceiptJournalStore, SignedActionReceipt};
+use rivun_memory::MemoryJournalStore;
+use rivun_net::{GossipMesh, QuorumProposal};
+use rivun_pact::RivunPact;
+use rivun_telemetry::{FleetNodeHealth, FleetNodeState, FleetTopology};
 
 /// Simple helper to generate a free UDP port.
 pub fn free_udp_addr() -> String {
@@ -39,14 +39,14 @@ pub const ECHO_DRIVER_WAT: &str = r#"
 (module
   (memory (export "memory") 1)
   (global $heap (mut i32) (i32.const 1024))
-  (func (export "zap_alloc") (param $len i32) (result i32)
+  (func (export "rivun_alloc") (param $len i32) (result i32)
     global.get $heap
     global.get $heap
     local.get $len
     i32.add
     global.set $heap)
-  (func (export "zap_dealloc") (param i32 i32))
-  (func (export "zap_execute")
+  (func (export "rivun_dealloc") (param i32 i32))
+  (func (export "rivun_execute")
     (param $action_ptr i32) (param $action_len i32)
     (param $payload_ptr i32) (param $payload_len i32)
     (result i64)
@@ -64,14 +64,14 @@ pub const REVERSE_DRIVER_WAT: &str = r#"
 (module
   (memory (export "memory") 1)
   (global $heap (mut i32) (i32.const 1024))
-  (func (export "zap_alloc") (param $len i32) (result i32)
+  (func (export "rivun_alloc") (param $len i32) (result i32)
     global.get $heap
     global.get $heap
     local.get $len
     i32.add
     global.set $heap)
-  (func (export "zap_dealloc") (param i32 i32))
-  (func (export "zap_execute")
+  (func (export "rivun_dealloc") (param i32 i32))
+  (func (export "rivun_execute")
     (param $action_ptr i32) (param $action_len i32)
     (param $payload_ptr i32) (param $payload_len i32)
     (result i64)
@@ -166,10 +166,10 @@ impl SimulatedNode {
 
     /// Append a test signed action receipt to this node's journal.
     pub fn record_action(&self, action: &str, payload: &[u8]) -> Result<SignedActionReceipt> {
-        let frame = ZapFrame::new(
+        let frame = RivunFrame::new(
             self.node_id,
             Uuid::nil(),
-            ZapFlags::SIGNED,
+            RivunFlags::SIGNED,
             Bytes::copy_from_slice(payload),
         )?;
         let processed_at = now_micros()?.max(frame.header.timestamp_micros);
@@ -325,9 +325,9 @@ pub fn create_test_pact(
     target: &str,
     intent: &str,
     keypair: &Keypair,
-) -> Result<ZapPact> {
+) -> Result<RivunPact> {
     let now = now_micros()?;
-    let mut pact = ZapPact::new(actor, target, intent, now);
+    let mut pact = RivunPact::new(actor, target, intent, now);
     pact.object = serde_json::json!({"action": intent, "resource": "asset_42"});
     pact.terms = serde_json::json!({"escrow_amount": 1000, "timeout_micros": 30_000_000});
     pact.consent = serde_json::json!({"approved": true, "actor": actor});

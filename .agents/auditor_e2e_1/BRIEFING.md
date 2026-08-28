@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-15T22:24:00Z
 
 ## Mission
-Forensic Integrity Audit of the E2E Testing Track (`tests/e2e/**`, `TEST_INFRA.md`, `TEST_READY.md`) for ZAP Next-Gen Frontier.
+Forensic Integrity Audit of the E2E Testing Track (`tests/e2e/**`, `TEST_INFRA.md`, `TEST_READY.md`) for rivun Next-Gen Frontier.
 
 ## 🔒 My Identity
 - Archetype: forensic_auditor
 - Roles: critic, specialist, auditor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\auditor_e2e_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\auditor_e2e_1
 - Original parent: ee5a2dcd-2673-4c47-a848-1f6357282214
 - Target: E2E Testing Track
 
@@ -45,7 +45,7 @@ Forensic Integrity Audit of the E2E Testing Track (`tests/e2e/**`, `TEST_INFRA.m
   3. Are there facade assertions? -> NO. 0 facade assertions.
   4. Is WASM runtime mocked? -> NO. Real Wasmtime execution of compiled WAT bytecode with fuel limits and memory sandboxes.
   5. Is MMR mocked? -> NO. Real incremental peak bagging and inclusion proof verification.
-- **Vulnerabilities found**: None in `tests/e2e`. Note: Workspace crate `zap-agent` in parallel track M1 has active compilation errors being resolved by M1 worker.
+- **Vulnerabilities found**: None in `tests/e2e`. Note: Workspace crate `rivun-agent` in parallel track M1 has active compilation errors being resolved by M1 worker.
 - **Untested angles**: None within the E2E audit scope.
 
 ## Loaded Skills
@@ -60,3 +60,4 @@ Forensic Integrity Audit of the E2E Testing Track (`tests/e2e/**`, `TEST_INFRA.m
 - `.agents/auditor_e2e_1/BRIEFING.md` — Working memory and status
 - `.agents/auditor_e2e_1/progress.md` — Liveness heartbeat
 - `.agents/auditor_e2e_1/handoff.md` — Final forensic audit report
+

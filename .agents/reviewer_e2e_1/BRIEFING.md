@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-15T20:24:00Z
 
 ## Mission
-Objectively and rigorously review the E2E test suite (zap-e2e) against PROJECT.md § Feature Inventory (15 features across Tiers 1-4), ORIGINAL_REQUEST.md, SCOPE.md, TEST_INFRA.md, and TEST_READY.md. Check integrity, opaque-box adherence, failure modes, run cargo test, and issue a verdict.
+Objectively and rigorously review the E2E test suite (rivun-e2e) against PROJECT.md § Feature Inventory (15 features across Tiers 1-4), ORIGINAL_REQUEST.md, SCOPE.md, TEST_INFRA.md, and TEST_READY.md. Check integrity, opaque-box adherence, failure modes, run cargo test, and issue a verdict.
 
 ## 🔒 My Identity
 - Archetype: reviewer_critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_e2e_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_e2e_1
 - Original parent: ee5a2dcd-2673-4c47-a848-1f6357282214
 - Milestone: E2E Testing Track Review
 - Instance: 1 of 1
@@ -15,7 +15,7 @@ Objectively and rigorously review the E2E test suite (zap-e2e) against PROJECT.m
 - Review-only — do NOT modify implementation code or test code
 - Verify all 15 features across Tiers 1-4
 - Adversarial check for integrity violations (dummy assertions, facades, bypassing requirements)
-- Run cargo test -p zap-e2e to verify test execution and passing state
+- Run cargo test -p rivun-e2e to verify test execution and passing state
 - Output findings and verdict in handoff.md
 
 ## Current Parent
@@ -50,11 +50,11 @@ Objectively and rigorously review the E2E test suite (zap-e2e) against PROJECT.m
   - MMR Proof Tamper Resistance: verified with leaf, sister, peak hash tampering
   - Causal Provenance Integrity: verified with hash corruptions and key mismatches
   - BFT Quorum Thresholds: verified with insufficient voting and expired proposals
-- **Vulnerabilities found**: Upstream `zap-agent` crate has missing imports (`Validate`, `Digest`) in `crates/zap-agent/src/swarm.rs` blocking clean workspace build.
+- **Vulnerabilities found**: Upstream `rivun-agent` crate has missing imports (`Validate`, `Digest`) in `crates/rivun-agent/src/swarm.rs` blocking clean workspace build.
 - **Untested angles**: All 15 features covered across 4 testing tiers.
 
 ## Key Decisions Made
-- Confirmed full adherence of `zap-e2e` to opaque-box methodology and anti-cheat constraints.
+- Confirmed full adherence of `rivun-e2e` to opaque-box methodology and anti-cheat constraints.
 - Documented upstream compilation finding without modifying implementation code.
 - Issued APPROVE verdict for E2E Testing Track deliverables.
 
@@ -63,3 +63,4 @@ Objectively and rigorously review the E2E test suite (zap-e2e) against PROJECT.m
 - `.agents/reviewer_e2e_1/BRIEFING.md` — Working state and memory
 - `.agents/reviewer_e2e_1/progress.md` — Liveness heartbeat
 - `.agents/reviewer_e2e_1/handoff.md` — Final review report
+

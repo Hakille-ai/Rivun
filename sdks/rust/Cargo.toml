@@ -1,10 +1,10 @@
 [package]
-name = "zap-sdk"
+name = "rivun-sdk"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.93"
-description = "External Rust SDK for ZAP control envelopes and ZapStore payloads"
+description = "External Rust SDK for Rivun control envelopes and RivunStore payloads"
 
 [workspace]
 
@@ -13,8 +13,8 @@ bytes = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde", "v4"] }
-zap-core = { path = "../../crates/zap-core" }
-zap-envelope = { path = "../../crates/zap-envelope" }
-zap-pact = { path = "../../crates/zap-pact" }
-zap-store = { path = "../../crates/zap-store" }
-zap-ledger = { path = "../../crates/zap-ledger" }
+rivun-core = { path = "../../crates/rivun-core" }
+rivun-envelope = { path = "../../crates/rivun-envelope" }
+rivun-pact = { path = "../../crates/rivun-pact" }
+rivun-store = { path = "../../crates/rivun-store" }
+rivun-ledger = { path = "../../crates/rivun-ledger" }

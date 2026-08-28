@@ -6,23 +6,23 @@ export declare const DRIVER_ABI_VERSION = 1;
 export declare const DRIVER_HASH_PREFIX = "blake3:";
 export declare const RECEIPT_SCHEMA_VERSION = 1;
 export declare const RECEIPT_REPLICATION_SCHEMA_VERSION = 1;
-export declare const RECEIPT_REPLICATION_CONTENT_TYPE = "application/zap-receipts+json";
-export declare const RECEIPT_REPLICATION_REQUEST_SUBJECT = "zap.receipts.request";
-export declare const RECEIPT_REPLICATION_RESPONSE_SUBJECT = "zap.receipts.response";
-export declare const RECEIPT_SIGNATURE_DOMAIN = "ZAP-ACTION-RECEIPT-v1";
-export declare const AGENT_CONTENT_TYPE = "application/zap-agent+json";
-export declare const AGENT_INTENT_SUBJECT = "zap.agent.intent";
-export declare const AGENT_STATUS_SUBJECT = "zap.agent.status";
-export declare const AGENT_RESULT_SUBJECT = "zap.agent.result";
+export declare const RECEIPT_REPLICATION_CONTENT_TYPE = "application/rivun-receipts+json";
+export declare const RECEIPT_REPLICATION_REQUEST_SUBJECT = "rivun.receipts.request";
+export declare const RECEIPT_REPLICATION_RESPONSE_SUBJECT = "rivun.receipts.response";
+export declare const RECEIPT_SIGNATURE_DOMAIN = "rivun-ACTION-RECEIPT-v1";
+export declare const AGENT_CONTENT_TYPE = "application/rivun-agent+json";
+export declare const AGENT_INTENT_SUBJECT = "rivun.agent.intent";
+export declare const AGENT_STATUS_SUBJECT = "rivun.agent.status";
+export declare const AGENT_RESULT_SUBJECT = "rivun.agent.result";
 export declare const PACT_SCHEMA_VERSION = 1;
-export declare const PACT_CONTENT_TYPE = "application/zap-pact+json";
-export declare const PACT_RECORD_SUBJECT = "zap.pact.record";
-export declare const PACT_VERIFY_SUBJECT = "zap.pact.verify";
-export declare const PACT_REVOKE_SUBJECT = "zap.pact.revoke";
-export declare const PACT_BUNDLE_SUBJECT = "zap.pact.bundle";
-export declare const PACT_SIGNATURE_DOMAIN = "ZAP-PACT-v1";
-export type ZapPactStatus = "draft" | "active" | "expired" | "revoked" | "invalid";
-export type ZapPact = {
+export declare const PACT_CONTENT_TYPE = "application/rivun-pact+json";
+export declare const PACT_RECORD_SUBJECT = "rivun.pact.record";
+export declare const PACT_VERIFY_SUBJECT = "rivun.pact.verify";
+export declare const PACT_REVOKE_SUBJECT = "rivun.pact.revoke";
+export declare const PACT_BUNDLE_SUBJECT = "rivun.pact.bundle";
+export declare const PACT_SIGNATURE_DOMAIN = "rivun-PACT-v1";
+export type RivunPactStatus = "draft" | "active" | "expired" | "revoked" | "invalid";
+export type RivunPact = {
     schema_version: number;
     pact_id: string;
     actor: string;
@@ -37,11 +37,11 @@ export type ZapPact = {
     actor_public_key?: string;
     hash?: string;
     signature?: string;
-    status?: ZapPactStatus;
+    status?: RivunPactStatus;
 };
-export type ZapPactBundle = {
+export type RivunPactBundle = {
     schema_version: number;
-    pact: ZapPact;
+    pact: RivunPact;
     verifications?: unknown[];
     revocations?: unknown[];
     metadata?: Record<string, unknown>;
@@ -178,7 +178,7 @@ export type ReceiptReplicationResponseBody = {
     truncated: boolean;
     receipts: ReceiptSample[];
 };
-export declare class ZapStoreClient {
+export declare class RivunStoreClient {
     registryIndexRequest(requireSignature?: boolean): ControlFrame;
     registryBundleManifestRequest(options?: {
         requirePublication?: boolean;
@@ -196,15 +196,15 @@ export declare function validateRegistryBundleEntry(entry: RegistryBundleEntry):
 export declare function validateArtifactHash(value: string): boolean;
 export declare function receiptBodyHash(bytes: Uint8Array): string;
 export declare function artifactHash(bytes: Uint8Array): string;
-export declare function pactCanonicalSigningBytes(pact: ZapPact): Uint8Array;
-export declare function pactHash(pact: ZapPact): string;
-export declare function validatePactShape(pact: ZapPact): void;
-export declare function verifyPact(pact: ZapPact, nowMicros?: number): Promise<boolean>;
-export declare function verifyPactBundle(bundle: ZapPactBundle, nowMicros?: number): Promise<boolean>;
-export declare function zapDomainMessage(domain: Uint8Array | string, message: Uint8Array): Uint8Array;
+export declare function pactCanonicalSigningBytes(pact: RivunPact): Uint8Array;
+export declare function pactHash(pact: RivunPact): string;
+export declare function validatePactShape(pact: RivunPact): void;
+export declare function verifyPact(pact: RivunPact, nowMicros?: number): Promise<boolean>;
+export declare function verifyPactBundle(bundle: RivunPactBundle, nowMicros?: number): Promise<boolean>;
+export declare function rivunDomainMessage(domain: Uint8Array | string, message: Uint8Array): Uint8Array;
 export declare function receiptSigningMessage(receipt: ReceiptSample | Record<string, unknown>): Uint8Array;
 export declare function validateReceiptShape(receipt: ReceiptSample | Record<string, unknown>): void;
 export declare function validateReceiptResponseShape(response: ReceiptReplicationResponseBody | Record<string, unknown>): void;
 export declare function verifyEd25519Signature(message: Uint8Array, signatureBase64: string, publicKeyBase64: string): Promise<boolean>;
 export declare function signatureVerificationPlaceholder(kind: string): SignatureVerificationStatus;
-//# sourceMappingURL=zapstore.d.ts.map
+//# sourceMappingURL=rivunstore.d.ts.map

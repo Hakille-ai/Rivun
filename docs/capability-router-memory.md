@@ -1,29 +1,29 @@
 # Capability, Router, and Memory
 
-ZAP now includes three future-core crates that stay inside the existing safety
+rivun now includes three future-core crates that stay inside the existing safety
 model: capability discovery is descriptive, routing is deterministic, and memory
 is local and auditable.
 
 ## Capability Discovery
 
-`zap-capability` defines capability ids, driver permission declarations, and
+`rivun-capability` defines capability ids, driver permission declarations, and
 JSON control messages. Nodes answer signed `ZENV` control envelopes:
 
-- `zap.capability.query`
-- `zap.capability.response`
-- `zap.capability.announce`
+- `rivun.capability.query`
+- `rivun.capability.response`
+- `rivun.capability.announce`
 
 Inspect local capabilities (generate
 `examples/wasm-drivers/echo/echo.manifest.toml` first with
-`zap driver-manifest create`, see [ZapStore](zapstore.md#cli)):
+`rivun driver-manifest create`, see [RivunStore](RivunStore.md#cli)):
 
 ```bash
-cargo run -p zap-cli -- capability list --config zap.toml --json
-cargo run -p zap-cli -- capability inspect-manifest --manifest examples/wasm-drivers/echo/echo.manifest.toml --json
-cargo run -p zap-cli -- capability query --config zap.toml --target <uuid> --cache .zap/capabilities.jsonl --json
-cargo run -p zap-cli -- capability cache refresh --config zap.toml --json --strict
-cargo run -p zap-cli -- capability cache verify --path .zap/capabilities.jsonl
-cargo run -p zap-cli -- capability cache list --path .zap/capabilities.jsonl --peer <uuid> --json
+cargo run -p rivun-cli -- capability list --config rivun.toml --json
+cargo run -p rivun-cli -- capability inspect-manifest --manifest examples/wasm-drivers/echo/echo.manifest.toml --json
+cargo run -p rivun-cli -- capability query --config rivun.toml --target <uuid> --cache .rivun/capabilities.jsonl --json
+cargo run -p rivun-cli -- capability cache refresh --config rivun.toml --json --strict
+cargo run -p rivun-cli -- capability cache verify --path .rivun/capabilities.jsonl
+cargo run -p rivun-cli -- capability cache list --path .rivun/capabilities.jsonl --peer <uuid> --json
 ```
 
 Discovery never grants authority. A peer can advertise `driver.execute:echo`,
@@ -50,11 +50,11 @@ reason = "critical actions require validator quorum"
 Grants must refer to capabilities the node actually advertises; validation
 rejects grants for missing local capabilities. Requirements may describe
 external prerequisites. When `require_grants_for_advertised = true`,
-`zap check-config` rejects any advertised capability without an explicit grant.
+`rivun check-config` rejects any advertised capability without an explicit grant.
 
 Remote query responses can be appended to a local capability cache with
 `capability query --cache`. Operators can refresh every configured peer in one
-run with `capability cache refresh --config zap.toml`; it uses
+run with `capability cache refresh --config rivun.toml`; it uses
 `[capability_cache].path` unless `--path` overrides it, respects local
 `[peers.trust]` send permissions, and reports per-peer `ok`, `skipped`, or
 `failed` status. The cache is JSONL with `previous_entry_hash` and `entry_hash`,
@@ -66,7 +66,7 @@ Node configs can require peer routes to be backed by a cached grant:
 
 ```toml
 [capability_cache]
-path = ".zap/capabilities.jsonl"
+path = ".rivun/capabilities.jsonl"
 max_age_micros = 86400000000
 
 [[routes]]
@@ -81,13 +81,13 @@ subject = "thermostat.setpoint"
 peer = "00000000-0000-4000-8000-000000000000"
 ```
 
-`zap check-config` verifies the cache hash chain, finds the latest cached
+`rivun check-config` verifies the cache hash chain, finds the latest cached
 advertisement for the peer, and requires that advertisement to both include and
 grant the requested capability.
 
 ## Router
 
-`zap-router` evaluates `[[routes]]` entries after inbound frames pass signature,
+`rivun-router` evaluates `[[routes]]` entries after inbound frames pass signature,
 PoA, timestamp, and replay validation. If no route matches, action messages keep
 the legacy behavior and dispatch to a local driver named by the action subject.
 
@@ -108,7 +108,7 @@ peer = "00000000-0000-4000-8000-000000000000"
 Explain a route:
 
 ```bash
-cargo run -p zap-cli -- route explain --config zap.toml --kind action --subject thermostat.setpoint --json
+cargo run -p rivun-cli -- route explain --config rivun.toml --kind action --subject thermostat.setpoint --json
 ```
 
 Route targets can be `local_driver`, `peer`, `capability`, `broadcast`, or
@@ -120,23 +120,23 @@ machine during config validation or dispatch.
 
 ## Memory
 
-`zap-memory` is an append-only binary journal with record body hashes,
+`rivun-memory` is an append-only binary journal with record body hashes,
 entry-to-entry hash chaining, disk indexes, tombstones, queries, compaction,
 JSONL import/export, and verification.
 
 ```bash
-cargo run -p zap-cli -- memory put --dir .zap/memory --subject note --payload hello
-cargo run -p zap-cli -- memory query --dir .zap/memory --subject note --json
-cargo run -p zap-cli -- memory verify --dir .zap/memory
-cargo run -p zap-cli -- memory compact --dir .zap/memory --out .zap/memory.compacted
-cargo run -p zap-cli -- memory export-evidence --dir .zap/memory --receipts logs/receipts
+cargo run -p rivun-cli -- memory put --dir .rivun/memory --subject note --payload hello
+cargo run -p rivun-cli -- memory query --dir .rivun/memory --subject note --json
+cargo run -p rivun-cli -- memory verify --dir .rivun/memory
+cargo run -p rivun-cli -- memory compact --dir .rivun/memory --out .rivun/memory.compacted
+cargo run -p rivun-cli -- memory export-evidence --dir .rivun/memory --receipts logs/receipts
 ```
 
 Node config can expose memory in local capability advertisements:
 
 ```toml
 [memory]
-dir = ".zap/memory"
+dir = ".rivun/memory"
 max_record_bytes = 1048576
 allow_driver_read = false
 allow_driver_write = false
@@ -145,17 +145,18 @@ allow_driver_write = false
 Driver memory access remains denied unless host imports are enabled by manifest
 or runtime config, the node config enables the corresponding `[memory]` gate,
 and explicit capability policy covers the advertised capability. In the ABI v2
-foundation, `zap.memory_write` host calls are appended as `driver` namespace
+foundation, `rivun.memory_write` host calls are appended as `driver` namespace
 records in the local binary memory journal with the source node and frame hash.
 
 Newly appended memory entries include `previous_entry_hash` and `entry_hash`.
-`zap memory verify` recalculates body hashes, validates entry hashes, checks the
+`rivun memory verify` recalculates body hashes, validates entry hashes, checks the
 append-only chain, rejects duplicate entry ids, and rejects tombstones whose
-source record is missing. `zap memory compact` rewrites entries into a fresh
+source record is missing. `rivun memory compact` rewrites entries into a fresh
 verifiable journal.
-`zap memory export-evidence` emits a bounded JSON evidence bundle with memory
+`rivun memory export-evidence` emits a bounded JSON evidence bundle with memory
 verification counts, entry ids, subjects, content types, body hashes, chain
 hashes, optional verified receipt summaries, and limitations. It intentionally
 omits memory payload bytes, metadata values, key material, and raw receipt
-signatures; preserve the referenced journal directories and re-run `zap memory verify`
-or `zap receipts verify` to prove the bundle.
+signatures; preserve the referenced journal directories and re-run `rivun memory verify`
+or `rivun receipts verify` to prove the bundle.
+

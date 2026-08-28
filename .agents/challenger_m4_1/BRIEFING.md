@@ -6,7 +6,7 @@ Adversarially challenge and stress test Milestone 4 implementation.
 ## 🔒 My Identity
 - Archetype: empirical challenger
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m4_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m4_1
 - Original parent: 93ddb720-b792-416a-9e98-289b84dbd0f2
 - Milestone: Milestone 4
 - Instance: 1 of 1
@@ -21,7 +21,7 @@ Adversarially challenge and stress test Milestone 4 implementation.
 - Updated: 2026-08-14T23:10:00Z
 
 ## Review Scope
-- **Files to review**: zap-agent, zap-gateway, zap-e2e, zap-core, zap-crypto, zap-storage
+- **Files to review**: rivun-agent, rivun-gateway, rivun-e2e, rivun-core, rivun-crypto, rivun-storage
 - **Interface contracts**: ORIGINAL_REQUEST.md, worker handoff
 - **Review criteria**: Correctness, stress resilience, edge cases, cryptographic & provenance integrity, protocol compliance
 
@@ -34,7 +34,7 @@ Adversarially challenge and stress test Milestone 4 implementation.
   - Corrupted Ed25519 signatures & key mismatch: Verified robust.
   - Concurrent REST/SSE streams & high fanout: Verified robust.
 - **Vulnerabilities found**:
-  - Clippy lints fail on `cargo clippy --workspace --all-targets -- -D warnings` with 4 errors in `crates/zap-gateway`.
+  - Clippy lints fail on `cargo clippy --workspace --all-targets -- -D warnings` with 4 errors in `crates/rivun-gateway`.
 - **Untested angles**: None.
 
 ## Loaded Skills
@@ -46,3 +46,4 @@ Adversarially challenge and stress test Milestone 4 implementation.
 ## Artifact Index
 - handoff.md — Final challenge findings report and verdict
 - progress.md — Liveness heartbeat and progress tracking
+

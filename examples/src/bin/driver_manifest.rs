@@ -1,9 +1,9 @@
-use zap_capability::DriverPermissions;
-use zap_crypto::Keypair;
-use zap_store::{DriverManifest, DriverRegistry};
+use rivun_capability::DriverPermissions;
+use rivun_crypto::Keypair;
+use rivun_store::{DriverManifest, DriverRegistry};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== ZAP Signed Driver Manifests & Registry ===");
+    println!("=== Rivun Signed Driver Manifests & Registry ===");
 
     // 1. Generate keys for the driver author and the system operator
     let author_keys = Keypair::generate();
@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("System Operator Node ID:  {}", operator_keys.node_id());
 
     // 2. Prepare dummy driver WebAssembly bytes (equivalent to echo.wat)
-    let wasm_bytes = b"(module (memory (export \"memory\") 1) (func (export \"zap_execute\")))";
+    let wasm_bytes = b"(module (memory (export \"memory\") 1) (func (export \"rivun_execute\")))";
 
     // 3. Create and cryptographically sign a Driver Manifest
     // The developer signs the manifest which records the WASM's BLAKE3 hash,
@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest = DriverManifest::new(
         "thermostat-driver",                                    // Driver Name
         "0.1.0",                                                // Version
-        "thermostat.setpoint",                                  // Target ZAP action to handle
+        "thermostat.setpoint",                                  // Target Rivun action to handle
         wasm_bytes,                                             // WASM binary data
         permissions,                                            // Sandboxed permissions requested
         Some("Controls room temperature via GPIO".to_string()), // Description
@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Initialize a local Driver Registry (index index.toml)
     // The registry lists all permitted drivers and is signed by the network/system operator.
     println!("\n3. Managing the Driver Registry:");
-    let mut registry = DriverRegistry::empty(Some("zap-store-cli-v1".to_string()));
+    let mut registry = DriverRegistry::empty(Some("rivun-store-cli-v1".to_string()));
 
     // Add our manifest to the registry index
     registry.add_manifest(

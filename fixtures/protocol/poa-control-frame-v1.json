@@ -10,8 +10,8 @@
     "id": "ffffffff-ffff-4fff-8fff-ffffffffffff",
     "correlation_id": "00000000-0000-0000-0000-000000000000",
     "causation_id": "00000000-0000-0000-0000-000000000000",
-    "subject": "zap.poa.attestation.request",
-    "content_type": "application/zap-poa-attestation+json",
+    "subject": "rivun.poa.attestation.request",
+    "content_type": "application/rivun-poa-attestation+json",
     "metadata_base64": "",
     "body_json": {
       "schema_version": 1,

@@ -1,14 +1,14 @@
-# Project Plan: ZAP Next-Gen Frontier
+# Project Plan: rivun Next-Gen Frontier
 
 ## Objectives
-Transform ZAP into an autonomous, hyper-scalable, cross-cluster decentralized execution and verification fabric fulfilling requirements R1 through R5.
+Transform rivun into an autonomous, hyper-scalable, cross-cluster decentralized execution and verification fabric fulfilling requirements R1 through R5.
 
 ## Architecture & Scope
-- **R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh** (`zap-net`, `zap-agent`, `zap-node`)
-- **R2: Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts** (`zap-ledger`, `zap-crypto`)
-- **R3: Async WASM Driver Pipeline & Inter-Driver IPC** (`zap-runtime`, `zap-driver-sdk`)
-- **R4: Decentralized Agent Pact & Dispute Resolution Engine** (`zap-pact`, `zap-policy`, `zap-agent`)
-- **R5: Cluster Simulator & Swarm Benchmarking Tooling** (`zap-cli`, `zap-telemetry`)
+- **R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh** (`rivun-net`, `rivun-agent`, `rivun-node`)
+- **R2: Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts** (`rivun-ledger`, `rivun-crypto`)
+- **R3: Async WASM Driver Pipeline & Inter-Driver IPC** (`rivun-runtime`, `rivun-driver-sdk`)
+- **R4: Decentralized Agent Pact & Dispute Resolution Engine** (`rivun-pact`, `rivun-policy`, `rivun-agent`)
+- **R5: Cluster Simulator & Swarm Benchmarking Tooling** (`rivun-cli`, `rivun-telemetry`)
 
 ## Phased Execution Strategy
 1. **Phase 0: Survey & Mapping**
@@ -24,3 +24,4 @@ Transform ZAP into an autonomous, hyper-scalable, cross-cluster decentralized ex
    - Run 100% E2E test verification.
    - Adversarial coverage hardening (Tier 5).
    - Final audit and victory notification.
+

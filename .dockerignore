@@ -1,8 +1,8 @@
 .git
 .github
-.zap
+.rivun
 target
-zap-docs
+rivun-docs
 *.log
 *.tmp
 *.wasm

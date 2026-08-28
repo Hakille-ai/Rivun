@@ -10,7 +10,7 @@ What must change, and why is the current behavior insufficient?
 
 ## Change Type
 
-- [ ] ZAP-Wire or `ZENV` binary layout
+- [ ] @@@@rivun_HEADER@@WIRE@@ or `ZENV` binary layout
 - [ ] Cryptography, signatures, replay protection, or key handling
 - [ ] Driver ABI, host imports, Wasm runtime permissions, or sandboxing
 - [ ] Node config defaults, policy defaults, or governance controls
@@ -44,3 +44,4 @@ What must change, and why is the current behavior insufficient?
 - [ ] Security documentation updated.
 - [ ] Migration notes included.
 - [ ] Tests cover old and new behavior where compatibility matters.
+

@@ -1,0 +1,20 @@
+[package]
+name = "rivun-envelope"
+description = "Binary universal payload envelopes for rivun-Wire frames."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+bytes.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+rivun-core = { path = "../rivun-core" }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "envelope"
+harness = false

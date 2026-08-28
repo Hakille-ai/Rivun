@@ -1,12 +1,12 @@
 bind = "127.0.0.1:7001"
-key_file = "../../.zap/node-b.key"
+key_file = "../../.rivun/node-b.key"
 require_signed = true
 routes = []
 
 [[peers]]
-node_id = "407550da-0728-831c-a40a-d3d733b0c517"
+node_id = "7f6daaec-d266-81d1-a240-71a1a6722592"
 addr = "127.0.0.1:7000"
-public_key = "Ut+edi9Dv6S3tIcBEZTxSXlFN96A1c+1IkBVP+UR14k"
+public_key = "jPpFU6eaKPJurEFD2hH4A9MYbXX+O7wG/yvvL0S0KbU"
 transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
 
 [peers.trust]
@@ -47,7 +47,7 @@ require_peer_expiry = false
 
 [poa]
 required_threshold = 1
-validator_set = "../../.zap/poa-validators.json"
+validator_set = "../../.rivun/poa-validators.json"
 validator_set_authority = "ub04BmALK4loxSDH2CYepq8cy/qWaJuJQdKeGSkKRzY"
 
 [[poa.validators]]
@@ -55,13 +55,13 @@ node_id = "407550da-0728-831c-a40a-d3d733b0c517"
 public_key = "Ut+edi9Dv6S3tIcBEZTxSXlFN96A1c+1IkBVP+UR14k"
 
 [receipts]
-dir = "../../.zap/node-b-receipts"
+dir = "../../.rivun/node-b-receipts"
 
 [registry]
 require_signature = false
 
 [memory]
-dir = "../../.zap/node-b-memory"
+dir = "../../.rivun/node-b-memory"
 allow_driver_read = false
 allow_driver_write = false
 

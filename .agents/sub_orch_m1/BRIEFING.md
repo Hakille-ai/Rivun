@@ -6,14 +6,14 @@ Sub-Orchestrator for Milestone 1 (R1): Implement and verify P2P Swarm Gossip Con
 ## 🔒 My Identity
 - Archetype: orchestrator
 - Roles: orchestrator, user_liaison, human_reporter, successor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m1
 - Original parent: parent
 - Original parent conversation ID: 5e9776fe-ebb1-46ac-b395-bfa1d62c469a
 
 ## 🔒 My Workflow
 - **Pattern**: Project / Sub-Orchestrator (Iteration Loop 2B)
-- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m1\SCOPE.md
-1. **Decompose**: Milestone 1 scoped across crates `zap-net`, `zap-agent`, `zap-node`.
+- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m1\SCOPE.md
+1. **Decompose**: Milestone 1 scoped across crates `rivun-net`, `rivun-agent`, `rivun-node`.
 2. **Dispatch & Execute**:
    - **Direct (iteration loop)**: 3 Explorers -> 1 Worker -> 2 Reviewers -> 2 Challengers -> 1 Forensic Auditor -> Gate.
 3. **On failure** (in this order):
@@ -46,7 +46,7 @@ Sub-Orchestrator for Milestone 1 (R1): Implement and verify P2P Swarm Gossip Con
 - Updated: not yet
 
 ## Key Decisions Made
-- Scoped M1 into `zap-net` (gossip, BFT consensus, mesh), `zap-agent` (swarm coordination, provenance), `zap-node` (Tokio actor daemon).
+- Scoped M1 into `rivun-net` (gossip, BFT consensus, mesh), `rivun-agent` (swarm coordination, provenance), `rivun-node` (Tokio actor daemon).
 - Completed 3-explorer synthesis into `implementation_spec.md`.
 - Replaced failed Worker 1 (quota exhaustion) with Worker 2.
 
@@ -71,7 +71,8 @@ Sub-Orchestrator for Milestone 1 (R1): Implement and verify P2P Swarm Gossip Con
 - Safety timer: none
 
 ## Artifact Index
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m1\SCOPE.md — Milestone 1 Scope
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m1\implementation_spec.md — Implementation Specification
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m1\GATE_STATUS.md — Gate Status
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m1\progress.md — Progress tracker
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m1\SCOPE.md — Milestone 1 Scope
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m1\implementation_spec.md — Implementation Specification
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m1\GATE_STATUS.md — Gate Status
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m1\progress.md — Progress tracker
+

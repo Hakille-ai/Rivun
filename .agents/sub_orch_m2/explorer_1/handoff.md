@@ -3,7 +3,7 @@
 **Agent**: Explorer 1 (`sub_orch_m2/explorer_1`)  
 **Parent**: `sub_orch_m2` (`e3deda70-d2ee-4ab1-aa5f-49fdf7d9486a`)  
 **Status**: Task Complete (Hard Handoff)  
-**Deliverable**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\explorer_1\analysis.md`  
+**Deliverable**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\explorer_1\analysis.md`  
 
 ---
 
@@ -11,7 +11,7 @@
 
 Direct observations from the inspected codebase:
 
-1. **Existing MMR In-Memory Model (`crates/zap-ledger/src/mmr.rs:86–91`)**:
+1. **Existing MMR In-Memory Model (`crates/rivun-ledger/src/mmr.rs:86–91`)**:
    ```rust
    pub struct MerkleMountainRange {
        leaves: Vec<MmrHash>,
@@ -22,14 +22,14 @@ Direct observations from the inspected codebase:
    - `leaves` stores all accumulated 32-byte hashes in a growing vector in RAM ($O(N)$ space complexity).
    - `append(&mut self, leaf_hash: MmrHash)` (`mmr.rs:114–120`) invokes `recompute_peaks()`, which calls `build_subtree_root(start, size)` (`mmr.rs:166–174`) recursively descending down to every individual leaf from scratch on every single append ($O(N)$ time per append).
 
-2. **Existing Single Inclusion Proof (`crates/zap-ledger/src/mmr.rs:65–72`, `177–322`)**:
+2. **Existing Single Inclusion Proof (`crates/rivun-ledger/src/mmr.rs:65–72`, `177–322`)**:
    - `MmrInclusionProof` contains `leaf_index`, `leaf_hash`, `total_leaves`, `sister_hashes: Vec<String>`, and `peak_hashes: Vec<String>`.
    - `verify_proof` calculates the peak from bottom-up using `curr_idx` bit parity against `sister_hashes`, then bags peaks using `bag_peaks` (`mmr.rs:46–62`) and compares with `expected_root`.
    - No multi-leaf DAG deduplication exists; proving $K$ leaves generates $K$ redundant sister paths.
    - No non-membership / exclusion proofs exist.
 
-3. **Existing Journal & Store Integration (`crates/zap-ledger/src/lib.rs:441–756`)**:
-   - `ReceiptJournalStore` provides append-only disk storage via `zap-journal` (`.zjseg`), segment manifest signing (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`), segment indexing (`ReceiptSegmentIndex`), and `build_mmr_accumulator` (`lib.rs:739–747`).
+3. **Existing Journal & Store Integration (`crates/rivun-ledger/src/lib.rs:441–756`)**:
+   - `ReceiptJournalStore` provides append-only disk storage via `rivun-journal` (`.zjseg`), segment manifest signing (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`), segment indexing (`ReceiptSegmentIndex`), and `build_mmr_accumulator` (`lib.rs:739–747`).
    - `build_mmr_accumulator` currently reads all receipts from disk (`self.all()?`), serializes canonical signing messages, and builds `MerkleMountainRange` from scratch on demand.
    - No disk persistence format (`.zmmr`) currently exists to checkpoint MMR state alongside `.zjseg` segments.
 
@@ -84,7 +84,8 @@ Key specification summary:
 
 To independently verify the findings and analysis:
 1. Inspect the detailed technical analysis in:
-   `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\explorer_1\analysis.md`
+   `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\explorer_1\analysis.md`
 2. Run existing ledger tests to verify baseline integrity:
-   `cargo test -p zap-ledger`
-3. Inspect `crates/zap-ledger/src/mmr.rs` lines 1–434 and `crates/zap-ledger/src/lib.rs` lines 738–756 against the observations cited in Section 1.
+   `cargo test -p rivun-ledger`
+3. Inspect `crates/rivun-ledger/src/mmr.rs` lines 1–434 and `crates/rivun-ledger/src/lib.rs` lines 738–756 against the observations cited in Section 1.
+

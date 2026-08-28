@@ -6,7 +6,7 @@ Empirical Stress Testing of Milestone 1 Durable Replay Remediation.
 ## 🔒 My Identity
 - Archetype: empirical challenger
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_challenger_m1_fix1_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_challenger_m1_fix1_1
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Milestone: m1_fix1
 - Instance: 1 of 1
@@ -32,10 +32,11 @@ Empirical Stress Testing of Milestone 1 Durable Replay Remediation.
 - None
 
 ## Key Decisions Made
-- Executed `cargo test --test durable_replay_stress -p zap-net -p zap-node` (10/10 passed).
-- Executed `cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger` (65/65 passed).
-- Executed `cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings` (0 warnings).
+- Executed `cargo test --test durable_replay_stress -p rivun-net -p rivun-node` (10/10 passed).
+- Executed `cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger` (65/65 passed).
+- Executed `cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings` (0 warnings).
 - Verdict: APPROVE.
 
 ## Artifact Index
 - handoff.md — Stress test report with verdict APPROVE
+

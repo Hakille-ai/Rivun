@@ -6,7 +6,7 @@ Adversarially challenge and stress-test Milestone 2 (Signed Domain Pack Lifecycl
 ## 🔒 My Identity
 - Archetype: EMPIRICAL CHALLENGER
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m2_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m2_1
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: M2
 - Instance: 1 of 1
@@ -21,12 +21,12 @@ Adversarially challenge and stress-test Milestone 2 (Signed Domain Pack Lifecycl
 - Updated: 2026-08-14T02:11:30Z
 
 ## Review Scope
-- **Files to review**: `crates/zap-store/`, `crates/zap-pack/`, `crates/zap-cli/`, `crates/zap-store/tests/`, `crates/zap-cli/tests/`
-- **Interface contracts**: `PROJECT.md` M2 requirements & security domain specs (`ZAP-DOMAIN-PACK-BUNDLE-v1`, `ZPACK001` magic header)
+- **Files to review**: `crates/rivun-store/`, `crates/rivun-pack/`, `crates/rivun-cli/`, `crates/rivun-store/tests/`, `crates/rivun-cli/tests/`
+- **Interface contracts**: `PROJECT.md` M2 requirements & security domain specs (`rivun-DOMAIN-PACK-BUNDLE-v1`, `ZPACK001` magic header)
 - **Review criteria**: Cryptographic soundness, edge cases, container integrity, signature forgery, dependency cycles/semver bugs, policy bypasses, risk auditing, CLI behavior.
 
 ## Key Decisions Made
-- Conducted exhaustive code review and created empirical test harness `crates/zap-store/tests/adversarial_m2_tests.rs`.
+- Conducted exhaustive code review and created empirical test harness `crates/rivun-store/tests/adversarial_m2_tests.rs`.
 - Discovered 6 critical/major security and functional defects.
 - Issued verdict: REQUEST_CHANGES.
 
@@ -34,12 +34,12 @@ Adversarially challenge and stress-test Milestone 2 (Signed Domain Pack Lifecycl
 - `.agents/challenger_m2_1/DISPATCH.md` — Dispatch log
 - `.agents/challenger_m2_1/BRIEFING.md` — Working briefing index
 - `.agents/challenger_m2_1/handoff.md` — Final handoff report with REQUEST_CHANGES verdict
-- `crates/zap-store/tests/adversarial_m2_tests.rs` — Empirical test harness verifying failure modes
+- `crates/rivun-store/tests/adversarial_m2_tests.rs` — Empirical test harness verifying failure modes
 
 ## Attack Surface
 - **Hypotheses tested**:
   1. Path traversal / Zip-slip in bundle extraction -> CONFIRMED VULNERABILITY
-  2. Dependency resolution skipped during `zap pack install` -> CONFIRMED DEFECT
+  2. Dependency resolution skipped during `rivun pack install` -> CONFIRMED DEFECT
   3. Transitive dependency resolution missing in resolver -> CONFIRMED DEFECT
   4. Policy validator bypass for files not containing "policy" in path -> CONFIRMED DEFECT
   5. Invalid version requirement fallthrough in `matches_version_req` -> CONFIRMED BUG
@@ -49,3 +49,4 @@ Adversarially challenge and stress-test Milestone 2 (Signed Domain Pack Lifecycl
 
 ## Loaded Skills
 - None
+

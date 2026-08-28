@@ -3,11 +3,11 @@ package main
 import (
 	"fmt"
 
-	zap "github.com/zap-protocol/zap-sdk-go"
+	rivun "github.com/rivun-protocol/rivun-sdk-go"
 )
 
 func main() {
-	frame, err := zap.RegistryBundleManifestRequestFrame(true, true)
+	frame, err := rivun.RegistryBundleManifestRequestFrame(true, true)
 	if err != nil {
 		panic(err)
 	}
@@ -15,7 +15,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	parsed, err := zap.DecodeControlFrame(payload)
+	parsed, err := rivun.DecodeControlFrame(payload)
 	if err != nil {
 		panic(err)
 	}

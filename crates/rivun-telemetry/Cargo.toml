@@ -1,0 +1,29 @@
+[package]
+name = "rivun-telemetry"
+description = "Fleet telemetry, diagnostics, doctor checks, and incident snapshot library for ZAP."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bytes.workspace = true
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+rivun-core = { path = "../rivun-core" }
+rivun-crypto = { path = "../rivun-crypto" }
+rivun-journal.workspace = true
+rivun-ledger = { path = "../rivun-ledger" }
+rivun-net = { path = "../rivun-net" }
+rivun-pact.workspace = true
+rivun-store = { path = "../rivun-store" }
+
+[dev-dependencies]
+tempfile.workspace = true

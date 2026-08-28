@@ -1,8 +1,8 @@
 {
     "fixture_schema_version":  1,
-    "description":  "Signed ZAP PACT v1 action record for offline verification conformance.",
-    "subject":  "zap.pact.record",
-    "content_type":  "application/zap-pact+json",
+    "description":  "Signed Rivun PACT v1 action record for offline verification conformance.",
+    "subject":  "rivun.pact.record",
+    "content_type":  "application/rivun-pact+json",
     "body_json":  {
                       "schema_version":  1,
                       "pact_id":  "33333333-3333-4333-8333-333333333333",

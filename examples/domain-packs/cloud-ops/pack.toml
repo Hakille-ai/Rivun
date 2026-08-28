@@ -1,12 +1,12 @@
 schema_version = 1
-id = "zap-pack-cloud-ops"
+id = "rivun-pack-cloud-ops"
 name = "Cloud Operations"
 version = "0.1.0"
 status = "preview"
-description = "Auditable SRE, cloud operations, and incident response workflows over ZAP."
+description = "Auditable SRE, cloud operations, and incident response workflows over Rivun."
 
 [compatibility]
-zap_protocol = ">=0.1.0,<1.0.0"
+rivun_protocol = ">=0.1.0,<1.0.0"
 driver_abi = ">=1,<=2"
 
 [[capabilities]]

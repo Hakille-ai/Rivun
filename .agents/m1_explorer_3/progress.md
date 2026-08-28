@@ -6,7 +6,7 @@
 ## Checklist
 - [x] Initialized DISPATCH.md and BRIEFING.md
 - [x] Read mandatory input files (ORIGINAL_REQUEST.md, PROJECT.md, SCOPE.md, explorer_survey_1/analysis.md)
-- [x] Investigate existing test setups in `crates/zap-net`, `crates/zap-agent`, and `crates/zap-node`
+- [x] Investigate existing test setups in `crates/rivun-net`, `crates/rivun-agent`, and `crates/rivun-node`
 - [x] Inspect crate structure, dependencies, test utils, channels, and actor patterns
 - [x] Design comprehensive unit test specifications for:
   - Phi Accrual Failure Detector & Heartbeat backoff
@@ -19,3 +19,4 @@
 - [x] Write analysis.md
 - [x] Write handoff.md
 - [x] Send completion message to parent
+

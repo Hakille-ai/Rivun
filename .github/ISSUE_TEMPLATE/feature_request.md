@@ -20,7 +20,7 @@ Describe the smallest useful design.
 
 ## Compatibility
 
-Does this affect ZAP-Wire, `ZENV`, signatures, PoA, runtime permissions,
+Does this affect @@@@rivun_HEADER@@WIRE@@, `ZENV`, signatures, PoA, runtime permissions,
 configuration, CLI behavior, or Docker deployment?
 
 If the answer is yes for protocol, crypto, ABI, config, or domain pack manifest
@@ -36,3 +36,4 @@ What did you consider and reject?
 - [ ] Behavior is documented.
 - [ ] Tests, fixtures, or examples describe the expected result.
 - [ ] Migration or compatibility notes are included when behavior changes.
+

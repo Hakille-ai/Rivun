@@ -1,0 +1,43 @@
+[package]
+name = "rivun-gateway"
+description = "AI Agent Gateway, MCP Server, and Provenance Chain Engine for ZAP."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bytes.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "sync", "time"] }
+toml.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+rivun-agent.workspace = true
+rivun-capability.workspace = true
+rivun-core = { path = "../rivun-core" }
+rivun-crypto = { path = "../rivun-crypto" }
+rivun-envelope = { path = "../rivun-envelope" }
+rivun-journal.workspace = true
+rivun-ledger = { path = "../rivun-ledger" }
+rivun-memory.workspace = true
+rivun-node = { path = "../rivun-node" }
+rivun-pact.workspace = true
+rivun-pack.workspace = true
+rivun-policy.workspace = true
+rivun-router.workspace = true
+rivun-runtime = { path = "../rivun-runtime" }
+rivun-schema.workspace = true
+rivun-store = { path = "../rivun-store" }
+rivun-telemetry.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

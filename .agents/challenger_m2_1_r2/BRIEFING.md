@@ -6,7 +6,7 @@ Adversarially evaluate Milestone 2 remediation fixes and verify Zip Slip protect
 ## 🔒 My Identity
 - Archetype: empirical_challenger
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m2_1_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m2_1_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 2 Gate Evaluation (Round 2)
 - Instance: 1 of 1
@@ -21,8 +21,8 @@ Adversarially evaluate Milestone 2 remediation fixes and verify Zip Slip protect
 - Updated: 2026-08-14T00:24:35Z
 
 ## Review Scope
-- **Files to review**: `zap-store`, `zap-pack`, `zap-cli`, `crates/zap-store/tests/adversarial_m2_tests.rs`
-- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\PROJECT.md`
+- **Files to review**: `rivun-store`, `rivun-pack`, `rivun-cli`, `crates/rivun-store/tests/adversarial_m2_tests.rs`
+- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\PROJECT.md`
 - **Review criteria**: Correctness, security (Zip Slip protection), SemVer resolution, transitive dependency resolution, test coverage.
 
 ## Attack Surface
@@ -38,6 +38,7 @@ Adversarially evaluate Milestone 2 remediation fixes and verify Zip Slip protect
 - Verdict: **APPROVE**.
 
 ## Artifact Index
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m2_1_r2\DISPATCH.md` — Dispatch log
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m2_1_r2\BRIEFING.md` — Persistent memory
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m2_1_r2\handoff.md` — Handoff report with explicit APPROVE verdict
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m2_1_r2\DISPATCH.md` — Dispatch log
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m2_1_r2\BRIEFING.md` — Persistent memory
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m2_1_r2\handoff.md` — Handoff report with explicit APPROVE verdict
+

@@ -2,25 +2,25 @@
 
 **Author**: Explorer 2 (Milestone 2 Sub-Orchestration)  
 **Date**: 2026-08-15  
-**Target Crates**: `crates/zap-ledger`, `crates/zap-crypto`, `crates/zap-journal`, `zap-core`  
+**Target Crates**: `crates/rivun-ledger`, `crates/rivun-crypto`, `crates/rivun-journal`, `rivun-core`  
 **Status**: Completed  
 
 ---
 
 ## Executive Summary
 
-Milestone 2 (R2) transforms ZAP from a local receipt logger into a high-throughput, cryptographically verifiable append-only ledger fabric. While Explorer 1 focuses on the logarithmic $O(\log N)$ peak accumulator (`IncrementalMmr`) and sister DAG inclusion/exclusion proofs, and Explorer 3 focuses on Dalek batch cryptographic primitives, **Explorer 2** defines the architecture for:
+Milestone 2 (R2) transforms rivun from a local receipt logger into a high-throughput, cryptographically verifiable append-only ledger fabric. While Explorer 1 focuses on the logarithmic $O(\log N)$ peak accumulator (`IncrementalMmr`) and sister DAG inclusion/exclusion proofs, and Explorer 3 focuses on Dalek batch cryptographic primitives, **Explorer 2** defines the architecture for:
 
 1. **Cryptographic Batch Sealing (`ReceiptBatchSeal`, `SignedReceiptBatch`, `BatchValidatorSignature`)**:
    - Cryptographic binding of `batch_id`, `node_id`, sequence range (`start_sequence..=end_sequence`), Merkle Mountain Range root (`mmr_root`), deterministic state transitions (`initial_state_hash` $\to$ `final_state_hash`), cumulative resource consumption (`total_fuel_consumed`), and Swarm Quorum multi-signatures ($T$-of-$N$ threshold).
-   - Canonical domain-separated signing protocols (`ZAP-RECEIPT-BATCH-SEAL-v1`) and high-throughput validation against PoA/Swarm validator sets (`PoaValidatorSet`).
+   - Canonical domain-separated signing protocols (`rivun-RECEIPT-BATCH-SEAL-v1`) and high-throughput validation against PoA/Swarm validator sets (`PoaValidatorSet`).
 
 2. **Zero-Knowledge Verifiable Receipt Rollups (`zk.rs`)**:
    - Privacy-preserving blinded receipt commitments (`BlindedReceiptCommitment`) utilizing high-entropy cryptographic salt blinding factors ($C = \text{Blake3}(\text{DOMAIN} \parallel \text{frame\_hash} \parallel \text{payload\_hash} \parallel \text{output\_hash} \parallel \text{salt})$).
    - Succinct execution rollup proofs (`ZkReceiptBatchProof`) and public verification statements (`ZkRollupPublicInputs`), proving execution correctness, fuel budget compliance, and state transition validity without exposing private memory tensors, proprietary driver inputs, or secret payload bytes.
 
 3. **`ReceiptJournalStore` Integration & Cross-Crate Interfaces**:
-   - Automated batch seal triggering upon journal segment rotation, persistent `.zjseal.json` on-disk layout, and seamless inter-operation across `zap-crypto`, `zap-journal`, `zap-net`, `zap-agent`, and `zap-pact`.
+   - Automated batch seal triggering upon journal segment rotation, persistent `.zjseal.json` on-disk layout, and seamless inter-operation across `rivun-crypto`, `rivun-journal`, `rivun-net`, `rivun-agent`, and `rivun-pact`.
 
 ---
 
@@ -28,10 +28,10 @@ Milestone 2 (R2) transforms ZAP from a local receipt logger into a high-throughp
 
 ```
 +---------------------------------------------------------------------------------------------------+
-|                                      ZAP LEDGER ARCHITECTURE                                      |
+|                                      rivun LEDGER ARCHITECTURE                                      |
 |                                                                                                   |
 |  +-------------------------------------+         +---------------------------------------------+  |
-|  |             zap-crypto              |         |                 zap-ledger                  |  |
+|  |             rivun-crypto              |         |                 rivun-ledger                  |  |
 |  | - Keypair / PublicKey Ed25519       |         | - IncrementalMmr (MMR Root Accumulator)     |  |
 |  | - PoaValidatorSet (T-of-N threshold)| =======>| - ReceiptBatchSeal (Swarm Multi-Sig Seal)   |  |
 |  | - Batch verification (Dalek batch)  |         | - BlindedReceiptCommitment (Salt Blinding)  |  |
@@ -43,7 +43,7 @@ Milestone 2 (R2) transforms ZAP from a local receipt logger into a high-throughp
 |                                                     |                                             |
 |                                                     v                                             |
 |                               +--------------------------------------------+                      |
-|                               |            zap-pact / zap-agent            |                      |
+|                               |            rivun-pact / rivun-agent            |                      |
 |                               | - ProvenanceStage::MmrCommitment           |                      |
 |                               | - Dispute adjudication against batch seal  |                      |
 |                               +--------------------------------------------+                      |
@@ -71,11 +71,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use thiserror::Error;
 use uuid::Uuid;
-use zap_crypto::{Keypair, PoaValidatorSet, PublicKey, node_id_from_public_key};
+use @@rivun_HEADER@@crypto::{Keypair, PoaValidatorSet, PublicKey, node_id_from_public_key};
 
 pub const RECEIPT_BATCH_SEAL_SCHEMA_VERSION: u8 = 1;
 pub const SIGNED_RECEIPT_BATCH_SCHEMA_VERSION: u8 = 1;
-pub const BATCH_SEAL_SIGNATURE_DOMAIN: &[u8] = b"ZAP-RECEIPT-BATCH-SEAL-v1";
+pub const BATCH_SEAL_SIGNATURE_DOMAIN: &[u8] = b"rivun-RECEIPT-BATCH-SEAL-v1";
 pub const BATCH_SEAL_EXTENSION: &str = "zjseal.json";
 pub const HASH_PREFIX: &str = "blake3:";
 const PUBLIC_KEY_LEN: usize = 32;
@@ -316,10 +316,10 @@ In decentralized machine execution, private driver executions must be verified b
 
 ### 3.2 `BlindedReceiptCommitment`
 Each receipt commitment is computed using a cryptographically randomized 32-byte salt $r$:
-$$C = \text{Blake3}(\text{b"ZAP-ZK-RECEIPT-COMMITMENT-v1"} \parallel \text{receipt\_id} \parallel \text{frame\_hash} \parallel \text{payload\_hash} \parallel \text{output\_hash} \parallel \text{salt})$$
+$$C = \text{Blake3}(\text{b"rivun-ZK-RECEIPT-COMMITMENT-v1"} \parallel \text{receipt\_id} \parallel \text{frame\_hash} \parallel \text{payload\_hash} \parallel \text{output\_hash} \parallel \text{salt})$$
 
 ```rust
-pub const ZK_COMMITMENT_DOMAIN: &[u8] = b"ZAP-ZK-RECEIPT-COMMITMENT-v1";
+pub const ZK_COMMITMENT_DOMAIN: &[u8] = b"rivun-ZK-RECEIPT-COMMITMENT-v1";
 pub const ZK_ROLLUP_SCHEMA_VERSION: u8 = 1;
 
 /// Blinded commitment for a single execution receipt.
@@ -409,7 +409,7 @@ pub struct ZkReceiptBatchProof {
 ### 3.4 Rollup Generation Algorithm (`generate_rollup`)
 
 ```rust
-pub const ZK_PROOF_DOMAIN: &[u8] = b"ZAP-ZK-ROLLUP-PROOF-v1";
+pub const ZK_PROOF_DOMAIN: &[u8] = b"rivun-ZK-ROLLUP-PROOF-v1";
 
 impl ZkReceiptBatchProof {
     /// Generates a Zero-Knowledge receipt batch proof over a collection of signed receipts.
@@ -466,7 +466,7 @@ impl ZkReceiptBatchProof {
             hash_bytes(&serde_json::to_vec(&seal.validator_signatures)?)
         } else {
             let mut h = blake3::Hasher::new();
-            h.update(b"ZAP-ZK-QUORUM-UNSEALED-v1:");
+            h.update(b"rivun-ZK-QUORUM-UNSEALED-v1:");
             h.update(batch_id.as_bytes());
             h.update(batch_mmr_root.as_bytes());
             format!("{HASH_PREFIX}{}", h.finalize().to_hex())
@@ -672,10 +672,10 @@ impl ReceiptJournalStore {
 
 | Caller Crate | Callee / Interface | Purpose |
 |---|---|---|
-| `zap-net` / `zap-node` | `ReceiptBatchSeal::verify_quorum(&self, &PoaValidatorSet)` | Validate peer batch seals during P2P gossip sync and consensus rounds |
-| `zap-agent` | `ZkReceiptBatchProof::generate_rollup(...)` | Create succinct verifiable execution proofs of multi-agent tasks |
-| `zap-pact` | `ProvenanceStage::MmrCommitment(batch_seal.mmr_root)` | Form immutable causal execution chains linking pact intents to settlement seals |
-| `zap-policy` | `ZkReceiptBatchProof::verify(&self, expected_root)` | Zero-knowledge dispute settlement checking execution invariants without revealing private payload bytes |
+| `rivun-net` / `rivun-node` | `ReceiptBatchSeal::verify_quorum(&self, &PoaValidatorSet)` | Validate peer batch seals during P2P gossip sync and consensus rounds |
+| `rivun-agent` | `ZkReceiptBatchProof::generate_rollup(...)` | Create succinct verifiable execution proofs of multi-agent tasks |
+| `rivun-pact` | `ProvenanceStage::MmrCommitment(batch_seal.mmr_root)` | Form immutable causal execution chains linking pact intents to settlement seals |
+| `rivun-policy` | `ZkReceiptBatchProof::verify(&self, expected_root)` | Zero-knowledge dispute settlement checking execution invariants without revealing private payload bytes |
 
 ---
 
@@ -695,3 +695,4 @@ The batch sealing and ZK rollup modules must be validated with comprehensive aut
 3. **Journal Store Batch Sealing Integration Tests**:
    - Multi-segment rotation test generating contiguous `.zjseal.json` files alongside `.zjseg` and `.zjmanifest.json.sig`.
    - Re-loading, deserializing, and verifying all batch seals from disk.
+

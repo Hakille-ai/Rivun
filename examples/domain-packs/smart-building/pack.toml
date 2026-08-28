@@ -1,12 +1,12 @@
 schema_version = 1
-id = "zap-pack-smart-building"
+id = "rivun-pack-smart-building"
 name = "Smart Building"
 version = "0.1.0"
 status = "preview"
 description = "Auditable sensor and actuator workflows for commercial smart buildings."
 
 [compatibility]
-zap_protocol = ">=0.1.0,<1.0.0"
+rivun_protocol = ">=0.1.0,<1.0.0"
 driver_abi = ">=1,<=2"
 
 [[capabilities]]

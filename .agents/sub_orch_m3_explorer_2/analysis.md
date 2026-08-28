@@ -1,15 +1,15 @@
-# Milestone 3 Investigation Report: `zap-driver-sdk` Specification & API Design
+# Milestone 3 Investigation Report: `rivun-driver-sdk` Specification & API Design
 
 **Agent**: `explorer_m3_2`  
 **Milestone**: Milestone 3 — Async WASM Driver Pipeline & Inter-Driver IPC  
 **Date**: 2026-08-15  
-**Target Crate**: `crates/zap-driver-sdk` (and interfaces to `crates/zap-runtime`, `crates/zap-capability`, `crates/zap-core`)  
+**Target Crate**: `crates/rivun-driver-sdk` (and interfaces to `crates/rivun-runtime`, `crates/rivun-capability`, `crates/rivun-core`)  
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 3 transforms ZAP's driver architecture from synchronous, single-invocation action execution into an **asynchronous, streaming, zero-copy inter-driver pipeline**. 
+Milestone 3 transforms rivun's driver architecture from synchronous, single-invocation action execution into an **asynchronous, streaming, zero-copy inter-driver pipeline**. 
 
 In this new architecture:
 - Drivers can stream data continuously (e.g. sensor telemetry, video frames, Modbus/TCP streams) without intermediate heap allocation copies between WASM guest and host.
@@ -17,15 +17,15 @@ In this new architecture:
 - Legacy synchronous `ZapDriver` implementations remain 100% backward compatible and seamlessly adapt into the async runtime via `SyncDriverAdapter`.
 - All guest-host pointer translations, memory slices, and buffer views are strictly bounds-checked and encapsulated in safe Rust abstractions (`PinnedBuffer`, `BufferSlice`, `BufferSliceMut`, `GuestMemoryView`).
 
-This report provides the exact architectural specification, API design, data structures, trait definitions, safety invariants, and implementation plan for `crates/zap-driver-sdk`.
+This report provides the exact architectural specification, API design, data structures, trait definitions, safety invariants, and implementation plan for `crates/rivun-driver-sdk`.
 
 ---
 
 ## 2. Existing State vs Milestone 3 Gap Analysis
 
-### 2.1 Current Implementation in `crates/zap-driver-sdk`
-Currently, `crates/zap-driver-sdk` (`src/lib.rs`) contains a minimal synchronous ABI (v1):
-- ABI constants: `DRIVER_ABI_VERSION = 1`, `MEMORY_EXPORT = "memory"`, `ALLOC_EXPORT = "zap_alloc"`, `DEALLOC_EXPORT = "zap_dealloc"`, `EXECUTE_EXPORT = "zap_execute"`.
+### 2.1 Current Implementation in `crates/rivun-driver-sdk`
+Currently, `crates/rivun-driver-sdk` (`src/lib.rs`) contains a minimal synchronous ABI (v1):
+- ABI constants: `DRIVER_ABI_VERSION = 1`, `MEMORY_EXPORT = "memory"`, `ALLOC_EXPORT = "@@rivun_HEADER@@alloc"`, `DEALLOC_EXPORT = "@@rivun_HEADER@@dealloc"`, `EXECUTE_EXPORT = "@@rivun_HEADER@@execute"`.
 - `PackedResult`: 64-bit packed pointer/length (`(ptr << 32) | len`).
 - `DriverInput<'a>`: Immutable reference to `action: &'a str` and `payload: &'a [u8]`.
 - `ZapDriver` trait: Single synchronous method `fn execute(&self, input: DriverInput<'_>) -> Result<Vec<u8>, DriverError>`.
@@ -78,7 +78,7 @@ process_stream(ctx, in, out)  handle_event(ctx, evt)  yield_execution()
 
 ### 3.2 Trait Definition
 ```rust
-/// Asynchronous WASM driver contract for ZAP pipelines.
+/// Asynchronous WASM driver contract for rivun pipelines.
 ///
 /// Enables non-blocking streaming I/O, asynchronous event handling,
 /// zero-copy memory processing, and inter-driver IPC.
@@ -608,7 +608,7 @@ pub struct IpcPipe {
 impl IpcPipe {
     pub fn new(name: impl Into<String>, channel_id: u32) -> Self {
         let mut causal_hasher = blake3::Hasher::new();
-        causal_hasher.update(b"ZAP-IPC-PIPE-v1:");
+        causal_hasher.update(b"rivun-IPC-PIPE-v1:");
         let name_str = name.into();
         causal_hasher.update(name_str.as_bytes());
         Self {
@@ -642,7 +642,7 @@ impl IpcPipe {
 
 ## 6. Sync `ZapDriver` <-> `AsyncZapDriver` Interoperability
 
-To guarantee strict backward compatibility with Milestone 2 and existing sync driver code, `zap-driver-sdk` provides transparent adapter wrappers:
+To guarantee strict backward compatibility with Milestone 2 and existing sync driver code, `rivun-driver-sdk` provides transparent adapter wrappers:
 
 ```
 +-------------------------------------------------------------+
@@ -733,7 +733,7 @@ impl<D: ZapDriver> ZapDriverExt for D {}
 
 ### 7.1 Async Trait Strategy (AFIT vs Dynamic Dispatch)
 - **Rust 2024 / Rust 1.93 Support**: Rust 2024 natively supports `async fn` in traits (AFIT) and RPITIT (`impl Future<Output = ...> + Send`).
-- **Dynamic Dispatch (`dyn AsyncZapDriver`)**: While static dispatch (generics) is zero-cost, pipeline stages in `zap-runtime` often require dynamic dispatch to hold heterogenous driver stages in a `Vec<Box<dyn DynamicAsyncDriver>>`.
+- **Dynamic Dispatch (`dyn AsyncZapDriver`)**: While static dispatch (generics) is zero-cost, pipeline stages in `rivun-runtime` often require dynamic dispatch to hold heterogenous driver stages in a `Vec<Box<dyn DynamicAsyncDriver>>`.
 - **Solution**: The SDK provides both:
   1. Static `AsyncZapDriver` trait for high-performance direct compilation.
   2. `BoxedAsyncDriver` / `DynamicAsyncDriver` helper wrapping boxed futures:
@@ -751,10 +751,10 @@ impl<D: ZapDriver> ZapDriverExt for D {}
 
 ---
 
-## 8. Proposed Module & File Structure for `crates/zap-driver-sdk`
+## 8. Proposed Module & File Structure for `crates/rivun-driver-sdk`
 
 ```
-crates/zap-driver-sdk/
+crates/rivun-driver-sdk/
 ├── Cargo.toml
 ├── benches/
 │   └── sdk.rs                       # Benchmarks for sync/async driver execution & zero-copy slices
@@ -770,11 +770,11 @@ crates/zap-driver-sdk/
     └── ipc_pipe_tests.rs            # Inter-driver IPC chaining, causal hash verification
 ```
 
-### Updated `Cargo.toml` for `crates/zap-driver-sdk`
+### Updated `Cargo.toml` for `crates/rivun-driver-sdk`
 ```toml
 [package]
-name = "zap-driver-sdk"
-description = "Helpers for authoring synchronous and asynchronous ZAP WASM action drivers."
+name = "rivun-driver-sdk"
+description = "Helpers for authoring synchronous and asynchronous rivun WASM action drivers."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -786,7 +786,7 @@ blake3.workspace = true
 bytes.workspace = true
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
-zap-capability.workspace = true
+rivun-capability.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -799,25 +799,25 @@ harness = false
 
 ---
 
-## 9. Integration with `zap-runtime`
+## 9. Integration with `rivun-runtime`
 
-The SDK components seamlessly integrate with host-side runtime modules in `crates/zap-runtime`:
-1. **`AsyncWasmExecutor` (`zap-runtime/src/async_engine.rs`)**:
+The SDK components seamlessly integrate with host-side runtime modules in `crates/rivun-runtime`:
+1. **`AsyncWasmExecutor` (`rivun-runtime/src/async_engine.rs`)**:
    - Manages Tokio tasks running WASM drivers.
-   - Binds host imports `zap::ipc_send`, `zap::ipc_recv`, `zap::yield_execution`.
+   - Binds host imports `rivun::ipc_send`, `rivun::ipc_recv`, `rivun::yield_execution`.
    - Uses `MemoryMapper` to project host Tokio stream buffers into guest memory.
-2. **`DriverPipeline` (`zap-runtime/src/pipeline.rs`)**:
+2. **`DriverPipeline` (`rivun-runtime/src/pipeline.rs`)**:
    - Chained multi-stage graphs: `Stage 1 (Perception) -> IpcPipe -> Stage 2 (Policy Filter) -> IpcPipe -> Stage 3 (Actuator)`.
    - Passes `BufferSlice` and `PinnedBuffer` between stages without intermediate copying.
    - Collects `PipelineExecutionReport` with final causal chain hash and aggregate fuel consumption.
-3. **`StreamingBufferPool` (`zap-runtime/src/streaming.rs`)**:
+3. **`StreamingBufferPool` (`rivun-runtime/src/streaming.rs`)**:
    - Manages lock-free circular ring-buffers for high-throughput TCP / Modbus / shared memory streams.
 
 ---
 
 ## 10. Verification & Test Plan
 
-1. **Unit Tests (`crates/zap-driver-sdk/src/`)**:
+1. **Unit Tests (`crates/rivun-driver-sdk/src/`)**:
    - `test_packed_result_roundtrip`: Validate 64-bit bitshift pack/unpack.
    - `test_pinned_buffer_write_and_slice`: Test zero-copy sub-slicing and bounds enforcement.
    - `test_buffer_slice_mut_split`: Test disjoint mutable slices and capacity limits.
@@ -835,3 +835,4 @@ The SDK components seamlessly integrate with host-side runtime modules in `crate
    - Benchmark IPC pipe message transfer throughput (target: > 1,000,000 msgs/sec in-memory).
 
 ---
+

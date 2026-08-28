@@ -3,42 +3,42 @@
 ## 1. Observation
 
 ### Forensic Audit & Evidence Summary
-A comprehensive review of the evidence reports from Auditor (`teamwork_preview_auditor_m1_1`), Reviewer 2 (`teamwork_preview_reviewer_m1_2`), Challenger 1 (`teamwork_preview_challenger_m1_1`), and Challenger 2 (`teamwork_preview_challenger_m1_2`) revealed multiple integrity, durability, and build failures across `zap-net`, `zap-node`, `zap-journal`, and `zap-ledger`.
+A comprehensive review of the evidence reports from Auditor (`teamwork_preview_auditor_m1_1`), Reviewer 2 (`teamwork_preview_reviewer_m1_2`), Challenger 1 (`teamwork_preview_challenger_m1_1`), and Challenger 2 (`teamwork_preview_challenger_m1_2`) revealed multiple integrity, durability, and build failures across `rivun-net`, `rivun-node`, `rivun-journal`, and `rivun-ledger`.
 
 #### Direct Observations & Failure Logs
 
-1. **`cargo test` Behavioral Failure in `zap-journal`**:
-   - Command: `cargo test -p zap-journal --test m1_journal_stress`
+1. **`cargo test` Behavioral Failure in `rivun-journal`**:
+   - Command: `cargo test -p rivun-journal --test m1_journal_stress`
    - Log:
      ```text
-     thread 'test_journal_rapid_rotation_stress' (17820) panicked at crates\zap-journal\tests\m1_journal_stress.rs:45:33:
+     thread 'test_journal_rapid_rotation_stress' (17820) panicked at crates\rivun-journal\tests\m1_journal_stress.rs:45:33:
      called `Result::unwrap()` on an `Err` value: HashChainMismatch { path: "...\\00000000000000000020.zjseg", offset: 33 }
      ```
 
-2. **`cargo clippy` Failure in `zap-journal`**:
-   - Command: `cargo clippy -p zap-journal --all-targets -- -D warnings`
+2. **`cargo clippy` Failure in `rivun-journal`**:
+   - Command: `cargo clippy -p rivun-journal --all-targets -- -D warnings`
    - Log:
      ```text
      error: manual implementation of `.is_multiple_of()`
-       --> crates\zap-journal\tests\m1_journal_stress.rs:11:18
+       --> crates\rivun-journal\tests\m1_journal_stress.rs:11:18
         |
      11 |         kind: if i % 2 == 0 { "alpha".to_string() } else { "beta".to_string() },
         |                  ^^^^^^^^^^ help: replace with: `i.is_multiple_of(2)`
      ```
 
-3. **`cargo clippy` & Build Compilation Failures in `zap-ledger`**:
+3. **`cargo clippy` & Build Compilation Failures in `rivun-ledger`**:
    - Command: `cargo clippy --workspace --all-targets -- -D warnings`
    - Log:
      ```text
      error: unused import: `ActionReceipt`
-       --> crates\zap-ledger\tests\m1_challenger_stress.rs:7:5
-     error[E0560]: struct `zap_core::ZapHeader` has no field named `sequence`
-       --> crates\zap-ledger\tests\m1_challenger_stress.rs:25:13
+       --> crates\rivun-ledger\tests\m1_challenger_stress.rs:7:5
+     error[E0560]: struct `@@rivun_HEADER@@core::ZapHeader` has no field named `sequence`
+       --> crates\rivun-ledger\tests\m1_challenger_stress.rs:25:13
      error[E0308]: mismatched types: expected `Bytes`, found `Vec<u8>`
-       --> crates\zap-ledger\tests\m1_challenger_stress.rs:28:18
+       --> crates\rivun-ledger\tests\m1_challenger_stress.rs:28:18
      ```
 
-4. **WAL Partial Write Recovery Failure (`zap-net`, `zap-node`)**:
+4. **WAL Partial Write Recovery Failure (`rivun-net`, `rivun-node`)**:
    - Log (`durable_replay_stress.rs`):
      ```text
      Partial write test: has_n1=true, has_n2=false
@@ -46,22 +46,22 @@ A comprehensive review of the evidence reports from Auditor (`teamwork_preview_a
      nonce2 appended after corruption must be preserved
      ```
 
-5. **Timestamp Overflow Panic (`zap-node`)**:
+5. **Timestamp Overflow Panic (`rivun-node`)**:
    - Log (`durable_replay_stress.rs`):
      ```text
-     thread 'stress_test_replay_store_clock_jumps_and_overflow' panicked at crates\zap-node\src\durable_replay.rs:81:17:
+     thread 'stress_test_replay_store_clock_jumps_and_overflow' panicked at crates\rivun-node\src\durable_replay.rs:81:17:
      attempt to add with overflow
      ```
 
-6. **Compaction Node ID Corruption (`zap-net`)**:
-   - Code inspection of `crates/zap-net/src/durable_replay.rs:124`:
+6. **Compaction Node ID Corruption (`rivun-net`)**:
+   - Code inspection of `crates/rivun-net/src/durable_replay.rs:124`:
      ```rust
      buf[8..24].copy_from_slice(Uuid::nil().as_bytes());
      ```
      `DurableNonceStore::compact()` replaces origin node IDs with `Uuid::nil()`.
 
-7. **Peer WAL Path Collision (`zap-net`)**:
-   - Code inspection of `crates/zap-net/src/lib.rs:310-314`:
+7. **Peer WAL Path Collision (`rivun-net`)**:
+   - Code inspection of `crates/rivun-net/src/lib.rs:310-314`:
      ```rust
      let path = if base_path.extension().is_none() {
          base_path.join(format!("{}.nonce.wal", peer.node_id))
@@ -71,12 +71,12 @@ A comprehensive review of the evidence reports from Auditor (`teamwork_preview_a
      ```
      When `base_path` has an extension (e.g. `nonces.wal`), all peers share the exact same file path.
 
-8. **Empty Segment Index Post-Pruning (`zap-ledger`)**:
-   - Code inspection of `crates/zap-ledger/src/lib.rs:536-541`:
+8. **Empty Segment Index Post-Pruning (`rivun-ledger`)**:
+   - Code inspection of `crates/rivun-ledger/src/lib.rs:536-541`:
      `build_and_verify_segment_index()` hardcodes `sequence = 0_u64`. When sequence 0 is deleted by `max_segment_count`, the loop terminates immediately, returning an empty index.
 
-9. **Unsigned Rotation Manifests & Mismatched Segment UUID (`zap-ledger`, `zap-journal`)**:
-   - Code inspection of `crates/zap-ledger/src/lib.rs:505`:
+9. **Unsigned Rotation Manifests & Mismatched Segment UUID (`rivun-ledger`, `rivun-journal`)**:
+   - Code inspection of `crates/rivun-ledger/src/lib.rs:505`:
      `rotate_and_seal_segment` generates a random `Uuid::new_v4()` for `segment_id`, mismatching the header UUID inside `.zjseg`.
    - Auto-rotations inside `JournalStore::append()` seal segments without creating `.zjmanifest.json.sig`.
 
@@ -116,7 +116,7 @@ A comprehensive review of the evidence reports from Auditor (`teamwork_preview_a
    - **Reasoning**: `ReceiptJournalStore::append()` must call `ensure_sealed_segments_signed()` to sign any un-signed closed segment manifests.
 
 7. **Compilation & Clippy Cleanliness**:
-   - `m1_journal_stress.rs` and `m1_challenger_stress.rs` contain `i % 2 == 0` and syntax mismatches against `zap-core` / `base64`.
+   - `m1_journal_stress.rs` and `m1_challenger_stress.rs` contain `i % 2 == 0` and syntax mismatches against `rivun-core` / `base64`.
    - **Reasoning**: Updating expressions to `is_multiple_of()` and aligning imports/struct initializations resolves all clippy lints and test compilation errors.
 
 ---
@@ -129,9 +129,9 @@ A comprehensive review of the evidence reports from Auditor (`teamwork_preview_a
 
 ## 4. Conclusion & Actionable Fix Blueprint
 
-### Blueprint Item 1: WAL Truncation on Open (`zap-net`, `zap-node`)
+### Blueprint Item 1: WAL Truncation on Open (`rivun-net`, `rivun-node`)
 
-#### Location 1A: `crates/zap-net/src/durable_replay.rs`
+#### Location 1A: `crates/rivun-net/src/durable_replay.rs`
 Modify `DurableNonceStore::open()`:
 ```rust
         let mut valid_records = 0_usize;
@@ -160,7 +160,7 @@ Modify `DurableNonceStore::open()`:
         }
 ```
 
-#### Location 1B: `crates/zap-node/src/durable_replay.rs`
+#### Location 1B: `crates/rivun-node/src/durable_replay.rs`
 Modify `DurableReplayStore::open()`:
 ```rust
         let mut valid_records = 0_usize;
@@ -193,9 +193,9 @@ Modify `DurableReplayStore::open()`:
 
 ---
 
-### Blueprint Item 2: `compact()` Node ID Preservation (`zap-net`, `zap-node`)
+### Blueprint Item 2: `compact()` Node ID Preservation (`rivun-net`, `rivun-node`)
 
-#### Location 2A: `crates/zap-net/src/durable_replay.rs`
+#### Location 2A: `crates/rivun-net/src/durable_replay.rs`
 1. Update `DurableNonceStore` struct field:
    `order: VecDeque<([u8; NONCE_LEN], Uuid, u64)>,`
 2. Update `remember()`:
@@ -215,7 +215,7 @@ Modify `DurableReplayStore::open()`:
    }
    ```
 
-#### Location 2B: `crates/zap-node/src/durable_replay.rs`
+#### Location 2B: `crates/rivun-node/src/durable_replay.rs`
 1. Update `DurableReplayStore` struct field:
    `order: VecDeque<([u8; 16], Uuid, u64)>,`
 2. Update `check_and_insert()`:
@@ -239,9 +239,9 @@ Modify `DurableReplayStore::open()`:
 
 ---
 
-### Blueprint Item 3: Safe Timestamp Arithmetic (`zap-node`)
+### Blueprint Item 3: Safe Timestamp Arithmetic (`rivun-node`)
 
-#### Location 3: `crates/zap-node/src/durable_replay.rs`
+#### Location 3: `crates/rivun-node/src/durable_replay.rs`
 Update `check_and_insert()` timestamp check:
 ```rust
         let ts = frame.header.timestamp_micros;
@@ -255,9 +255,9 @@ Update `check_and_insert()` timestamp check:
 
 ---
 
-### Blueprint Item 4: Peer WAL Isolation (`zap-net`)
+### Blueprint Item 4: Peer WAL Isolation (`rivun-net`)
 
-#### Location 4: `crates/zap-net/src/lib.rs`
+#### Location 4: `crates/rivun-net/src/lib.rs`
 Update `add_peer()` in `ZapEndpoint`:
 ```rust
         peers
@@ -284,9 +284,9 @@ Update `add_peer()` in `ZapEndpoint`:
 
 ---
 
-### Blueprint Item 5: Hash Chain & Pruning Verification (`zap-journal`)
+### Blueprint Item 5: Hash Chain & Pruning Verification (`rivun-journal`)
 
-#### Location 5: `crates/zap-journal/src/lib.rs`
+#### Location 5: `crates/rivun-journal/src/lib.rs`
 Update `scan_records()`:
 ```rust
     fn scan_records<F>(&self, allow_partial_tail: bool, callback: &mut F) -> Result<()>
@@ -325,9 +325,9 @@ Update `scan_records()`:
 
 ---
 
-### Blueprint Item 6: Segment Index Building & Signing (`zap-journal`, `zap-ledger`)
+### Blueprint Item 6: Segment Index Building & Signing (`rivun-journal`, `rivun-ledger`)
 
-#### Location 6A: `crates/zap-ledger/src/lib.rs` - `build_and_verify_segment_index()`
+#### Location 6A: `crates/rivun-ledger/src/lib.rs` - `build_and_verify_segment_index()`
 ```rust
     pub fn build_and_verify_segment_index(&self) -> Result<ReceiptSegmentIndex> {
         let node_id = self.keypair.as_ref().map(|k| k.node_id()).unwrap_or_default();
@@ -342,7 +342,7 @@ Update `scan_records()`:
     }
 ```
 
-#### Location 6B: `crates/zap-ledger/src/lib.rs` - `rotate_and_seal_segment()`
+#### Location 6B: `crates/rivun-ledger/src/lib.rs` - `rotate_and_seal_segment()`
 ```rust
     pub fn rotate_and_seal_segment(&self, sequence: u64) -> Result<SignedReceiptSegmentManifest> {
         let keypair = self.keypair.as_ref().ok_or_else(|| {
@@ -379,7 +379,7 @@ Update `scan_records()`:
     }
 ```
 
-#### Location 6C: `crates/zap-ledger/src/lib.rs` - Automatic Manifest Signing in `append()`
+#### Location 6C: `crates/rivun-ledger/src/lib.rs` - Automatic Manifest Signing in `append()`
 ```rust
     pub fn ensure_sealed_segments_signed(&self) -> Result<()> {
         let Some(_keypair) = &self.keypair else { return Ok(()); };
@@ -410,13 +410,13 @@ Update `scan_records()`:
 
 ### Blueprint Item 7: Compilation & Clippy Cleanliness
 
-#### Location 7A: `crates/zap-journal/tests/m1_journal_stress.rs`
+#### Location 7A: `crates/rivun-journal/tests/m1_journal_stress.rs`
 Replace line 11:
 `kind: if i.is_multiple_of(2) { "alpha".to_string() } else { "beta".to_string() },`
 
-#### Location 7B: `crates/zap-ledger/tests/m1_challenger_stress.rs`
+#### Location 7B: `crates/rivun-ledger/tests/m1_challenger_stress.rs`
 1. Replace `i % 2 == 0` and `i % 3 == 0` with `i.is_multiple_of(2)` and `i.is_multiple_of(3)`.
-2. Fix unused imports: `use zap_ledger::{...}` without unused `ActionReceipt`.
+2. Fix unused imports: `use @@rivun_HEADER@@ledger::{...}` without unused `ActionReceipt`.
 3. Ensure `ZapFrame::with_timestamp(...)` and `base64::Engine` calls align with current workspace APIs.
 
 ---
@@ -439,14 +439,15 @@ To independently verify the fixes:
 
 3. **WAL Partial Write Recovery Verification**:
    ```powershell
-   cargo test -p zap-net --test durable_replay_stress
-   cargo test -p zap-node --test durable_replay_stress
+   cargo test -p rivun-net --test durable_replay_stress
+   cargo test -p rivun-node --test durable_replay_stress
    ```
    *Expected Output*: `stress_test_nonce_store_partial_write_corruption` and `stress_test_replay_store_partial_write_corruption` pass cleanly.
 
 4. **Journal Segment Rotation & Manifest Signing Verification**:
    ```powershell
-   cargo test -p zap-journal --test m1_journal_stress
-   cargo test -p zap-ledger --test m1_challenger_stress
+   cargo test -p rivun-journal --test m1_journal_stress
+   cargo test -p rivun-ledger --test m1_challenger_stress
    ```
    *Expected Output*: All journal rotation, manifest signing, index building, and pruning tests pass cleanly.
+

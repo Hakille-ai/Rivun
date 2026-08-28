@@ -6,7 +6,7 @@ Perform forensic integrity re-audit of Milestone 2 remediation fixes: struct ali
 ## 🔒 My Identity
 - Archetype: forensic_auditor
 - Roles: critic, specialist, auditor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\auditor_m2_1_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\auditor_m2_1_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Target: Milestone 2 remediation fixes
 
@@ -21,7 +21,7 @@ Perform forensic integrity re-audit of Milestone 2 remediation fixes: struct ali
 - Updated: 2026-08-14T02:25:00Z
 
 ## Audit Scope
-- **Work product**: Milestone 2 remediation fixes in crates/zap-store, crates/zap-pack, crates/zap-cli, and tests.
+- **Work product**: Milestone 2 remediation fixes in crates/rivun-store, crates/rivun-pack, crates/rivun-cli, and tests.
 - **Profile loaded**: General Project / Integrity Forensics
 - **Audit type**: forensic integrity re-audit
 
@@ -45,3 +45,4 @@ Perform forensic integrity re-audit of Milestone 2 remediation fixes: struct ali
 - BRIEFING.md — Working memory state
 - progress.md — Audit progress log
 - handoff.md — Audit handoff report
+

@@ -10,8 +10,8 @@
     "id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "correlation_id": "00000000-0000-0000-0000-000000000000",
     "causation_id": "00000000-0000-0000-0000-000000000000",
-    "subject": "zap.registry.index.request",
-    "content_type": "application/zap-registry-index+json",
+    "subject": "rivun.registry.index.request",
+    "content_type": "application/rivun-registry-index+json",
     "metadata_base64": "",
     "body_json": {
       "schema_version": 1,

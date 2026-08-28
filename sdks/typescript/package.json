@@ -1,7 +1,7 @@
 {
-  "name": "@zap-protocol/sdk",
+  "name": "@rivun-protocol/sdk",
   "version": "0.1.0",
-  "description": "Lightweight TypeScript SDK for ZAP control envelopes and ZapStore payloads",
+  "description": "Lightweight TypeScript SDK for Rivun control envelopes and RivunStore payloads",
   "type": "module",
   "license": "Apache-2.0",
   "types": "./dist/src/index.d.ts",

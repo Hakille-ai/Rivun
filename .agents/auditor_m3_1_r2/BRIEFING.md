@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-14T19:02:18Z
 
 ## Mission
-Forensic integrity re-audit of Milestone 3 remediation fixes (FleetDoctor, IncidentCapturer, SecretRedactor, tar.gz incident bundle creation, Prometheus metrics, zap-telemetry, zap-node, zap-cli).
+Forensic integrity re-audit of Milestone 3 remediation fixes (FleetDoctor, IncidentCapturer, SecretRedactor, tar.gz incident bundle creation, Prometheus metrics, rivun-telemetry, rivun-node, rivun-cli).
 
 ## 🔒 My Identity
 - Archetype: forensic_auditor
 - Roles: critic, specialist, auditor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\auditor_m3_1_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\auditor_m3_1_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Target: Milestone 3 remediation
 
@@ -21,7 +21,7 @@ Forensic integrity re-audit of Milestone 3 remediation fixes (FleetDoctor, Incid
 - Updated: 2026-08-14T19:02:18Z
 
 ## Audit Scope
-- **Work product**: Milestone 3 crates (`crates/zap-telemetry`, `crates/zap-node`, `crates/zap-cli`) and remediation fixes
+- **Work product**: Milestone 3 crates (`crates/rivun-telemetry`, `crates/rivun-node`, `crates/rivun-cli`) and remediation fixes
 - **Profile loaded**: General Project
 - **Audit type**: forensic integrity check
 
@@ -47,3 +47,4 @@ Forensic integrity re-audit of Milestone 3 remediation fixes (FleetDoctor, Incid
 
 ## Loaded Skills
 - None loaded yet
+

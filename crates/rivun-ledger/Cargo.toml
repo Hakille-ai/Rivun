@@ -1,0 +1,30 @@
+[package]
+name = "rivun-ledger"
+description = "Signed action receipts for ZAP audit logs."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+blake3.workspace = true
+ed25519-dalek.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+rivun-core = { path = "../rivun-core" }
+rivun-crypto = { path = "../rivun-crypto" }
+rivun-journal.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+criterion.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "receipt"
+harness = false

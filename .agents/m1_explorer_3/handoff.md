@@ -2,19 +2,19 @@
 
 **Agent**: Explorer 3 (Test Strategy & Validation Specialist)  
 **Milestone**: Milestone 1 (R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh)  
-**Target Crates**: `crates/zap-net`, `crates/zap-agent`, `crates/zap-node`  
-**Primary Output**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\m1_explorer_3\analysis.md`  
+**Target Crates**: `crates/rivun-net`, `crates/rivun-agent`, `crates/rivun-node`  
+**Primary Output**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\m1_explorer_3\analysis.md`  
 
 ---
 
 ## 1. Observation
 
 1. **Existing Test Setups**:
-   - `crates/zap-net/src/lib.rs` (lines 631–1138) contains unit tests for point-to-point UDP encryption, anti-replay sliding windows (`NonceReplayCache`), datagram header validation, and Noise handshake derivation.
-   - `crates/zap-net/src/gossip.rs` (lines 321–396) has basic unit tests for vector clocks, simple heartbeat tracking, and quorum counter voting, but lacks epidemic dissemination, bloom filters, anti-entropy synchronization, and packet-loss chaos testing.
-   - `crates/zap-net/tests/durable_replay_stress.rs` (lines 1–264) provides robust multi-threaded stress tests for WAL persistence and crash restarts.
-   - `crates/zap-agent/src/provenance.rs` (lines 718–838) provides 6-stage provenance verification ($H_{\text{intent}} \to H_{\text{negotiation}} \to H_{\text{policy}} \to H_{\text{driver}} \to H_{\text{poa}} \to H_{\text{receipt}}$), which must be extended to support `ProvenanceStage::Consensus` binding `SwarmCommitCertificate`.
-   - `crates/zap-node/src/lib.rs` (lines 1–800+) currently runs a synchronous `handle_once()` UDP receive loop with static PoA attestation rather than concurrent Tokio actor tasks.
+   - `crates/rivun-net/src/lib.rs` (lines 631–1138) contains unit tests for point-to-point UDP encryption, anti-replay sliding windows (`NonceReplayCache`), datagram header validation, and Noise handshake derivation.
+   - `crates/rivun-net/src/gossip.rs` (lines 321–396) has basic unit tests for vector clocks, simple heartbeat tracking, and quorum counter voting, but lacks epidemic dissemination, bloom filters, anti-entropy synchronization, and packet-loss chaos testing.
+   - `crates/rivun-net/tests/durable_replay_stress.rs` (lines 1–264) provides robust multi-threaded stress tests for WAL persistence and crash restarts.
+   - `crates/rivun-agent/src/provenance.rs` (lines 718–838) provides 6-stage provenance verification ($H_{\text{intent}} \to H_{\text{negotiation}} \to H_{\text{policy}} \to H_{\text{driver}} \to H_{\text{poa}} \to H_{\text{receipt}}$), which must be extended to support `ProvenanceStage::Consensus` binding `SwarmCommitCertificate`.
+   - `crates/rivun-node/src/lib.rs` (lines 1–800+) currently runs a synchronous `handle_once()` UDP receive loop with static PoA attestation rather than concurrent Tokio actor tasks.
    - `tests/e2e/tests/e2e_suite.rs` (lines 1–800+) covers end-to-end multi-tier test cases across all features.
 
 2. **Milestone 1 Scope & Architectural Survey Requirements**:
@@ -39,7 +39,7 @@
 
 ## 3. Caveats
 
-1. **Network Scale in Unit Tests**: Mock network tests are scoped for $N \in [3, 16]$ nodes to ensure sub-second unit test execution. Scalability benchmarks for $N \ge 64$ and 10,000 ops/sec will be executed under Milestone 5 (`zap-cli` / `benches/`).
+1. **Network Scale in Unit Tests**: Mock network tests are scoped for $N \in [3, 16]$ nodes to ensure sub-second unit test execution. Scalability benchmarks for $N \ge 64$ and 10,000 ops/sec will be executed under Milestone 5 (`rivun-cli` / `benches/`).
 2. **Cryptographic Primitives**: Threshold signature batch verification uses `ed25519_dalek::verify_batch()`. Future threshold signature schemes (BLS12-381 / FROST) may be integrated in Milestone 2 without altering the consensus state machine interface.
 3. **Scope Boundary**: Explorer 3 delivers test architecture, test cases, and fixture specifications only; production implementation code will be written by implementer subagents.
 
@@ -47,7 +47,7 @@
 
 ## 4. Conclusion
 
-The comprehensive test strategy, mock harness architecture, and 7 test suites (29 distinct test cases) have been fully designed and documented in `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\m1_explorer_3\analysis.md`. The design provides implementers and challengers with clear, unambiguous blueprints, concrete Rust test fixtures, and mathematical assertions to ensure 100% test coverage with zero clippy warnings.
+The comprehensive test strategy, mock harness architecture, and 7 test suites (29 distinct test cases) have been fully designed and documented in `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\m1_explorer_3\analysis.md`. The design provides implementers and challengers with clear, unambiguous blueprints, concrete Rust test fixtures, and mathematical assertions to ensure 100% test coverage with zero clippy warnings.
 
 ---
 
@@ -57,11 +57,12 @@ To verify the test design against the codebase:
 
 ```bash
 # 1. Inspect the analysis document
-view_file AbsolutePath="c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\m1_explorer_3\analysis.md"
+view_file AbsolutePath="c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\m1_explorer_3\analysis.md"
 
 # 2. Verify workspace builds and passes existing tests cleanly
-cargo test -p zap-net -p zap-agent -p zap-node --all-targets
+cargo test -p rivun-net -p rivun-agent -p rivun-node --all-targets
 
 # 3. Check workspace Clippy compliance
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+

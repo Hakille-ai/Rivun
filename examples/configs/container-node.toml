@@ -1,5 +1,5 @@
 bind = "0.0.0.0:7000"
-key_file = "/var/lib/zap/node.key"
+key_file = "/var/lib/rivun/node.key"
 require_signed = true
 
 # Add peers before accepting signed traffic from other nodes.
@@ -9,10 +9,10 @@ require_signed = true
 # public_key = "peer-public-key-base64url"
 # transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
 
-# Mount production drivers under /opt/zap/drivers and register them here.
+# Mount production drivers under /opt/rivun/drivers and register them here.
 # [[drivers]]
 # action = "echo"
-# path = "/opt/zap/drivers/echo/echo.wat"
+# path = "/opt/rivun/drivers/echo/echo.wat"
 
 [runtime]
 fuel = 10000000
@@ -25,4 +25,4 @@ max_clock_skew_micros = 300000000
 replay_cache_capacity = 4096
 
 [receipts]
-dir = "/var/lib/zap/receipts"
+dir = "/var/lib/rivun/receipts"

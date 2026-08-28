@@ -1,21 +1,21 @@
-# ZAP Next-Gen Frontier: Architectural Survey & Technical Specification
+# rivun Next-Gen Frontier: Architectural Survey & Technical Specification
 ## Focus: R2 (Merkle Mountain Range & Compact Batch Receipts) & R3 (Async WASM Driver Pipeline & Inter-Driver IPC)
 
 **Date:** 2026-08-15  
 **Author:** Explorer 2 (Teamwork Explorer Agent)  
 **Status:** Completed Architectural Survey  
-**Target Crates:** `crates/zap-ledger`, `crates/zap-crypto`, `crates/zap-runtime`, `crates/zap-driver-sdk`, `crates/zap-machine`, `crates/zap-capability`, `crates/zap-node`
+**Target Crates:** `crates/rivun-ledger`, `crates/rivun-crypto`, `crates/rivun-runtime`, `crates/rivun-driver-sdk`, `crates/rivun-machine`, `crates/rivun-capability`, `crates/rivun-node`
 
 ---
 
 ## Table of Contents
 1. [Executive Summary & Scope Definition](#1-executive-summary--scope-definition)
 2. [Survey of Existing Architecture & Baseline Codebase](#2-survey-of-existing-architecture--baseline-codebase)
-   - 2.1 `zap-ledger`: Receipts, Journaling, Batch Verification, and Baseline MMR
-   - 2.2 `zap-crypto`: Identity, Signatures, PoA Consensus, and Domain Separation
-   - 2.3 `zap-runtime`: Wasmtime Engine, Fuel Metering, Epoch Ticking, and Memory Sandboxing
-   - 2.4 `zap-driver-sdk`: Driver Trait, Memory Layout, and ABI Interface
-   - 2.5 `zap-machine` & `zap-capability`: Device Profiles and Capability Matrix
+   - 2.1 `rivun-ledger`: Receipts, Journaling, Batch Verification, and Baseline MMR
+   - 2.2 `rivun-crypto`: Identity, Signatures, PoA Consensus, and Domain Separation
+   - 2.3 `rivun-runtime`: Wasmtime Engine, Fuel Metering, Epoch Ticking, and Memory Sandboxing
+   - 2.4 `rivun-driver-sdk`: Driver Trait, Memory Layout, and ABI Interface
+   - 2.5 `rivun-machine` & `rivun-capability`: Device Profiles and Capability Matrix
 3. [Requirement 2 (R2): Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts](#3-requirement-2-r2-merkle-mountain-range-mmr--compact-cryptographic-batch-receipts)
    - 3.1 MMR Theoretical Model & Bitwise Indexing Mathematics
    - 3.2 Gap Analysis of Current MMR Implementation
@@ -29,7 +29,7 @@
    - 4.3 Streaming I/O Buffers (Async TCP, Modbus, SPSC Shared Ring-Buffers)
    - 4.4 Deterministic Zero-Copy Inter-Driver IPC Pipes & Pipeline Chaining
    - 4.5 Unified Fuel Budgeting & Deterministic Pipeline Audit Trail
-   - 4.6 Next-Gen `zap-driver-sdk` Extensions
+   - 4.6 Next-Gen `rivun-driver-sdk` Extensions
 5. [Cross-Crate Dependency Architecture & Interface Contracts](#5-cross-crate-dependency-architecture--interface-contracts)
 6. [Implementation Roadmap, Verification Strategy & Action Plan](#6-implementation-roadmap-verification-strategy--action-plan)
 
@@ -37,15 +37,15 @@
 
 ## 1. Executive Summary & Scope Definition
 
-The ZAP Next-Gen Frontier transformation upgrades ZAP into an autonomous, hyper-scalable, cross-cluster decentralized execution and verification fabric. This survey provides an exhaustive technical analysis, architectural gap analysis, and implementation specification for two foundational pillars:
+The rivun Next-Gen Frontier transformation upgrades rivun into an autonomous, hyper-scalable, cross-cluster decentralized execution and verification fabric. This survey provides an exhaustive technical analysis, architectural gap analysis, and implementation specification for two foundational pillars:
 
-1. **Requirement 2 (R2): Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts** (`zap-ledger`, `zap-crypto`)
+1. **Requirement 2 (R2): Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts** (`rivun-ledger`, `rivun-crypto`)
    - High-throughput batch receipt sealing over append-only journals.
    - Strict $O(\log N)$ compact inclusion and non-membership (exclusion) cryptographic proofs.
    - Peak-bagging root calculation and multi-leaf batch proof aggregation.
    - Zero-Knowledge verifiable receipt rollups allowing agents to cryptographically prove execution correctness without disclosing confidential payload bytes, internal memory, or proprietary sensor data.
 
-2. **Requirement 3 (R3): Async WASM Driver Pipeline & Inter-Driver IPC** (`zap-runtime`, `zap-driver-sdk`)
+2. **Requirement 3 (R3): Async WASM Driver Pipeline & Inter-Driver IPC** (`rivun-runtime`, `rivun-driver-sdk`)
    - Non-blocking asynchronous WASM driver host execution integrated with Tokio.
    - Streaming I/O buffers for high-bandwidth telemetry and hardware protocols (Async TCP, Modbus TCP/RTU, Lock-free SPSC Ring-Buffers).
    - Deterministic zero-copy inter-driver IPC pipes enabling sequential and DAG driver chaining (e.g. Machine Perception $\to$ Safety Policy $\to$ Actuator).
@@ -55,13 +55,13 @@ The ZAP Next-Gen Frontier transformation upgrades ZAP into an autonomous, hyper-
 
 ## 2. Survey of Existing Architecture & Baseline Codebase
 
-### 2.1 `zap-ledger`: Receipts, Journaling, Batch Verification, and Baseline MMR
+### 2.1 `rivun-ledger`: Receipts, Journaling, Batch Verification, and Baseline MMR
 - **Receipt Representation (`SignedActionReceipt`)**:
   - Encapsulates `ActionReceipt` containing `schema_version`, `node_id`, `source_node`, `target_node`, `kind`, `subject`, `action`, `frame_hash`, `payload_hash`, `output_hash`, `frame_timestamp_micros`, `processed_at_micros`, `flags`, `consensus_required`, `poa: Option<PoaReceipt>`, and `pact: Option<PactReceiptReference>`.
-  - Signed via Ed25519 using domain separator `ZAP-ACTION-RECEIPT-v1`.
+  - Signed via Ed25519 using domain separator `rivun-ACTION-RECEIPT-v1`.
   - Enforces static validation on Blake3 artifact hashes (`blake3:<64-hex>`), timestamp monotonicity, and consensus flag compliance.
 - **Receipt Journal Store (`ReceiptJournalStore`)**:
-  - Implements disk-backed, append-only segmented storage via `zap-journal` (`.zjseg` files).
+  - Implements disk-backed, append-only segmented storage via `rivun-journal` (`.zjseg` files).
   - Generates signed segment manifests (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`) linking segments cryptographically via `previous_segment_hash`.
   - Provides index-accelerated query filtering (`query_fast`) based on `ReceiptSegmentIndex`.
   - Supports full crash-tail recovery and JSONL export/import.
@@ -69,24 +69,24 @@ The ZAP Next-Gen Frontier transformation upgrades ZAP into an autonomous, hyper-
   - Scalar verification for $< 4$ receipts.
   - Chunked batch verification via `ed25519-dalek::verify_batch` for $\ge 4$ receipts.
   - Parallel multi-threaded chunk processing via Rayon (`par_chunks`) for $\ge 128$ receipts.
-- **Baseline MMR Accumulator (`crates/zap-ledger/src/mmr.rs`)**:
-  - Implements `hash_leaf` (domain `ZAP-MMR-LEAF-v1:`), `hash_nodes` (domain `ZAP-MMR-NODE-v1:`), and `bag_peaks` (domain `ZAP-MMR-PEAK-BAG-v1:`).
+- **Baseline MMR Accumulator (`crates/rivun-ledger/src/mmr.rs`)**:
+  - Implements `hash_leaf` (domain `rivun-MMR-LEAF-v1:`), `hash_nodes` (domain `rivun-MMR-NODE-v1:`), and `bag_peaks` (domain `rivun-MMR-PEAK-BAG-v1:`).
   - `MerkleMountainRange`: Stores all leaves in memory (`Vec<MmrHash>`), recomputes peaks via bit shifts, generates single-leaf inclusion proofs (`MmrInclusionProof`), and verifies single proofs.
   - Contains basic `MmrRollupCommitment` structure (root hash, leaf count, min/max timestamp).
 
-### 2.2 `zap-crypto`: Identity, Signatures, PoA Consensus, and Domain Separation
+### 2.2 `rivun-crypto`: Identity, Signatures, PoA Consensus, and Domain Separation
 - **Key Material & Node Identity**:
   - Ed25519 `SigningKey` and `VerifyingKey` (`Keypair`, `PublicKey`).
-  - Node IDs are derived deterministically: $\text{UUIDv8}(\text{Blake3}(\text{"ZAP-NODE-ID-v1"} \parallel \text{public\_key\_bytes}))$.
+  - Node IDs are derived deterministically: $\text{UUIDv8}(\text{Blake3}(\text{"rivun-NODE-ID-v1"} \parallel \text{public\_key\_bytes}))$.
 - **Fast Synchronous Wire Filtering**:
-  - Generates an 8-byte `ZAP_SIGN` signature hint: $\text{Blake3}(\text{"ZAP-SIGN-HINT-v1"} \parallel \text{signature})[0..8]$.
+  - Generates an 8-byte `@@rivun_HEADER@@SIGN` signature hint: $\text{Blake3}(\text{"rivun-SIGN-HINT-v1"} \parallel \text{signature})[0..8]$.
   - Embedded in the 64-byte `ZapFrame` header for $O(1)$ pre-filtering before full cryptographic verification.
 - **Proof-of-Action (PoA) Consensus Primitives**:
   - Multi-validator threshold signing ($T$-of-$N$) over frame digests (`poa_frame_digest`).
   - `PoaAttestation`, `PoaTrailer`, `PoaValidatorSet`, `SignedPoaValidatorSet`.
   - Validator sets enforce epoch monotonicity, threshold bounds, and authority signature verification.
 
-### 2.3 `zap-runtime`: Wasmtime Engine, Fuel Metering, Epoch Ticking, and Memory Sandboxing
+### 2.3 `rivun-runtime`: Wasmtime Engine, Fuel Metering, Epoch Ticking, and Memory Sandboxing
 - **Execution Architecture**:
   - Built on `wasmtime 45.0.1` with Cranelift compiler.
   - Synchronous execution model (`WasmExecutor::execute(&driver, action, payload, limits)`).
@@ -99,16 +99,16 @@ The ZAP Next-Gen Frontier transformation upgrades ZAP into an autonomous, hyper-
 - **Module Caching**:
   - LRU compiled module cache (`WasmModuleCache`) indexed by `Blake3(wasm_bytes)`.
 - **Host ABI**:
-  - WASM Exports: `memory`, `zap_alloc(i32) -> i32`, `zap_dealloc(i32, i32)`, `zap_execute(i32, i32, i32, i32) -> i64` (packed `(ptr << 32) | len`).
-  - Host Imports: `zap.emit_event`, `zap.memory_read`, `zap.memory_write`, `zap.device_call`.
+  - WASM Exports: `memory`, `@@rivun_HEADER@@alloc(i32) -> i32`, `@@rivun_HEADER@@dealloc(i32, i32)`, `@@rivun_HEADER@@execute(i32, i32, i32, i32) -> i64` (packed `(ptr << 32) | len`).
+  - Host Imports: `rivun.emit_event`, `rivun.memory_read`, `rivun.memory_write`, `rivun.device_call`.
 
-### 2.4 `zap-driver-sdk`: Driver Trait, Memory Layout, and ABI Interface
+### 2.4 `rivun-driver-sdk`: Driver Trait, Memory Layout, and ABI Interface
 - Minimal SDK containing `ZapDriver` trait (`fn execute(&self, input: DriverInput) -> Result<Vec<u8>, DriverError>`).
 - Bit-packed result encoding/decoding helper (`PackedResult`).
 
-### 2.5 `zap-machine` & `zap-capability`: Device Profiles and Capability Matrix
-- `zap-capability`: Capability hierarchy (`CapabilityId`, e.g. `driver.execute:<action>`), permission sets (`DriverPermissions`).
-- `zap-machine`: Device profiles (`DeviceProfile`), adapter types (`Mock`, `Serial`, `Tcp`, `ModbusLike`), command payload validation. Currently synchronous only.
+### 2.5 `rivun-machine` & `rivun-capability`: Device Profiles and Capability Matrix
+- `rivun-capability`: Capability hierarchy (`CapabilityId`, e.g. `driver.execute:<action>`), permission sets (`DriverPermissions`).
+- `rivun-machine`: Device profiles (`DeviceProfile`), adapter types (`Mock`, `Serial`, `Tcp`, `ModbusLike`), command payload validation. Currently synchronous only.
 
 ---
 
@@ -127,11 +127,11 @@ For an MMR with $N$ leaves:
 To produce a single 32-byte cryptographic root $R$ from peaks $[P_0, P_1, \dots, P_k]$:
 $$R = \text{BagPeaks}([P_0, P_1, \dots, P_k])$$
 $$\text{Bag}(P_0) = P_0$$
-$$\text{Bag}(P_0, P_1) = \text{Blake3}(\text{"ZAP-MMR-PEAK-BAG-v1:"} \parallel P_0 \parallel P_1)$$
-$$\text{Bag}(P_0, \dots, P_k) = \text{Blake3}(\text{"ZAP-MMR-PEAK-BAG-v1:"} \parallel \text{Bag}(P_0, \dots, P_{k-1}) \parallel P_k)$$
+$$\text{Bag}(P_0, P_1) = \text{Blake3}(\text{"rivun-MMR-PEAK-BAG-v1:"} \parallel P_0 \parallel P_1)$$
+$$\text{Bag}(P_0, \dots, P_k) = \text{Blake3}(\text{"rivun-MMR-PEAK-BAG-v1:"} \parallel \text{Bag}(P_0, \dots, P_{k-1}) \parallel P_k)$$
 
 ### 3.2 Gap Analysis of Current MMR Implementation
-| Feature | Current `zap-ledger` (`mmr.rs`) | Required Next-Gen Frontier Architecture |
+| Feature | Current `rivun-ledger` (`mmr.rs`) | Required Next-Gen Frontier Architecture |
 |---|---|---|
 | **Memory Footprint** | $O(N)$ RAM: stores entire `Vec<MmrHash>` in memory; recomputes trees recursively. | $O(\log N)$ RAM: incremental peak accumulator maintaining only active peak hashes ($\le 64$ hashes in RAM). |
 | **Disk Persistence** | In-memory only; rebuilt from journal records upon request. | Persistent MMR node storage integrated directly into `ReceiptJournalStore` segments (`.zmmr` files). |
@@ -271,7 +271,7 @@ The batch sealing process operates during journal segment rotation:
 1. `ReceiptJournalStore` rotates active segment $S$.
 2. Generates `IncrementalMmr` from all receipts in segment $S$, deriving `mmr_root`.
 3. Constructs `ReceiptBatchSealPayload` containing `(batch_id, segment_sequence, mmr_root, initial_state_hash, final_state_hash, receipt_count)`.
-4. Broadcasts `ReceiptBatchSealPayload` to Swarm Quorum / PoA Validators via P2P Gossip (`zap.quorum.seal_request`).
+4. Broadcasts `ReceiptBatchSealPayload` to Swarm Quorum / PoA Validators via P2P Gossip (`rivun.quorum.seal_request`).
 5. Validators verify local receipt segment records against `mmr_root`, signing the batch payload.
 6. Node collects $T$-of-$N$ threshold signatures, assembling `ReceiptBatchSeal`.
 7. Persists seal to `.zjseal.json` alongside `.zjseg` and `.zjmanifest.json.sig`.
@@ -292,7 +292,7 @@ pub struct BlindedReceiptCommitment {
     pub receipt_id: Uuid,
     /// Salt blinding factor: r
     pub blinding_salt: String,
-    /// C = Blake3(ZAP-ZK-RECEIPT-v1 || frame_hash || payload_hash || output_hash || salt)
+    /// C = Blake3(rivun-ZK-RECEIPT-v1 || frame_hash || payload_hash || output_hash || salt)
     pub commitment_hash: String,
     /// Public execution metadata
     pub action: String,
@@ -332,7 +332,7 @@ pub struct ZkRollupPublicInputs {
 ## 4. Requirement 3 (R3): Async WASM Driver Pipeline & Inter-Driver IPC
 
 ### 4.1 Gap Analysis of Current WASM Runtime & Driver SDK
-| Dimension | Current `zap-runtime` / `zap-driver-sdk` | Next-Gen Async & IPC Architecture |
+| Dimension | Current `rivun-runtime` / `rivun-driver-sdk` | Next-Gen Async & IPC Architecture |
 |---|---|---|
 | **Host Execution** | Synchronous, blocking OS thread during execution. | Fully asynchronous host execution on Tokio tasks (`wasmtime::Config::async_support(true)`). |
 | **Streaming I/O** | Discrete single request/response buffers. | Streaming I/O buffers for TCP, Modbus, and lock-free Shared Memory Ring-Buffers. |
@@ -378,10 +378,10 @@ impl AsyncWasmExecutor {
 ```
 
 #### Async Host Call Dispatch
-Host calls (`zap.async_stream_read`, `zap.async_stream_write`, `zap.async_device_call`) use Wasmtime's `linker.func_wrap_async`:
+Host calls (`rivun.async_stream_read`, `rivun.async_stream_write`, `rivun.async_device_call`) use Wasmtime's `linker.func_wrap_async`:
 ```rust
 linker.func_wrap_async(
-    "zap",
+    "rivun",
     "async_stream_read",
     |mut caller: Caller<'_, AsyncStoreState>, (stream_id, ptr, max_len): (i32, i32, i32)| {
         Box::new(async move {
@@ -478,7 +478,7 @@ pub struct StageExecutionReceipt {
 #### 3. Zero-Copy Inter-Driver Buffer Passing Mechanism
 1. Host allocates shared pinned memory page $B_{ipc}$.
 2. Stage 0 runs in its WASM linear memory, writes output to $B_{ipc}$.
-3. Host passes $B_{ipc}$ directly to Stage 1 via `zap_execute` pointer mapping into Stage 1's address space without intermediate host heap copying.
+3. Host passes $B_{ipc}$ directly to Stage 1 via `@@rivun_HEADER@@execute` pointer mapping into Stage 1's address space without intermediate host heap copying.
 4. Hash $H_0 = \text{Blake3}(B_{ipc})$ is recorded into the stage execution receipt for deterministic auditability.
 5. Stage 1 executes, writing output to $B_{ipc}'$.
 6. Stage 2 executes, consuming $B_{ipc}'$ and issuing physical device command.
@@ -493,7 +493,7 @@ pub struct StageExecutionReceipt {
 - If $F_{remaining} == 0$ or stage fails, pipeline terminates immediately, returning `PipelineFuelExhausted { stage_id }`.
 - Determinism Guarantee: Given identical inputs and fuel costs, the pipeline execution trace and stage hashes are identical bit-for-bit across any node in the cluster.
 
-### 4.6 Next-Gen `zap-driver-sdk` Extensions
+### 4.6 Next-Gen `rivun-driver-sdk` Extensions
 ```rust
 /// Asynchronous driver trait for high-performance streaming & IPC pipelines.
 #[async_trait::async_trait]
@@ -524,7 +524,7 @@ pub struct ZeroCopyBuffer<'a> {
 
 ```
                                ┌───────────────────────┐
-                               │       zap-core        │
+                               │       rivun-core        │
                                │  (ZapFrame, Flags,    │
                                │   PoaTrailer, Hashes) │
                                └───────────┬───────────┘
@@ -533,25 +533,25 @@ pub struct ZeroCopyBuffer<'a> {
                      │                     │                     │
                      ▼                     ▼                     ▼
              ┌───────────────┐     ┌───────────────┐     ┌───────────────┐
-             │  zap-crypto   │     │zap-capability │     │  zap-journal  │
+             │  rivun-crypto   │     │rivun-capability │     │  rivun-journal  │
              │ (Keypair, PoA,│     │(Permissions,  │     │(Binary Segs,  │
              │  Signatures)  │     │ Capabilities) │     │ Hash Chaining)│
              └───────┬───────┘     └───────┬───────┘     └───────┬───────┘
                      │                     │                     │
                      ▼                     ▼                     │
              ┌───────────────┐     ┌───────────────┐             │
-             │  zap-ledger   │     │  zap-machine  │             │
+             │  rivun-ledger   │     │  rivun-machine  │             │
              │ (MMR, Rollups,│     │(Stream Buffer,│             │
              │  Batch Seals) │     │ Device Ports) │             │
              └───────┬───────┘     └───────┬───────┘             │
                      │                     │                     │
                      │             ┌───────▼───────┐             │
-                     │             │zap-driver-sdk │             │
+                     │             │rivun-driver-sdk │             │
                      │             │(Async, IPC SDK│             │
                      │             └───────┬───────┘             │
                      │                     │                     │
                      │             ┌───────▼───────┐             │
-                     │             │  zap-runtime  │             │
+                     │             │  rivun-runtime  │             │
                      │             │(Async Executor│             │
                      │             │ Pipeline IPC) │             │
                      │             └───────┬───────┘             │
@@ -560,22 +560,22 @@ pub struct ZeroCopyBuffer<'a> {
                                  │
                                  ▼
                           ┌───────────────┐
-                          │   zap-node    │
+                          │   rivun-node    │
                           │ (Coordinator, │
                           │  P2P Engine)  │
                           └───────────────┘
 ```
 
 ### Key Interface Contracts
-1. **`zap-ledger` $\leftrightarrow$ `zap-crypto`**:
+1. **`rivun-ledger` $\leftrightarrow$ `rivun-crypto`**:
    - `IncrementalMmr` and `ReceiptBatchSeal` consume `Keypair` and `PublicKey` domain-separated signing.
    - Batch verification links Ed25519 threshold validator certificates with peak-bagged MMR roots.
-2. **`zap-runtime` $\leftrightarrow$ `zap-driver-sdk`**:
-   - ABI contract version 2: `zap_alloc`, `zap_dealloc`, `zap_execute_async`, `zap_stream_read`, `zap_stream_write`.
+2. **`rivun-runtime` $\leftrightarrow$ `rivun-driver-sdk`**:
+   - ABI contract version 2: `@@rivun_HEADER@@alloc`, `@@rivun_HEADER@@dealloc`, `@@rivun_HEADER@@execute_async`, `@@rivun_HEADER@@stream_read`, `@@rivun_HEADER@@stream_write`.
    - Zero-copy buffer pointer sharing via linear memory segments.
-3. **`zap-runtime` $\leftrightarrow$ `zap-ledger`**:
-   - When a multi-driver pipeline completes, `zap-runtime` emits a `PipelineExecutionReceipt` directly ingestible by `ReceiptJournalStore`.
-4. **`zap-node` $\leftrightarrow$ `zap-runtime` / `zap-ledger`**:
+3. **`rivun-runtime` $\leftrightarrow$ `rivun-ledger`**:
+   - When a multi-driver pipeline completes, `rivun-runtime` emits a `PipelineExecutionReceipt` directly ingestible by `ReceiptJournalStore`.
+4. **`rivun-node` $\leftrightarrow$ `rivun-runtime` / `rivun-ledger`**:
    - P2P Gossip engine disseminates `ReceiptBatchSeal` and MMR inclusion proofs for cross-node replication and swarm consensus validation.
 
 ---
@@ -584,8 +584,8 @@ pub struct ZeroCopyBuffer<'a> {
 
 ### 6.1 Phased Implementation Roadmap
 
-#### Phase 1: MMR Accumulator & Batch Sealing Upgrade (`zap-ledger`, `zap-crypto`)
-- [ ] Refactor `crates/zap-ledger/src/mmr.rs`:
+#### Phase 1: MMR Accumulator & Batch Sealing Upgrade (`rivun-ledger`, `rivun-crypto`)
+- [ ] Refactor `crates/rivun-ledger/src/mmr.rs`:
   - Implement `IncrementalMmr` with $O(\log N)$ peak array arithmetic.
   - Implement `MmrBatchInclusionProof` multi-leaf DAG deduplication algorithm.
   - Implement `MmrExclusionProof` (monotonic sequence gap and neighbor bounding proofs).
@@ -593,22 +593,22 @@ pub struct ZeroCopyBuffer<'a> {
 - [ ] Add `ZkReceiptRollupCommitment` and verification logic for private execution proofs.
 - [ ] Extend `ReceiptJournalStore` to auto-commit MMR peaks to `.zmmr` indexes on segment rotation.
 
-#### Phase 2: Async WASM Runtime & Streaming Engine (`zap-runtime`, `zap-driver-sdk`)
-- [ ] Enable Wasmtime `async_support(true)` in `zap-runtime`.
+#### Phase 2: Async WASM Runtime & Streaming Engine (`rivun-runtime`, `rivun-driver-sdk`)
+- [ ] Enable Wasmtime `async_support(true)` in `rivun-runtime`.
 - [ ] Implement `AsyncWasmExecutor` with Tokio async task scheduling.
 - [ ] Implement `StreamingBufferPool` supporting Async TCP, Modbus TCP/RTU, and SPSC lock-free ring buffers.
-- [ ] Update host imports with async stream primitives (`zap.async_stream_read`, `zap.async_stream_write`).
-- [ ] Update `zap-driver-sdk` with `AsyncZapDriver` and zero-copy memory slice wrappers.
+- [ ] Update host imports with async stream primitives (`rivun.async_stream_read`, `rivun.async_stream_write`).
+- [ ] Update `rivun-driver-sdk` with `AsyncZapDriver` and zero-copy memory slice wrappers.
 
-#### Phase 3: Inter-Driver IPC Pipes & Deterministic Chaining (`zap-runtime`, `zap-node`)
-- [ ] Implement `DriverPipeline` orchestrator in `zap-runtime`.
+#### Phase 3: Inter-Driver IPC Pipes & Deterministic Chaining (`rivun-runtime`, `rivun-node`)
+- [ ] Implement `DriverPipeline` orchestrator in `rivun-runtime`.
 - [ ] Implement zero-copy buffer passing between chained pipeline stages (Perception $\to$ Safety $\to$ Actuator).
 - [ ] Implement aggregate deterministic fuel pool metering across all pipeline stages.
 - [ ] Integrate pipeline execution receipts with `ReceiptJournalStore`.
 
 #### Phase 4: Benchmarking, Validation & Cluster Simulation
-- [ ] Create benchmark `benches/mmr_scale.rs` in `zap-ledger` verifying 100,000+ receipts with sub-millisecond MMR root derivation and proof checks.
-- [ ] Create benchmark `benches/async_pipeline.rs` in `zap-runtime` verifying high-concurrency streaming pipelines under strict fuel metering.
+- [ ] Create benchmark `benches/mmr_scale.rs` in `rivun-ledger` verifying 100,000+ receipts with sub-millisecond MMR root derivation and proof checks.
+- [ ] Create benchmark `benches/async_pipeline.rs` in `rivun-runtime` verifying high-concurrency streaming pipelines under strict fuel metering.
 - [ ] Run full workspace test suite `cargo test --workspace --all-targets` and Clippy linting.
 
 ---
@@ -619,3 +619,4 @@ pub struct ZeroCopyBuffer<'a> {
 - **Async WASM Concurrency**: 500+ concurrent WASM streaming driver instances must run on Tokio threadpool without thread blocking.
 - **Pipeline Zero-Copy IPC**: Passing a 1MB buffer across 3 driver stages must perform 0 heap allocations on the host inter-stage boundary.
 - **Unified Fuel Budget**: A pipeline with 5M fuel limit must abort at the exact stage where aggregate fuel is exhausted.
+

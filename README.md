@@ -1,13 +1,13 @@
-# ZAP
+# Rivun
 
 **Universal low-latency protocol for typed message dispatch, signed by default.**
 
-ZAP is a compact, signed, encrypted, low-latency messaging protocol implemented
+Rivun is a compact, signed, encrypted, low-latency messaging protocol implemented
 in Rust. It moves **typed messages** between nodes — data, events, commands,
 queries, responses, stream chunks, actions, and control messages — through a
 unified wire format with end-to-end cryptographic provenance.
 
-ZAP is a protocol, not a runtime: it is agnostic to AI models, application
+Rivun is a protocol, not a runtime: it is agnostic to AI models, application
 frameworks, and hardware. It is used wherever messages must be verifiable,
 auditable, and safe to dispatch — from factory safety systems to agent
 gateways.
@@ -40,7 +40,7 @@ gateways.
 - **SDKs in 4 languages.** Rust, Go, TypeScript, and Python share the same
   protocol fixtures and canonical hashing rules.
 
-## When to use ZAP
+## When to use Rivun
 
 - You need typed messages with cryptographic provenance between nodes.
 - Actions must pass deterministic policy before execution.
@@ -50,12 +50,12 @@ gateways.
 - Operators need signed receipts, replay protection, and audit evidence.
 - Gateways and SDKs must agree on stable protocol fixtures across languages.
 
-## When not to use ZAP
+## When not to use Rivun
 
 - You only need a generic message broker, queue, or RPC framework (use MQTT,
   NATS, or gRPC).
 - You need a database, hidden model memory store, financial ledger, or payment
-  rail — ZAP is explicitly not one of these.
+  rail — Rivun is explicitly not one of these.
 - An integration would bypass identity, policy, grants, PoA, or receipts for
   convenience.
 - You cannot tolerate pre-1.0 API and CLI evolution.
@@ -91,19 +91,19 @@ cargo test --workspace --all-targets
 
 ```bash
 # Generate a node identity
-cargo run -p zap-cli -- keygen --out .zap/node.key
+cargo run -p Rivun-cli -- keygen --out .Rivun/node.key
 
 # Send a typed action envelope (needs a configured peer, see below)
-cargo run -p zap-cli -- send --config zap.toml --target <uuid> --action echo --payload hello
+cargo run -p Rivun-cli -- send --config Rivun.toml --target <uuid> --action echo --payload hello
 
 # Run a quick parse benchmark
-cargo run -p zap-cli -- bench parse --iterations 100000
+cargo run -p Rivun-cli -- bench parse --iterations 100000
 ```
 
 ### Two-node demo
 
-1. Generate keys for both nodes: `zap keygen --out .zap/node-a.key` and
-   `zap keygen --out .zap/node-b.key`.
+1. Generate keys for both nodes: `Rivun keygen --out .Rivun/node-a.key` and
+   `Rivun keygen --out .Rivun/node-b.key`.
 2. Copy `node_id` and `public_key` into
    [`examples/configs/node-a.toml`](examples/configs/node-a.toml) and
    [`examples/configs/node-b.toml`](examples/configs/node-b.toml), and set a
@@ -111,38 +111,38 @@ cargo run -p zap-cli -- bench parse --iterations 100000
 3. Validate and run:
 
 ```bash
-cargo run -p zap-cli -- check-config --config examples/configs/node-a.toml
-cargo run -p zap-cli -- check-config --config examples/configs/node-b.toml
+cargo run -p Rivun-cli -- check-config --config examples/configs/node-a.toml
+cargo run -p Rivun-cli -- check-config --config examples/configs/node-b.toml
 
 # Terminal 1
-cargo run -p zap-cli -- run --config examples/configs/node-a.toml
+cargo run -p Rivun-cli -- run --config examples/configs/node-a.toml
 
 # Terminal 2 — send an action and a typed event
-cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
+cargo run -p Rivun-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> --action echo --payload hello
-cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
+cargo run -p Rivun-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> --kind event --subject sensor.temperature \
   --payload '{"c":21.5}' --content-type application/json
 ```
 
-> `zap send` binds to the `bind` address in its config so the receiver can
-> enforce static peer addresses. Do not run `zap run` and `zap send` from the
+> `Rivun send` binds to the `bind` address in its config so the receiver can
+> enforce static peer addresses. Do not run `Rivun run` and `Rivun send` from the
 > same config simultaneously.
 
 ### Programmatic examples
 
 ```bash
-cargo run -p zap-examples --bin frame_basics      # frame creation, signing, verification
-cargo run -p zap-examples --bin envelope_types    # ZENV envelopes and causal linking
-cargo run -p zap-examples --bin memory_store      # append-only journal memory + audit
-cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry revocation
+cargo run -p Rivun-examples --bin frame_basics      # frame creation, signing, verification
+cargo run -p Rivun-examples --bin envelope_types    # ZENV envelopes and causal linking
+cargo run -p Rivun-examples --bin memory_store      # append-only journal memory + audit
+cargo run -p Rivun-examples --bin driver_manifest   # signed manifests + registry revocation
 ```
 
 ## Architecture
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                              ZAP Node (zap-node)                            │
+│                              Rivun Node (Rivun-node)                            │
 │  policy │ capability │ router │ memory │ receipts │ observability          │
 │  ───────────────────────────────┐                                          │
 │         Node daemon             │   actors: udp_rx, gossip, mesh,           │
@@ -150,8 +150,8 @@ cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry 
 │  ───────────────────────────────┘                                          │
 │         │          │               │               │                       │
 │  ┌──────▼───┐ ┌────▼─────┐ ┌───────▼───────┐ ┌─────▼──────────┐            │
-│  │ Runtime  │ │ ZapStore │ │  Transport    │ │   Ledger       │            │
-│  │ Wasmtime │ │ driver & │ │  (zap-net)    │ │   (zap-ledger) │            │
+│  │ Runtime  │ │ RivunStore │ │  Transport    │ │   Ledger       │            │
+│  │ Wasmtime │ │ driver & │ │  (Rivun-net)    │ │   (Rivun-ledger) │            │
 │  │ fuel/mem │ │ pack     │ │  ChaCha20     │ │   receipts     │            │
 │  │ time/out │ │ registry │ │  Noise ·      │ │   MMR · batch  │            │
 │  │ async    │ │ signed   │ │  replay       │ │   blinded      │            │
@@ -161,13 +161,13 @@ cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry 
 │  └──────────┘ └──────────┘ └───────────────┘ └────────────────┘            │
 │                                                                            │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │  Gateway (zap-gateway)    MCP stdio · HTTP REST · SSE · WebSocket     │  │
+│  │  Gateway (Rivun-gateway)    MCP stdio · HTTP REST · SSE · WebSocket     │  │
 │  │                          provenance chain: intent → … → receipt       │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │                                                                            │
 │  ┌─────────────────────────────────────────┐   ┌────────────────────────┐  │
-│  │  Wire format (zap-core / zap-envelope)  │   │  Fleet (zap-telemetry) │  │
-│  │  ZAP_ header │ ZENV │ ZSIG │ ZPOA       │   │  doctor · metrics      │  │
+│  │  Wire format (Rivun-core / Rivun-envelope)  │   │  Fleet (Rivun-telemetry) │  │
+│  │  @@rivun_HEADER@@ header │ ZENV │ ZSIG │ ZPOA       │   │  doctor · metrics      │  │
 │  └─────────────────────────────────────────┘   │  incident · topology   │  │
 │                                                └────────────────────────┘  │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -178,109 +178,109 @@ cargo run -p zap-examples --bin driver_manifest   # signed manifests + registry 
 | Crate | Responsibility |
 |---|---|
 | **Core protocol** | |
-| `zap-core` | ZAP-Wire v1 frame parsing/encoding: 64-byte `ZAP_` header, flags, auth and PoA trailers |
-| `zap-envelope` | Universal `ZENV` payload envelopes: kind, subject, content type, metadata, body |
-| `zap-crypto` | Node identity (Ed25519), key generation, frame signing/verification, PoA certificates |
-| `zap-schema` | Typed message contracts for agent gateways and machine commands |
-| `zap-pact` | PACT profile: signed action records, canonical hashes, revocations, bundles, dispute engine |
+| `Rivun-core` | Rivun-Wire v1 frame parsing/encoding: 64-byte `@@rivun_HEADER@@` header, flags, auth and PoA trailers |
+| `Rivun-envelope` | Universal `ZENV` payload envelopes: kind, subject, content type, metadata, body |
+| `Rivun-crypto` | Node identity (Ed25519), key generation, frame signing/verification, PoA certificates |
+| `Rivun-schema` | Typed message contracts for agent gateways and machine commands |
+| `Rivun-pact` | PACT profile: signed action records, canonical hashes, revocations, bundles, dispute engine |
 | **Node & execution** | |
-| `zap-node` | Daemon core: config, peer verification, replay protection, receipts, capability-aware dispatch, actors |
-| `zap-runtime` | Wasmtime sandboxed execution: ABI verification, fuel/memory/time/output limits, async pipeline, streaming |
-| `zap-driver-sdk` | ABI helpers for WASM driver authors: async drivers, ring buffers, zero-copy IPC |
-| `zap-machine` | Machine connections and profile contracts for industrial adapters |
-| `zap-cli` | Operator CLI: 29 commands covering every workflow below |
+| `Rivun-node` | Daemon core: config, peer verification, replay protection, receipts, capability-aware dispatch, actors |
+| `Rivun-runtime` | Wasmtime sandboxed execution: ABI verification, fuel/memory/time/output limits, async pipeline, streaming |
+| `Rivun-driver-sdk` | ABI helpers for WASM driver authors: async drivers, ring buffers, zero-copy IPC |
+| `Rivun-machine` | Machine connections and profile contracts for industrial adapters |
+| `Rivun-cli` | Operator CLI: 29 commands covering every workflow below |
 | **Network** | |
-| `zap-net` | Encrypted UDP transport, Noise handshake, durable anti-replay, BFT consensus, gossip, adaptive mesh |
+| `Rivun-net` | Encrypted UDP transport, Noise handshake, durable anti-replay, BFT consensus, gossip, adaptive mesh |
 | **Intelligence & policy** | |
-| `zap-capability` | Capability ids, driver permission contracts, signed query/response |
-| `zap-policy` | Deterministic policy decisions: allow/deny/PoA/grant/human/simulation |
-| `zap-router` | Deterministic route tables and explainable route decisions |
-| `zap-agent` | Agent protocol contracts: intents, sessions, delegation, negotiation, provenance chain, swarm |
+| `Rivun-capability` | Capability ids, driver permission contracts, signed query/response |
+| `Rivun-policy` | Deterministic policy decisions: allow/deny/PoA/grant/human/simulation |
+| `Rivun-router` | Deterministic route tables and explainable route decisions |
+| `Rivun-agent` | Agent protocol contracts: intents, sessions, delegation, negotiation, provenance chain, swarm |
 | **Audit & storage** | |
-| `zap-journal` | Append-only binary journal segments: hash chaining, sealing, indexes, crash recovery |
-| `zap-ledger` | Signed action receipts, batch seals, incremental MMR, blinded rollup commitments |
-| `zap-memory` | Append-only binary journal memory: body hashes, entries, tombstones, compaction |
-| `zap-store` | Driver manifests, registry index, migrations, publications, install plans, bundles |
-| `zap-pack` | Domain pack lifecycle: build, sign, verify, install, audit (shared with `zap-store`) |
+| `Rivun-journal` | Append-only binary journal segments: hash chaining, sealing, indexes, crash recovery |
+| `Rivun-ledger` | Signed action receipts, batch seals, incremental MMR, blinded rollup commitments |
+| `Rivun-memory` | Append-only binary journal memory: body hashes, entries, tombstones, compaction |
+| `Rivun-store` | Driver manifests, registry index, migrations, publications, install plans, bundles |
+| `Rivun-pack` | Domain pack lifecycle: build, sign, verify, install, audit (shared with `Rivun-store`) |
 | **Gateway & operations** | |
-| `zap-gateway` | AI agent gateway: MCP server, HTTP REST, SSE, WebSocket, provenance chain engine |
-| `zap-telemetry` | Fleet doctor, incident snapshots, Prometheus metrics, topology |
-| `zap-ops` | Operations contracts: observability, governance, production configs |
+| `Rivun-gateway` | AI agent gateway: MCP server, HTTP REST, SSE, WebSocket, provenance chain engine |
+| `Rivun-telemetry` | Fleet doctor, incident snapshots, Prometheus metrics, topology |
+| `Rivun-ops` | Operations contracts: observability, governance, production configs |
 
 ## CLI
 
 Full command reference for a node:
 
 ```bash
-zap keygen            # generate a node identity key
-zap run               # start the daemon
-zap check-config      # validate a config
-zap doctor            # operator readiness gate
-zap fleet doctor      # multi-node health aggregation
-zap send              # send a message or action to a peer
-zap inspect           # decode a frame file
+Rivun keygen            # generate a node identity key
+Rivun run               # start the daemon
+Rivun check-config      # validate a config
+Rivun doctor            # operator readiness gate
+Rivun fleet doctor      # multi-node health aggregation
+Rivun send              # send a message or action to a peer
+Rivun inspect           # decode a frame file
 ```
 
 Identity & peer trust:
 
 ```bash
-zap trust enroll / inspect
-zap peer invite / accept / rotate / revoke
+Rivun trust enroll / inspect
+Rivun peer invite / accept / rotate / revoke
 ```
 
 Protocol, policy & routing:
 
 ```bash
-zap capability list / query / cache / inspect-manifest
-zap discovery announce / query
-zap route explain
-zap policy evaluate
-zap schema validate / inspect / export
+Rivun capability list / query / cache / inspect-manifest
+Rivun discovery announce / query
+Rivun route explain
+Rivun policy evaluate
+Rivun schema validate / inspect / export
 ```
 
 Agents, PACT, packs & fixtures:
 
 ```bash
-zap agent session / intent / status / result / delegate / negotiate / validate / schema
-zap pact create / sign / verify / revoke / bundle / schema
-zap pack init / build / sign / verify / install / audit / validate / inspect / list
-zap fixtures verify --fixtures fixtures --sdk <sdk-path>
+Rivun agent session / intent / status / result / delegate / negotiate / validate / schema
+Rivun pact create / sign / verify / revoke / bundle / schema
+Rivun pack init / build / sign / verify / install / audit / validate / inspect / list
+Rivun fixtures verify --fixtures fixtures --sdk <sdk-path>
 ```
 
 Drivers & registry:
 
 ```bash
-zap driver-manifest create / verify
-zap registry init / add / sign / verify-signature / resolve / pull / mirror
-zap registry publication create / verify
-zap registry plan create / verify
-zap registry bundle export / pull-manifest / verify / import
-zap registry revoke / deprecate / migration add / list
+Rivun driver-manifest create / verify
+Rivun registry init / add / sign / verify-signature / resolve / pull / mirror
+Rivun registry publication create / verify
+Rivun registry plan create / verify
+Rivun registry bundle export / pull-manifest / verify / import
+Rivun registry revoke / deprecate / migration add / list
 ```
 
 Audit & evidence:
 
 ```bash
-zap receipts pull / verify / import-jsonl / export-jsonl / compact
-zap memory put / get / query / tombstone / verify / prune / compact
-zap memory import-jsonl / export-jsonl / export-evidence
-zap incident snapshot
-zap provenance verify
+Rivun receipts pull / verify / import-jsonl / export-jsonl / compact
+Rivun memory put / get / query / tombstone / verify / prune / compact
+Rivun memory import-jsonl / export-jsonl / export-evidence
+Rivun incident snapshot
+Rivun provenance verify
 ```
 
 Consensus:
 
 ```bash
-zap poa request / attest / validator-set create / verify / pull / apply
+Rivun poa request / attest / validator-set create / verify / pull / apply
 ```
 
 Gateway & simulation:
 
 ```bash
-zap gateway start / status      # MCP stdio, HTTP REST, SSE, WebSocket
-zap cluster up / status         # in-memory N-node cluster simulation
-zap swarm bench / partition-test
-zap bench parse
+Rivun gateway start / status      # MCP stdio, HTTP REST, SSE, WebSocket
+Rivun cluster up / status         # in-memory N-node cluster simulation
+Rivun swarm bench / partition-test
+Rivun bench parse
 ```
 
 ## SDKs
@@ -297,7 +297,7 @@ the same canonical BLAKE3 hashes and offline verification results. See
 [SDKs](docs/sdks.md).
 
 ```bash
-zap fixtures verify --fixtures fixtures --sdk sdks/rust --json
+Rivun fixtures verify --fixtures fixtures --sdk sdks/rust --json
 ```
 
 ## Testing & benchmarks
@@ -323,12 +323,12 @@ no mocks — see [TEST_INFRA.md](TEST_INFRA.md).
 | Perf | Benchmark gates, regression detection, Pages publishing |
 
 Benchmark history is published to
-**[ZAP Benchmarks](https://hakille-ai.github.io/ZAP/)**.
+**[Rivun Benchmarks](https://hakille-ai.github.io/Rivun/)**.
 
 ## Security model
 
 - **Identity:** Ed25519 node keys; the node UUID is derived from the public key.
-- **Signatures:** every frame is fully verified (`ZAP_SIGN` is only a fast
+- **Signatures:** every frame is fully verified (`@@rivun_HEADER@@SIGN` is only a fast
   pre-filter hint).
 - **Transport:** ChaCha20-Poly1305 authenticated encryption over UDP; Noise
   `NN_25519_ChaChaPoly_BLAKE2s` helpers; static peer table for deterministic
@@ -352,7 +352,7 @@ See [Security Model](docs/security.md) and report vulnerabilities through
 |---|---|---|
 | 1 — Kernel Alpha | Implemented | Wire protocol, crypto, transport, WASM, CLI |
 | 2 — Typed Agent Gateway | Implemented | Strict envelopes, policy gates, agent protocol, MCP gateway |
-| 3 — SDKs & Driver Registry | Implemented | Signed manifests, ZapStore, domain packs, SDK conformance |
+| 3 — SDKs & Driver Registry | Implemented | Signed manifests, RivunStore, domain packs, SDK conformance |
 | 4 — Proof-of-Action Network | Implemented | Multi-validator PoA, BFT consensus, gossip, mesh, receipt audit |
 | 5 — Core Interfaces | Partial | Capabilities, routing, memory, fleet doctor, gateway transports |
 | 6 — 1.0 Readiness | Planned | Compatibility matrix, security audit, external adoption gates |
@@ -366,7 +366,7 @@ See [Roadmap](docs/roadmap.md) and
 |---|---|
 | [Getting Started](docs/getting-started.md) | 5-minute developer onboarding |
 | [Install](docs/install.md) | Source install, CLI build, Docker quickstart |
-| [Protocol](docs/protocol.md) | ZAP-Wire v1 frame format and ZENV envelope specification |
+| [Protocol](docs/protocol.md) | Rivun-Wire v1 frame format and ZENV envelope specification |
 | [Tutorial](docs/tutorial.md) | End-to-end factory telemetry & control |
 | [Use Cases](docs/use-cases.md) | Application scenarios for the protocol |
 | [FAQ](docs/faq.md) | Design, security, and protocol comparison questions |
@@ -379,7 +379,7 @@ See [Roadmap](docs/roadmap.md) and
 | [Operations](docs/operations.md) | Operator workflows: doctor, receipts, incident runbooks |
 | [Observability](docs/observability.md) | Metrics contract, health signals, alerting |
 | [Runtime](docs/runtime.md) | WASM sandboxing: fuel, memory, time, output, host calls |
-| [ZapStore](docs/zapstore.md) | Signed manifests, registry, versioning, revocation, bundles |
+| [RivunStore](docs/RivunStore.md) | Signed manifests, registry, versioning, revocation, bundles |
 | [Domain Packs](docs/domain-packs.md) | Pack layout, lifecycle, CLI, risk model |
 | [PACT Profile](docs/pact.md) | Signed action records, canonical hashes, bundles, disputes |
 | [Agent Protocol](docs/agent-protocol.md) | Intents, sessions, delegation, negotiation, provenance, swarm |
@@ -388,7 +388,7 @@ See [Roadmap](docs/roadmap.md) and
 | [Capability, Router & Memory](docs/capability-router-memory.md) | Discovery, routing, auditable memory |
 | [Receipts](docs/receipts.md) | Receipt ledger, peer pull, verification, pruning |
 | [Discovery](docs/discovery.md) | Dynamic service discovery |
-| [Machine Connections](docs/machine-connections.md) | `zap-machine` profiles and adapters |
+| [Machine Connections](docs/machine-connections.md) | `Rivun-machine` profiles and adapters |
 | [Deployment](docs/deployment.md) | Docker, compose, hardening checklist |
 | [RFC/ZEP Process](docs/rfc-process.md) | Proposal process for protocol & ecosystem contracts |
 | [Versioning](docs/versioning.md) | Semver and wire compatibility rules |

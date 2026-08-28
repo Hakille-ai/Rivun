@@ -10,8 +10,8 @@
     "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "correlation_id": "00000000-0000-0000-0000-000000000000",
     "causation_id": "00000000-0000-0000-0000-000000000000",
-    "subject": "zap.registry.bundle.manifest.request",
-    "content_type": "application/zap-registry-bundle-manifest+json",
+    "subject": "rivun.registry.bundle.manifest.request",
+    "content_type": "application/rivun-registry-bundle-manifest+json",
     "metadata_base64": "",
     "body_json": {
       "schema_version": 1,

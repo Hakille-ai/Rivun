@@ -3,25 +3,25 @@
 ## 1. Observation
 
 ### Existing Codebase Inspection
-1. **`crates/zap-cli` Domain Pack Commands (`crates/zap-cli/src/main.rs`)**:
+1. **`crates/rivun-cli` Domain Pack Commands (`crates/rivun-cli/src/main.rs`)**:
    - Lines 1065–1088: `PackCommand` enum currently only defines 3 subcommands: `Validate`, `Inspect`, and `List`.
    - Lines 7315–7630: Pack handling logic includes `DomainPackManifest`, `DomainPackCapability`, `DomainPackPathRef`, `validate_domain_pack`, `inspect_domain_pack`, `list_domain_packs`, and path/capability validation helpers.
    - Missing subcommands required for R2: `init`, `build`, `sign`, `verify`, `install`, and `audit`.
 
-2. **`zap-store` Domain Pack Data Structures & Registry (`crates/zap-store/src/lib.rs`)**:
+2. **`rivun-store` Domain Pack Data Structures & Registry (`crates/rivun-store/src/lib.rs`)**:
    - Lines 485–568: `DomainPackStatus`, `DomainPackRisk`, `DomainPackCompatibility`, `DomainPackArtifact`, `DomainPackRegistryEntry`, and `DomainPackRegistry`.
-   - Lines 2066–2260: `DomainPackRegistry` supports entry addition, validation, Ed25519 signing over domain `ZAP-DOMAIN-PACK-REGISTRY-v1`, and signature verification.
-   - Missing domain pack features in `zap-store`:
+   - Lines 2066–2260: `DomainPackRegistry` supports entry addition, validation, Ed25519 signing over domain `rivun-DOMAIN-PACK-REGISTRY-v1`, and signature verification.
+   - Missing domain pack features in `rivun-store`:
      - `.zpack` offline bundle reader/writer and payload checksum validation (`DomainPackBundle`, `DomainPackBundleManifest`).
-     - Detached bundle signature structure (`DomainPackBundleSignature`) and signing/verification API over domain `ZAP-DOMAIN-PACK-BUNDLE-v1`.
+     - Detached bundle signature structure (`DomainPackBundleSignature`) and signing/verification API over domain `rivun-DOMAIN-PACK-BUNDLE-v1`.
      - Multi-pack dependency resolution engine (`DomainPackDependencyResolver`) covering version range requirements and capability constraint resolution.
      - Offline store directory layout, atomic extraction, and registry index update.
      - Policy and route static validation engine (`DomainPackPolicyValidator`).
 
 3. **Dependencies & Policy Crates**:
-   - `zap-policy` (`crates/zap-policy/src/lib.rs`): Defines `PolicySet`, `PolicyRule`, `PolicyDecision`, and `ZapPolicyError`. Provides `PolicySet::from_toml_str()` and `validate()`.
-   - `zap-router` (`crates/zap-router/src/lib.rs`): Defines `RouteTable`, `RouteRule`, and `ZapRouterError`. Provides `RouteTable::new()` and `validate()`.
-   - `zap-crypto` (`crates/zap-crypto/src/lib.rs`): Provides Ed25519 keypairs, signing, verification, and SHA-256 helpers.
+   - `rivun-policy` (`crates/rivun-policy/src/lib.rs`): Defines `PolicySet`, `PolicyRule`, `PolicyDecision`, and `ZapPolicyError`. Provides `PolicySet::from_toml_str()` and `validate()`.
+   - `rivun-router` (`crates/rivun-router/src/lib.rs`): Defines `RouteTable`, `RouteRule`, and `ZapRouterError`. Provides `RouteTable::new()` and `validate()`.
+   - `rivun-crypto` (`crates/rivun-crypto/src/lib.rs`): Provides Ed25519 keypairs, signing, verification, and SHA-256 helpers.
 
 ---
 
@@ -30,17 +30,17 @@
 1. **CLI Subcommand Lifecycle Gap**:
    - *Observation*: The CLI only exposes `validate`, `inspect`, and `list` for unpacked pack directories.
    - *Reasoning*: A domain pack must move through a secure packaging, distribution, and installation lifecycle: scaffolding (`init`) -> packaging (`build`) -> signing (`sign`) -> offline verification (`verify`) -> installation (`install`) -> security auditing (`audit`).
-   - *Deduction*: Adding `init`, `build`, `sign`, `verify`, `install`, and `audit` to `PackCommand` in `crates/zap-cli` completes the end-to-end user and operator workflow.
+   - *Deduction*: Adding `init`, `build`, `sign`, `verify`, `install`, and `audit` to `PackCommand` in `crates/rivun-cli` completes the end-to-end user and operator workflow.
 
 2. **Offline Bundle & Signature Verification**:
    - *Observation*: Without network access, node operators must be able to verify domain pack bundles before installation.
    - *Reasoning*: Security in air-gapped environments requires cryptographic signatures over single-file `.zpack` bundles and verification of internal artifact digests (`manifest.digest.json`) against signed checksums.
-   - *Deduction*: `zap-store` requires a dedicated `DomainPackBundle` container (ZIP/tar.gz format with `ZPACK001` magic bytes) and `DomainPackBundleSignature` struct with Ed25519 verification over domain `ZAP-DOMAIN-PACK-BUNDLE-v1`.
+   - *Deduction*: `rivun-store` requires a dedicated `DomainPackBundle` container (ZIP/tar.gz format with `ZPACK001` magic bytes) and `DomainPackBundleSignature` struct with Ed25519 verification over domain `rivun-DOMAIN-PACK-BUNDLE-v1`.
 
 3. **Dependency Resolution & Policy Validation Engine**:
    - *Observation*: Domain packs may depend on other domain packs or specific capability exports. Installing an incompatible or broken pack can corrupt node route tables or violate security policies.
    - *Reasoning*: Dependency resolution must check semver version requirements (e.g. `^1.0.0`), resolve required vs provided capabilities across installed domain packs, detect circular dependencies, and statically validate policy rules (`PolicySet`) and route tables (`RouteTable`).
-   - *Deduction*: `zap-store` requires `DomainPackDependencyResolver` and `DomainPackPolicyValidator` to ensure atomic, safe installation and policy compliance.
+   - *Deduction*: `rivun-store` requires `DomainPackDependencyResolver` and `DomainPackPolicyValidator` to ensure atomic, safe installation and policy compliance.
 
 ---
 
@@ -48,7 +48,7 @@
 
 - **Scope Boundary**: This blueprint provides complete technical specifications, data structures, method signatures, CLI interfaces, and test strategies for Milestone 2. Code implementation must be executed by the implementer agent.
 - **Archive Format**: `.zpack` bundles are defined as compressed archives (tar.gz format) with a top-level `manifest.digest.json` file.
-- **Crypto Compatibility**: Detached Ed25519 signatures use `zap-crypto`'s Ed25519 implementation and `ZAP-DOMAIN-PACK-BUNDLE-v1` domain separation prefix.
+- **Crypto Compatibility**: Detached Ed25519 signatures use `rivun-crypto`'s Ed25519 implementation and `rivun-DOMAIN-PACK-BUNDLE-v1` domain separation prefix.
 
 ---
 
@@ -58,11 +58,11 @@
 
 ```
 crates/
-├── zap-cli/
+├── rivun-cli/
 │   └── src/
 │       ├── main.rs            # Update PackCommand enum & dispatcher
 │       └── pack.rs            # Dedicated CLI pack module for init/build/sign/verify/install/audit
-└── zap-store/
+└── rivun-store/
     └── src/
         ├── lib.rs             # Export new module and error variants
         ├── bundle.rs          # DomainPackBundle, DomainPackBundleManifest, DomainPackBundleSignature
@@ -72,9 +72,9 @@ crates/
 
 ---
 
-### 4.2 CLI Command Definitions (`crates/zap-cli`)
+### 4.2 CLI Command Definitions (`crates/rivun-cli`)
 
-#### Updated `PackCommand` Enum (`crates/zap-cli/src/main.rs`)
+#### Updated `PackCommand` Enum (`crates/rivun-cli/src/main.rs`)
 
 ```rust
 #[derive(Debug, Subcommand)]
@@ -177,7 +177,7 @@ enum PackCommand {
 
 #### CLI Command Behavior Specs & Report Structs
 
-1. **`zap pack init`**:
+1. **`rivun pack init`**:
    - Creates directory `<dir>` and populates:
      - `pack.toml`:
        ```toml
@@ -213,7 +213,7 @@ enum PackCommand {
      }
      ```
 
-2. **`zap pack build`**:
+2. **`rivun pack build`**:
    - Parses `<pack_dir>/pack.toml`. Validates referenced files exist.
    - Computes SHA-256 for all artifacts (`pack.toml`, `policies/*`, `schemas/*`, `drivers/*`).
    - Writes `manifest.digest.json` containing list of `DomainPackArtifactDigest`.
@@ -231,10 +231,10 @@ enum PackCommand {
      }
      ```
 
-3. **`zap pack sign`**:
+3. **`rivun pack sign`**:
    - Reads Ed25519 private key from file or environment.
    - Computes SHA-256 digest of `.zpack` file.
-   - Domain prefix: `ZAP-DOMAIN-PACK-BUNDLE-v1`.
+   - Domain prefix: `rivun-DOMAIN-PACK-BUNDLE-v1`.
    - Constructs `DomainPackBundleSignature` and writes to `<bundle>.sig` or `--out`.
    - Data Struct:
      ```rust
@@ -248,9 +248,9 @@ enum PackCommand {
      }
      ```
 
-4. **`zap pack verify`**:
+4. **`rivun pack verify`**:
    - Opens `.zpack` archive, checks file hashes against `manifest.digest.json`.
-   - Verifies Ed25519 signature over domain `ZAP-DOMAIN-PACK-BUNDLE-v1`.
+   - Verifies Ed25519 signature over domain `rivun-DOMAIN-PACK-BUNDLE-v1`.
    - Performs static validation on policies (`PolicySet`) and routes (`RouteTable`) unless `--no-policy-check`.
    - Data Struct:
      ```rust
@@ -266,7 +266,7 @@ enum PackCommand {
      }
      ```
 
-5. **`zap pack install`**:
+5. **`rivun pack install`**:
    - Performs offline bundle verification.
    - Validates Ed25519 signature against trusted public key whitelist (`--trusted-key`).
    - Runs `DomainPackDependencyResolver` against existing installed packs in `store_dir`.
@@ -285,7 +285,7 @@ enum PackCommand {
      }
      ```
 
-6. **`zap pack audit`**:
+6. **`rivun pack audit`**:
    - Audits capabilities, requested permissions, wildcard route rules, and deprecation status.
    - Calculates overall risk (`low`, `medium`, `high`, `critical`).
    - Data Struct:
@@ -310,12 +310,12 @@ enum PackCommand {
 
 ---
 
-### 4.3 `zap-store` Engine Integration (`crates/zap-store`)
+### 4.3 `rivun-store` Engine Integration (`crates/rivun-store`)
 
-#### Data Types (`crates/zap-store/src/bundle.rs`)
+#### Data Types (`crates/rivun-store/src/bundle.rs`)
 
 ```rust
-pub const DOMAIN_PACK_BUNDLE_SIGNATURE_DOMAIN: &[u8] = b"ZAP-DOMAIN-PACK-BUNDLE-v1";
+pub const DOMAIN_PACK_BUNDLE_SIGNATURE_DOMAIN: &[u8] = b"rivun-DOMAIN-PACK-BUNDLE-v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DomainPackBundleManifest {
@@ -354,15 +354,15 @@ impl DomainPackBundleSignature {
         pack_version: &str,
         bundle_sha256: &str,
         keypair: &Keypair,
-    ) -> Result<Self, ZapStoreError>;
+    ) -> Result<Self, RivunStoreError>;
 
-    pub fn verify(&self, expected_bundle_sha256: &str) -> Result<(), ZapStoreError>;
+    pub fn verify(&self, expected_bundle_sha256: &str) -> Result<(), RivunStoreError>;
 
     pub fn verify_against_trusted_keys(
         &self,
         expected_bundle_sha256: &str,
         trusted_public_keys: &[String],
-    ) -> Result<(), ZapStoreError>;
+    ) -> Result<(), RivunStoreError>;
 }
 
 pub struct DomainPackBundle {
@@ -372,15 +372,15 @@ pub struct DomainPackBundle {
 }
 
 impl DomainPackBundle {
-    pub fn build_from_dir(pack_dir: &Path) -> Result<Self, ZapStoreError>;
-    pub fn open_from_file(bundle_path: &Path) -> Result<Self, ZapStoreError>;
-    pub fn write_to_file(&self, output_path: &Path) -> Result<(), ZapStoreError>;
-    pub fn verify_integrity(&self) -> Result<(), ZapStoreError>;
-    pub fn extract_to_dir(&self, target_dir: &Path) -> Result<(), ZapStoreError>;
+    pub fn build_from_dir(pack_dir: &Path) -> Result<Self, RivunStoreError>;
+    pub fn open_from_file(bundle_path: &Path) -> Result<Self, RivunStoreError>;
+    pub fn write_to_file(&self, output_path: &Path) -> Result<(), RivunStoreError>;
+    pub fn verify_integrity(&self) -> Result<(), RivunStoreError>;
+    pub fn extract_to_dir(&self, target_dir: &Path) -> Result<(), RivunStoreError>;
 }
 ```
 
-#### Dependency Resolution Engine (`crates/zap-store/src/resolver.rs`)
+#### Dependency Resolution Engine (`crates/rivun-store/src/resolver.rs`)
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -409,11 +409,11 @@ impl<'a> DomainPackDependencyResolver<'a> {
         &self,
         manifest: &DomainPackManifest,
         dependencies: &[DomainPackDependencySpec],
-    ) -> Result<DomainPackResolutionPlan, ZapStoreError>;
+    ) -> Result<DomainPackResolutionPlan, RivunStoreError>;
 }
 ```
 
-#### Policy & Route Static Validator (`crates/zap-store/src/validator.rs`)
+#### Policy & Route Static Validator (`crates/rivun-store/src/validator.rs`)
 
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -433,7 +433,7 @@ impl DomainPackPolicyValidator {
 }
 ```
 
-#### ZapStoreError Variant Extensions (`crates/zap-store/src/lib.rs`)
+#### RivunStoreError Variant Extensions (`crates/rivun-store/src/lib.rs`)
 
 ```rust
     // Domain pack bundle & offline verification errors
@@ -484,47 +484,48 @@ Run full test suite:
 cargo test --workspace --all-targets
 ```
 
-Run specific `zap-cli` and `zap-store` pack tests:
+Run specific `rivun-cli` and `rivun-store` pack tests:
 ```powershell
-cargo test -p zap-store --test pack_tests
-cargo test -p zap-cli --test pack_cli_tests
+cargo test -p rivun-store --test pack_tests
+cargo test -p rivun-cli --test pack_cli_tests
 ```
 
 ### 2. Manual / CLI End-to-End Test Sequence
 
 1. **Scaffold pack template**:
    ```powershell
-   cargo run --bin zap -- pack init --dir ./tmp/test-pack --id com.example.finance --name "Finance Pack" --version 1.0.0
+   cargo run --bin rivun -- pack init --dir ./tmp/test-pack --id com.example.finance --name "Finance Pack" --version 1.0.0
    ```
    *Verification*: Confirms `./tmp/test-pack/pack.toml`, `policies/default.policy`, and `schemas/default.json` are created.
 
 2. **Build bundle**:
    ```powershell
-   cargo run --bin zap -- pack build --pack ./tmp/test-pack --out ./tmp/finance-1.0.0.zpack
+   cargo run --bin rivun -- pack build --pack ./tmp/test-pack --out ./tmp/finance-1.0.0.zpack
    ```
    *Verification*: Confirms `./tmp/finance-1.0.0.zpack` file is generated containing `manifest.digest.json`.
 
 3. **Sign bundle**:
    ```powershell
-   cargo run --bin zap -- keygen --out ./tmp/author.key
-   cargo run --bin zap -- pack sign --bundle ./tmp/finance-1.0.0.zpack --key ./tmp/author.key --out ./tmp/finance-1.0.0.zpack.sig
+   cargo run --bin rivun -- keygen --out ./tmp/author.key
+   cargo run --bin rivun -- pack sign --bundle ./tmp/finance-1.0.0.zpack --key ./tmp/author.key --out ./tmp/finance-1.0.0.zpack.sig
    ```
    *Verification*: Confirms detached signature file `./tmp/finance-1.0.0.zpack.sig` is created.
 
 4. **Verify bundle**:
    ```powershell
-   cargo run --bin zap -- pack verify --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig
+   cargo run --bin rivun -- pack verify --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig
    ```
    *Verification*: Returns `integrity_ok: true`, `signature_ok: true`, `policy_ok: true`.
 
 5. **Install bundle offline**:
    ```powershell
-   cargo run --bin zap -- pack install --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig --store-dir ./tmp/store
+   cargo run --bin rivun -- pack install --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig --store-dir ./tmp/store
    ```
    *Verification*: Confirms extraction into `./tmp/store/packs/com.example.finance/1.0.0/` and entry in `./tmp/store/registry.json`.
 
 6. **Audit pack**:
    ```powershell
-   cargo run --bin zap -- pack audit --pack ./tmp/test-pack --max-risk medium
+   cargo run --bin rivun -- pack audit --pack ./tmp/test-pack --max-risk medium
    ```
    *Verification*: Evaluates pack risk level and route policy safety, outputs structured JSON report.
+

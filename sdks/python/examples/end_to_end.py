@@ -1,4 +1,4 @@
-from zap_sdk import (
+from rivun_sdk import (
     ControlFrame,
     RegistryBundleManifestRequest,
     RegistryBundleManifestResponse,

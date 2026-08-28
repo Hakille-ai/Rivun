@@ -6,7 +6,7 @@ Re-review Milestone 2 remediation fixes and issue an objective, evidence-based g
 ## 🔒 My Identity
 - Archetype: Reviewer / Adversarial Critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m2_1_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m2_1_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 2 Gate Evaluation (Round 2)
 - Instance: 1 of 2
@@ -23,17 +23,17 @@ Re-review Milestone 2 remediation fixes and issue an objective, evidence-based g
 
 ## Review Scope
 - **Files to review**:
-  - `ORIGINAL_REQUEST.md` at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\ORIGINAL_REQUEST.md`
-  - `PROJECT.md` at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\PROJECT.md`
-  - `handoff.md` at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_worker_m2_fix\handoff.md`
-  - Implementation code in `crates/` (specifically `zap-store`, `zap-core`, `zap-cli`, `zap-policy`, etc.)
+  - `ORIGINAL_REQUEST.md` at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\ORIGINAL_REQUEST.md`
+  - `PROJECT.md` at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\PROJECT.md`
+  - `handoff.md` at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_worker_m2_fix\handoff.md`
+  - Implementation code in `crates/` (specifically `rivun-store`, `rivun-core`, `rivun-cli`, `rivun-policy`, etc.)
 - **Remediation focus points**:
-  1. Struct alignment in `crates/zap-store/src/lib.rs` and call sites.
+  1. Struct alignment in `crates/rivun-store/src/lib.rs` and call sites.
   2. Zip Slip path sanitization in `DomainPackBundle::extract_to_dir` and `decode_bytes`.
   3. Public key Base64/hex parsing in `verify_against_trusted_keys`.
   4. SemVer matching and transitive dependency resolution in `DomainPackDependencyResolver`.
   5. Policy validator and audit status checks.
-  6. `zap pack verify` (executes `bundle.verify_integrity()`) and `zap pack install` (dependency resolution).
+  6. `rivun pack verify` (executes `bundle.verify_integrity()`) and `rivun pack install` (dependency resolution).
 
 ## Review Checklist
 - **Items reviewed**: All 6 M2 remediation points + adversarial test suite
@@ -54,3 +54,4 @@ Re-review Milestone 2 remediation fixes and issue an objective, evidence-based g
 - `.agents/reviewer_m2_1_r2/BRIEFING.md` — Working briefing state
 - `.agents/reviewer_m2_1_r2/progress.md` — Progress heartbeat
 - `.agents/reviewer_m2_1_r2/handoff.md` — Final handoff report with verdict
+

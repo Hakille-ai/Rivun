@@ -1,31 +1,31 @@
 # Architectural Blueprint & Implementation Specification: R1 Swarm Agent Coordination, Cryptographic Provenance & Concurrent Node Daemon
 
-**Document Reference**: `ZAP-R1-AGENT-NODE-BLUEPRINT-2026`  
+**Document Reference**: `rivun-R1-AGENT-NODE-BLUEPRINT-2026`  
 **Author**: Explorer 2 (Milestone 1 — R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh)  
-**Target Crates**: `crates/zap-agent`, `crates/zap-node`, with cross-cutting integration in `crates/zap-core`, `crates/zap-router`, `crates/zap-net`, `crates/zap-crypto`  
+**Target Crates**: `crates/rivun-agent`, `crates/rivun-node`, with cross-cutting integration in `crates/rivun-core`, `crates/rivun-router`, `crates/rivun-net`, `crates/rivun-crypto`  
 **Status**: Final Technical Specification & Implementation Blueprint  
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 1 (R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh) establishes the decentralized networking, consensus, and coordination foundation for ZAP Next-Gen Frontier. While `crates/zap-net` implements the low-level epidemic gossip protocol, BFT consensus state machine, and $\Phi$-accrual mesh health tracker, the application and daemon layers reside in:
-1. **`crates/zap-agent`**: Bridges high-level autonomous agent intents (`AgentIntent`) with distributed swarm consensus, decentralized capability matching, and cryptographic provenance verification.
-2. **`crates/zap-node`**: Serves as the high-performance runtime daemon, orchestrating concurrent networking, gossip dissemination, consensus voting, mesh health tracking, and WASM action dispatch without blocking the event loop.
+Milestone 1 (R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh) establishes the decentralized networking, consensus, and coordination foundation for rivun Next-Gen Frontier. While `crates/rivun-net` implements the low-level epidemic gossip protocol, BFT consensus state machine, and $\Phi$-accrual mesh health tracker, the application and daemon layers reside in:
+1. **`crates/rivun-agent`**: Bridges high-level autonomous agent intents (`AgentIntent`) with distributed swarm consensus, decentralized capability matching, and cryptographic provenance verification.
+2. **`crates/rivun-node`**: Serves as the high-performance runtime daemon, orchestrating concurrent networking, gossip dissemination, consensus voting, mesh health tracking, and WASM action dispatch without blocking the event loop.
 
 ### Core Objectives of Explorer 2 Blueprint:
-- **`crates/zap-agent/src/swarm.rs`**: Design the `SwarmAgentCoordinator` state machine to manage the lifecycle of consensus-backed agent intents, swarm capability scoring, and multi-agent intent proposals.
-- **`crates/zap-agent/src/provenance.rs`**: Extend the 6-stage cryptographic Provenance Chain Engine to support `ProvenanceStage::Consensus`, mathematically binding `SwarmCommitCertificate` (certificate hash, epoch, round, view, threshold, validator count, and signer bitmask) into the causal Merkle chain.
-- **`crates/zap-node` Concurrent Actor Refactor**: Decompose the single-loop `ZapNode` daemon into concurrent Tokio actors (`UdpRxTask`, `GossipTask`, `ConsensusTask`, `MeshTask`, `ExecutionTask`) communicating over bounded channels with structured graceful shutdown.
-- **Configuration Schema Extensions**: Expand `zap.toml` with `[swarm]`, `[gossip]`, and `[mesh]` tables while maintaining 100% backwards compatibility with existing configuration files, CLI commands, and wire formats.
+- **`crates/rivun-agent/src/swarm.rs`**: Design the `SwarmAgentCoordinator` state machine to manage the lifecycle of consensus-backed agent intents, swarm capability scoring, and multi-agent intent proposals.
+- **`crates/rivun-agent/src/provenance.rs`**: Extend the 6-stage cryptographic Provenance Chain Engine to support `ProvenanceStage::Consensus`, mathematically binding `SwarmCommitCertificate` (certificate hash, epoch, round, view, threshold, validator count, and signer bitmask) into the causal Merkle chain.
+- **`crates/rivun-node` Concurrent Actor Refactor**: Decompose the single-loop `ZapNode` daemon into concurrent Tokio actors (`UdpRxTask`, `GossipTask`, `ConsensusTask`, `MeshTask`, `ExecutionTask`) communicating over bounded channels with structured graceful shutdown.
+- **Configuration Schema Extensions**: Expand `rivun.toml` with `[swarm]`, `[gossip]`, and `[mesh]` tables while maintaining 100% backwards compatibility with existing configuration files, CLI commands, and wire formats.
 
 ---
 
-## 2. `crates/zap-agent` Deep-Dive & Architecture Blueprint
+## 2. `crates/rivun-agent` Deep-Dive & Architecture Blueprint
 
-### 2.1 Current State Analysis of `crates/zap-agent`
-- `crates/zap-agent/src/lib.rs`: Implements strict JSON contracts for `AgentIntent`, `AgentSession`, `DelegationRequest`, `DelegationResponse`, `CapabilityNegotiationRequest`, `CapabilityNegotiationResponse`, `AgentStatusUpdate`, `AgentResult`, and `AgentMessage`. All schemas enforce validation rules (non-empty fields, max text lengths, valid identifier characters, monotonic timestamps).
-- `crates/zap-agent/src/provenance.rs`: Enforces causal hashing over 6 stages:
+### 2.1 Current State Analysis of `crates/rivun-agent`
+- `crates/rivun-agent/src/lib.rs`: Implements strict JSON contracts for `AgentIntent`, `AgentSession`, `DelegationRequest`, `DelegationResponse`, `CapabilityNegotiationRequest`, `CapabilityNegotiationResponse`, `AgentStatusUpdate`, `AgentResult`, and `AgentMessage`. All schemas enforce validation rules (non-empty fields, max text lengths, valid identifier characters, monotonic timestamps).
+- `crates/rivun-agent/src/provenance.rs`: Enforces causal hashing over 6 stages:
   $$H_{\text{intent}} \to H_{\text{negotiation}} \to H_{\text{policy}} \to H_{\text{driver}} \to H_{\text{poa}} \to H_{\text{receipt}} \to H_{\text{root}}$$
   signed with the node's Ed25519 identity key.
 - **Gaps**:
@@ -34,7 +34,7 @@ Milestone 1 (R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh) establishes 
 
 ---
 
-### 2.2 `crates/zap-agent/src/swarm.rs`: Swarm Agent Coordinator Specification
+### 2.2 `crates/rivun-agent/src/swarm.rs`: Swarm Agent Coordinator Specification
 
 `src/swarm.rs` introduces `SwarmAgentCoordinator`, providing the high-level API for agents to interact with swarm consensus and capability routing.
 
@@ -62,15 +62,15 @@ Milestone 1 (R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh) establishes 
 #### 2.2.1 Data Structures & Enums
 
 ```rust
-// Proposed in crates/zap-agent/src/swarm.rs
+// Proposed in crates/rivun-agent/src/swarm.rs
 
 use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-use zap_capability::CapabilityId;
-use zap_core::now_micros;
-use zap_crypto::Keypair;
+use @@rivun_HEADER@@capability::CapabilityId;
+use @@rivun_HEADER@@core::now_micros;
+use @@rivun_HEADER@@crypto::Keypair;
 
 use crate::{
     AgentId, AgentIntent, AgentResult, IntentKind, ProvenanceChainBuilder,
@@ -78,8 +78,8 @@ use crate::{
 };
 
 pub const SWARM_PROTOCOL_SCHEMA_VERSION: u8 = 1;
-pub const SWARM_INTENT_PROPOSAL_SUBJECT: &str = "zap.swarm.intent.propose";
-pub const SWARM_INTENT_COMMIT_SUBJECT: &str = "zap.swarm.intent.commit";
+pub const SWARM_INTENT_PROPOSAL_SUBJECT: &str = "rivun.swarm.intent.propose";
+pub const SWARM_INTENT_COMMIT_SUBJECT: &str = "rivun.swarm.intent.commit";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -361,7 +361,7 @@ impl SwarmAgentCoordinator {
 
 ---
 
-### 2.3 `crates/zap-agent/src/provenance.rs`: Cryptographic Swarm Consensus Binding
+### 2.3 `crates/rivun-agent/src/provenance.rs`: Cryptographic Swarm Consensus Binding
 
 #### 2.3.1 Extending `ProvenanceStage`
 Add `ProvenanceStage::Consensus` while preserving backwards compatibility:
@@ -634,7 +634,7 @@ impl ProvenanceChainBuilder {
 
 ---
 
-## 3. `crates/zap-node` Concurrent Tokio Actor Architecture
+## 3. `crates/rivun-node` Concurrent Tokio Actor Architecture
 
 ### 3.1 Overview & Concurrency Model
 
@@ -669,7 +669,7 @@ The Next-Gen `ZapNode` refactors the daemon into **5 asynchronous Tokio actor ta
              |                                v (Finalized Commits)            | (Healthy Routes)
              |                   +-------------------------+                   |
              +-----------------> |      ExecutionTask      | <-----------------+
-                                 | - zap-router Evaluation |
+                                 | - rivun-router Evaluation |
                                  | - WASM Driver Host      |
                                  | - Receipt Journal + MMR |
                                  +-------------------------+
@@ -680,7 +680,7 @@ The Next-Gen `ZapNode` refactors the daemon into **5 asynchronous Tokio actor ta
 ### 3.2 Inter-Task Channel Graph & Data Contracts
 
 ```rust
-// Proposed channel definitions in crates/zap-node/src/actors/mod.rs
+// Proposed channel definitions in crates/rivun-node/src/actors/mod.rs
 
 pub struct NodeActorChannels {
     pub udp_to_gossip_tx: tokio::sync::mpsc::Sender<InboundGossipPacket>,
@@ -727,8 +727,8 @@ pub enum MeshPacketKind {
 #[derive(Debug)]
 pub struct InboundExecutionPacket {
     pub peer: Uuid,
-    pub frame: zap_core::ZapFrame,
-    pub message: zap_envelope::ZapEnvelope,
+    pub frame: @@rivun_HEADER@@core::ZapFrame,
+    pub message: @@rivun_HEADER@@envelope::ZapEnvelope,
 }
 
 #[derive(Debug, Clone)]
@@ -758,9 +758,9 @@ pub struct MeshHealthStatus {
 #### 3.3.1 `UdpRxTask`
 - **Function**: Continuously polls `endpoint.recv()`, decrypts the ChaCha20 AEAD payload, verifies replay with sliding-window nonce filter, checks peer trust, and performs sub-microsecond classification.
 - **Classification Rules**:
-  - If envelope subject starts with `zap.gossip.` or frame flags contain `ZapFlags::BROADCAST`: forward to `udp_to_gossip_tx`.
-  - If envelope subject is `zap.gossip.consensus` or frame flags contain `ZapFlags::REQUIRES_CONSENSUS`: forward to `udp_to_consensus_tx`.
-  - If envelope subject is `zap.p2p.heartbeat` or `zap.p2p.heartbeat.ack`: forward to `udp_to_mesh_tx`.
+  - If envelope subject starts with `rivun.gossip.` or frame flags contain `ZapFlags::BROADCAST`: forward to `udp_to_gossip_tx`.
+  - If envelope subject is `rivun.gossip.consensus` or frame flags contain `ZapFlags::REQUIRES_CONSENSUS`: forward to `udp_to_consensus_tx`.
+  - If envelope subject is `rivun.p2p.heartbeat` or `rivun.p2p.heartbeat.ack`: forward to `udp_to_mesh_tx`.
   - If envelope subject is an Action/Control message: forward to `udp_to_execution_tx`.
 
 #### 3.3.2 `GossipTask`
@@ -771,7 +771,7 @@ pub struct MeshHealthStatus {
   - `capability_index: SwarmCapabilityIndex`.
 - **Interval Timers**:
   - **PEX Timer** (every 10s): Selects random active peer, sends `PeerExchangeRequest`, updates passive view using XOR distance metric.
-  - **Anti-Entropy Sync Timer** (every 5s): Exchanges digest/state hash with active peers over `zap.gossip.sync`.
+  - **Anti-Entropy Sync Timer** (every 5s): Exchanges digest/state hash with active peers over `rivun.gossip.sync`.
 - **Dissemination Logic**:
   1. Computes $M_{\text{id}} = \text{Blake3}(\text{topic} \parallel \text{origin} \parallel \text{seq} \parallel \text{digest})$.
   2. If found in `dedup_cache`, drops message.
@@ -809,19 +809,19 @@ pub struct MeshHealthStatus {
 - **Execution Flow**:
   1. Receives frame from `udp_to_execution_tx` or `consensus_to_execution_tx`.
   2. Checks mesh health status: if `is_partitioned` and frame modifies state, rejects with `PartitionDegradedError`.
-  3. Evaluates `zap-router` `RouteTable`:
+  3. Evaluates `rivun-router` `RouteTable`:
      - `RouteTarget::local_driver`: Executes WASM driver in `WasmExecutor` with strict fuel metering.
      - `RouteTarget::peer`: Dispatches to destination peer (via direct UDP or 2-hop mesh relay).
      - `RouteTarget::drop`: Discards frame.
   4. Appends `SignedActionReceipt` to `ReceiptJournalStore`.
-  5. Updates MMR leaf accumulator in `zap-ledger`.
+  5. Updates MMR leaf accumulator in `rivun-ledger`.
 
 ---
 
 ### 3.4 Structured Graceful Shutdown Protocol
 
 ```rust
-// Proposed graceful shutdown in crates/zap-node/src/node.rs
+// Proposed graceful shutdown in crates/rivun-node/src/node.rs
 
 pub struct ZapNodeHandle {
     pub shutdown_tx: tokio::sync::broadcast::Sender<()>,
@@ -830,7 +830,7 @@ pub struct ZapNodeHandle {
 
 impl ZapNodeHandle {
     pub async fn shutdown(self) -> Result<()> {
-        info!("Initiating ZAP node graceful shutdown...");
+        info!("Initiating rivun node graceful shutdown...");
         let _ = self.shutdown_tx.send(());
 
         // Await all background actor tasks
@@ -840,7 +840,7 @@ impl ZapNodeHandle {
             }
         }
 
-        info!("All ZAP node actors terminated cleanly. Flushing journals.");
+        info!("All rivun node actors terminated cleanly. Flushing journals.");
         Ok(())
     }
 }
@@ -848,19 +848,19 @@ impl ZapNodeHandle {
 
 ---
 
-## 4. Configuration Schema Extensions (`zap.toml`)
+## 4. Configuration Schema Extensions (`rivun.toml`)
 
 ### 4.1 TOML Configuration Specification
 
 ```toml
 [node]
 bind = "0.0.0.0:9000"
-key_file = ".zap/node.key"
+key_file = ".rivun/node.key"
 require_signed = true
 
 [swarm]
 enabled = true
-cluster_id = "zap-mainnet-alpha"
+cluster_id = "rivun-mainnet-alpha"
 min_quorum_threshold = 3
 auto_rebalance = true
 epoch_duration_ms = 60000
@@ -892,7 +892,7 @@ max_relay_hops = 2
 ### 4.2 Rust Data Structures for Configuration
 
 ```rust
-// Proposed additions to crates/zap-node/src/config.rs
+// Proposed additions to crates/rivun-node/src/config.rs
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SwarmConfig {
@@ -924,7 +924,7 @@ impl Default for SwarmConfig {
 }
 
 fn default_cluster_id() -> String {
-    "zap-default-swarm".to_string()
+    "rivun-default-swarm".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1024,11 +1024,11 @@ fn default_max_relay_hops() -> u8 { 2 }
 
 | Component | Backwards Compatibility Guarantee | Verification Mechanism |
 | :--- | :--- | :--- |
-| **`zap.toml` Parsing** | Older `zap.toml` files missing `[swarm]`, `[gossip]`, `[mesh]` deserialize with default values. Node behaves identically to v1 (point-to-point UDP, static PoA). | `test_legacy_config_deserialization` succeeds without error. |
-| **CLI Commands** | `zap run`, `zap send`, `zap capability`, `zap pact`, `zap agent`, `zap receipts`, `zap provenance` maintain 100% parameter and output compatibility. | Workspace test suite and CLI integration tests pass. |
-| **Wire Protocol** | 64-byte `ZapHeader`, `AuthTrailer` (`ZSIG`), `PoaTrailer` (`ZPOA`) unaltered. New `SwarmConsensusTrailer` (`ZSC1`) activates only when `ZapFlags::REQUIRES_CONSENSUS` is combined with Swarm consensus. | Byte-level round-trip properties in `crates/zap-core/tests/properties.rs`. |
+| **`rivun.toml` Parsing** | Older `rivun.toml` files missing `[swarm]`, `[gossip]`, `[mesh]` deserialize with default values. Node behaves identically to v1 (point-to-point UDP, static PoA). | `test_legacy_config_deserialization` succeeds without error. |
+| **CLI Commands** | `rivun run`, `rivun send`, `rivun capability`, `rivun pact`, `rivun agent`, `rivun receipts`, `rivun provenance` maintain 100% parameter and output compatibility. | Workspace test suite and CLI integration tests pass. |
+| **Wire Protocol** | 64-byte `ZapHeader`, `AuthTrailer` (`ZSIG`), `PoaTrailer` (`ZPOA`) unaltered. New `SwarmConsensusTrailer` (`ZSC1`) activates only when `ZapFlags::REQUIRES_CONSENSUS` is combined with Swarm consensus. | Byte-level round-trip properties in `crates/rivun-core/tests/properties.rs`. |
 | **Provenance Verification** | Older 6-stage chains (`Intent` $\to$ `Negotiation` $\to$ `Policy` $\to$ `Driver` $\to$ `Poa` $\to$ `Receipt`) verify with 100% success. New chains with `Consensus` verify with identical cryptographic strength. | `test_full_provenance_chain_generation_and_verification` passes on both legacy and swarm chains. |
-| **`zap-router` & `zap-core`** | Route evaluation rules (`RouteMatch`, `RouteTarget`) evaluate without modification. Mesh relay routes wrap frames in standard `ZapRelayEnvelope` without mutating the inner `ZapFrame`. | Integration tests in `zap-router` pass. |
+| **`rivun-router` & `rivun-core`** | Route evaluation rules (`RouteMatch`, `RouteTarget`) evaluate without modification. Mesh relay routes wrap frames in standard `ZapRelayEnvelope` without mutating the inner `ZapFrame`. | Integration tests in `rivun-router` pass. |
 
 ---
 
@@ -1036,12 +1036,12 @@ fn default_max_relay_hops() -> u8 { 2 }
 
 | File Path | Action | Scope & Key Additions |
 | :--- | :--- | :--- |
-| `crates/zap-agent/src/swarm.rs` | **Create** | `SwarmAgentCoordinator`, `SwarmIntentProposal`, `SwarmIntentStatus`, `SwarmCommitCertificateRef`, `SwarmCapabilityIndex`, `SwarmPeerCapabilityScore`. |
-| `crates/zap-agent/src/provenance.rs` | **Modify** | Add `ProvenanceStage::Consensus`, `with_consensus()` method on `ProvenanceChainBuilder`, update causal step resolution and verification. |
-| `crates/zap-agent/src/lib.rs` | **Modify** | Export `pub mod swarm;` and re-export swarm types. |
-| `crates/zap-node/src/config.rs` | **Create/Modify** | Add `SwarmConfig`, `GossipConfig`, `MeshConfig` structs and default functions. |
-| `crates/zap-node/src/actors/` | **Create** | Submodules for `udp_rx.rs`, `gossip.rs`, `consensus.rs`, `mesh.rs`, `execution.rs`. |
-| `crates/zap-node/src/lib.rs` | **Modify** | Refactor `ZapNode` into concurrent supervisor with `run_actors()`, `spawn_observability_http()`, and graceful shutdown. |
+| `crates/rivun-agent/src/swarm.rs` | **Create** | `SwarmAgentCoordinator`, `SwarmIntentProposal`, `SwarmIntentStatus`, `SwarmCommitCertificateRef`, `SwarmCapabilityIndex`, `SwarmPeerCapabilityScore`. |
+| `crates/rivun-agent/src/provenance.rs` | **Modify** | Add `ProvenanceStage::Consensus`, `with_consensus()` method on `ProvenanceChainBuilder`, update causal step resolution and verification. |
+| `crates/rivun-agent/src/lib.rs` | **Modify** | Export `pub mod swarm;` and re-export swarm types. |
+| `crates/rivun-node/src/config.rs` | **Create/Modify** | Add `SwarmConfig`, `GossipConfig`, `MeshConfig` structs and default functions. |
+| `crates/rivun-node/src/actors/` | **Create** | Submodules for `udp_rx.rs`, `gossip.rs`, `consensus.rs`, `mesh.rs`, `execution.rs`. |
+| `crates/rivun-node/src/lib.rs` | **Modify** | Refactor `ZapNode` into concurrent supervisor with `run_actors()`, `spawn_observability_http()`, and graceful shutdown. |
 
 ---
 
@@ -1054,5 +1054,6 @@ fn default_max_relay_hops() -> u8 { 2 }
    - `test_concurrent_actor_message_routing`: Spawns node actor channels; injects gossip, consensus, and action packets; validates routing to respective actor queues.
    - `test_config_with_swarm_gossip_mesh_defaults`: Validates TOML parsing with and without new tables.
 2. **Build & Clippy Integrity**:
-   - `cargo test -p zap-agent -p zap-node` passes with 0 failures.
-   - `cargo clippy -p zap-agent -p zap-node -- -D warnings` runs with 0 warnings.
+   - `cargo test -p rivun-agent -p rivun-node` passes with 0 failures.
+   - `cargo clippy -p rivun-agent -p rivun-node -- -D warnings` runs with 0 warnings.
+

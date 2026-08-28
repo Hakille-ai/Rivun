@@ -6,20 +6,21 @@ Status: In Progress
 ## Tasks Checklist
 - [ ] Read all mandatory input files (ORIGINAL_REQUEST, PROJECT, SCOPE, implementation_spec, analysis 1, 2, 3)
 - [ ] Check existing repository structure and build status
-- [ ] Implement `zap-net`:
+- [ ] Implement `rivun-net`:
   - [ ] `Cargo.toml` updates (dependencies: ed25519-dalek, rand, libm/statrs if needed, etc.)
   - [ ] `src/gossip/` (envelope, lru, peer_sampling, anti_entropy, engine, mod.rs)
   - [ ] `src/consensus/` (proposal, vote, certificate, validator_set, slashing, engine, mod.rs)
   - [ ] `src/mesh/` (phi_detector, heartbeat, partition, relay, mod.rs)
   - [ ] `src/lib.rs` exports & backwards compatibility
-- [ ] Implement `zap-agent`:
+- [ ] Implement `rivun-agent`:
   - [ ] `src/swarm.rs` (SwarmAgentCoordinator, SwarmCapabilityIndex)
   - [ ] `src/provenance.rs` (ProvenanceStage::Consensus, with_consensus chaining)
   - [ ] `src/lib.rs` exports
-- [ ] Implement `zap-node`:
+- [ ] Implement `rivun-node`:
   - [ ] `src/config.rs` (SwarmConfig, GossipConfig, MeshConfig)
   - [ ] `src/actors/` (UdpRxTask, GossipTask, ConsensusTask, MeshTask, ExecutionTask)
   - [ ] `src/node.rs` and `src/lib.rs`
-- [ ] Write unit and integration tests across zap-net, zap-agent, and zap-node
+- [ ] Write unit and integration tests across rivun-net, rivun-agent, and rivun-node
 - [ ] Run `cargo test` and `cargo clippy -- -D warnings`
 - [ ] Complete `handoff.md` and send handoff message to parent
+

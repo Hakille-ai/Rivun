@@ -1,3 +1,3 @@
 export * from "./protocol.ts";
-export * from "./zapstore.ts";
+export * from "./rivunstore.ts";
 //# sourceMappingURL=index.d.ts.map

@@ -5,7 +5,7 @@
 ---
 
 ## 1. Observation
-Empirical tests were executed across `crates/zap-telemetry`, `crates/zap-node`, and `crates/zap-cli`. A dedicated adversarial stress test suite (`crates/zap-telemetry/tests/challenger_empirical_tests.rs`) was constructed and run against the implementation to verify failure detection under corrupted, tampered, and degraded conditions.
+Empirical tests were executed across `crates/rivun-telemetry`, `crates/rivun-node`, and `crates/rivun-cli`. A dedicated adversarial stress test suite (`crates/rivun-telemetry/tests/challenger_empirical_tests.rs`) was constructed and run against the implementation to verify failure detection under corrupted, tampered, and degraded conditions.
 
 Specific observations:
 1. **Corrupted WAL Detection (`check_replay_guard`)**:
@@ -39,14 +39,14 @@ Specific observations:
    - All 5 required incident artifacts (`snapshot.json`, `metrics.prom`, `diagnostics.txt`, `config.redacted.toml`, `health.json`) unpack cleanly with full contents.
 
 7. **Prometheus Metrics Parity (`ZapNodeMetricsSnapshot::to_prometheus_text`)**:
-   - All 17 metrics are exported with proper `# HELP` and `# TYPE` headers, including `zap_replay_drops_total` and `zap_peers_active`.
+   - All 17 metrics are exported with proper `# HELP` and `# TYPE` headers, including `@@rivun_HEADER@@replay_drops_total` and `@@rivun_HEADER@@peers_active`.
    - Prometheus text escaping correctly escapes newlines (`\n`), double quotes (`\"`), and backslashes (`\\`) in label values.
 
 8. **Test Suite & Clippy Results**:
-   - `cargo test -p zap-telemetry`: 15 tests passed (0 failed).
-   - `cargo test -p zap-node`: 75 tests passed (0 failed).
-   - `cargo test -p zap-cli`: 78 tests passed (0 failed).
-   - `cargo clippy -p zap-telemetry -- -D warnings`: Clean build with 0 warnings.
+   - `cargo test -p rivun-telemetry`: 15 tests passed (0 failed).
+   - `cargo test -p rivun-node`: 75 tests passed (0 failed).
+   - `cargo test -p rivun-cli`: 78 tests passed (0 failed).
+   - `cargo clippy -p rivun-telemetry -- -D warnings`: Clean build with 0 warnings.
 
 ---
 
@@ -57,7 +57,7 @@ Specific observations:
 - **Step 4**: Tampering with pack registry contents verified that `check_pack_registry` performs real Ed25519 verification on `DomainPackRegistry` and `DriverRegistry`.
 - **Step 5**: Topology tests confirmed that quorum thresholds are properly computed and that cluster degradation is accurately flagged with warning status.
 - **Step 6**: Decompression of gzip incident archives with `flate2::read::GzDecoder` and parser block traversal proved archive integrity and absence of byte misalignment.
-- **Step 7**: All unit, integration, stress, and clippy checks across `zap-telemetry`, `zap-node`, and `zap-cli` executed with zero errors.
+- **Step 7**: All unit, integration, stress, and clippy checks across `rivun-telemetry`, `rivun-node`, and `rivun-cli` executed with zero errors.
 
 ---
 
@@ -76,8 +76,9 @@ The Milestone 3 implementation is robust, complete, and resilient against advers
 ## 5. Verification Method
 To independently reproduce the empirical challenge verification:
 
-1. `cargo test -p zap-telemetry --test challenger_empirical_tests`
-2. `cargo test -p zap-telemetry`
-3. `cargo test -p zap-node`
-4. `cargo test -p zap-cli`
-5. `cargo clippy -p zap-telemetry -- -D warnings`
+1. `cargo test -p rivun-telemetry --test challenger_empirical_tests`
+2. `cargo test -p rivun-telemetry`
+3. `cargo test -p rivun-node`
+4. `cargo test -p rivun-cli`
+5. `cargo clippy -p rivun-telemetry -- -D warnings`
+

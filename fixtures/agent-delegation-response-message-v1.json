@@ -1,8 +1,8 @@
 {
   "fixture_schema_version": 1,
   "description": "Agent delegation response payload for the zap.agent.delegation.response ZENV subject.",
-  "subject": "zap.agent.delegation.response",
-  "content_type": "application/zap-agent+json",
+  "subject": "rivun.agent.delegation.response",
+  "content_type": "application/rivun-agent+json",
   "body_json": {
     "type": "delegation_response",
     "payload": {

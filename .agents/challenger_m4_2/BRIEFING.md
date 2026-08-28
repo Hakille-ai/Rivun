@@ -6,7 +6,7 @@ Adversarially stress-test cryptographic provenance chain linking and multi-trans
 ## 🔒 My Identity
 - Archetype: EMPIRICAL CHALLENGER
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m4_2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m4_2
 - Original parent: 93ddb720-b792-416a-9e98-289b84dbd0f2
 - Milestone: M4
 - Instance: 2 of 2
@@ -22,7 +22,7 @@ Adversarially stress-test cryptographic provenance chain linking and multi-trans
 - Updated: 2026-08-15T01:10:00+02:00
 
 ## Review Scope
-- **Files to review**: `crates/zap-agent/src/provenance.rs`, `crates/zap-agent/src/lib.rs`, `crates/zap-gateway/src/`, `crates/zap-gateway/tests/`, `tests/e2e/tests/e2e_suite.rs`, worker_m4 handoff
+- **Files to review**: `crates/rivun-agent/src/provenance.rs`, `crates/rivun-agent/src/lib.rs`, `crates/rivun-gateway/src/`, `crates/rivun-gateway/tests/`, `tests/e2e/tests/e2e_suite.rs`, worker_m4 handoff
 - **Interface contracts**: ORIGINAL_REQUEST.md (R4), PROJECT.md
 - **Review criteria**: Cryptographic tamper resistance, chain integrity, gateway security (rate limiting, CORS, Bearer auth, WS framing), test completeness, clippy cleanliness
 
@@ -52,3 +52,4 @@ Adversarially stress-test cryptographic provenance chain linking and multi-trans
 
 ## Loaded Skills
 - None
+

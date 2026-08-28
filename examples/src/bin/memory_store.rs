@@ -1,10 +1,10 @@
 use serde_json::json;
 use tempfile::tempdir;
 use uuid::Uuid;
-use zap_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
+use rivun_memory::{JsonlMemoryStore, MemoryPut, MemoryQuery, MemoryStore};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== ZAP Hash-Chained Memory Store ===");
+    println!("=== Rivun Hash-Chained Memory Store ===");
 
     // 1. Open a local memory store backed by a JSONL file
     // We use a temporary directory for demonstration purposes.
@@ -76,7 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  Total tombstones found: {}", audit_report.tombstones);
 
     // 5. Delete records using tombstones
-    // ZAP uses soft-deletion (appending a tombstone record) to preserve the historical audit trail.
+    // Rivun uses soft-deletion (appending a tombstone record) to preserve the historical audit trail.
     println!("\nTombstoning record 1 (ID: {})...", record1.id);
     store.tombstone(record1.id, Some("Sensor recalibrated".to_string()))?;
 

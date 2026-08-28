@@ -1,18 +1,18 @@
 # BRIEFING — 2026-08-15T15:06:21Z
 
 ## Mission
-Implement Milestone 3: Async WASM Driver Pipeline & Inter-Driver IPC across `zap-driver-sdk` and `zap-runtime`.
+Implement Milestone 3: Async WASM Driver Pipeline & Inter-Driver IPC across `rivun-driver-sdk` and `rivun-runtime`.
 
 ## 🔒 My Identity
 - Archetype: implementer / qa / specialist
 - Roles: implementer, qa, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m3_worker_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m3_worker_1
 - Original parent: 3b4ab3a6-4146-4f38-a23d-cba01d0ffde7
 - Milestone: Milestone 3 (Async WASM Driver Pipeline & Inter-Driver IPC)
 
 ## 🔒 Key Constraints
 - Genuine implementation, zero cheating/mocking/hardcoding.
-- Strict write ownership: `crates/zap-driver-sdk/*`, `crates/zap-runtime/*`.
+- Strict write ownership: `crates/rivun-driver-sdk/*`, `crates/rivun-runtime/*`.
 - 100% tests passing across workspace, 0 clippy warnings (`-D warnings`).
 - Cache-line aligned SPSC ringbuffer, zero-copy buffer views, Blake3 causal transcripts, async Wasmtime engine with fuel & host functions.
 
@@ -23,8 +23,8 @@ Implement Milestone 3: Async WASM Driver Pipeline & Inter-Driver IPC across `zap
 ## Task Summary
 - **What to build**: Async WASM Driver Pipeline, Inter-Driver IPC, SPSC RingBuffer, AsyncWasmExecutor, Blake3 causal tracking, driver adapters, and streaming buffer pool.
 - **Success criteria**: All requirements in DISPATCH.md and SCOPE.md implemented with comprehensive tests passing and clippy clean.
-- **Interface contracts**: `PROJECT.md`, `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m3\SCOPE.md`
-- **Code layout**: `crates/zap-driver-sdk`, `crates/zap-runtime`
+- **Interface contracts**: `PROJECT.md`, `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m3\SCOPE.md`
+- **Code layout**: `crates/rivun-driver-sdk`, `crates/rivun-runtime`
 
 ## Key Decisions Made
 - Initial setup and reading specifications.
@@ -48,3 +48,4 @@ Implement Milestone 3: Async WASM Driver Pipeline & Inter-Driver IPC across `zap
 
 ## Loaded Skills
 - None
+

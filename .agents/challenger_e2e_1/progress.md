@@ -9,9 +9,10 @@ Status: IN_PROGRESS
 
 ## Next Steps:
 1. Inspect test codebase structure, harness, and all tier files.
-2. Run baseline `cargo test -p zap-e2e` to verify 174 test count and passing status.
+2. Run baseline `cargo test -p rivun-e2e` to verify 174 test count and passing status.
 3. Check for tautological assertions, dummy passes, or vacuous logic.
 4. Perform mutation testing on selected tests across tiers to verify oracle fidelity.
 5. Check edge cases, resource cleanup, tempfile leaks, socket conflicts.
 6. Verify documentation completeness in `TEST_INFRA.md` and `TEST_READY.md`.
 7. Synthesize findings and write handoff report with verdict.
+

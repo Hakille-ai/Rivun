@@ -1,23 +1,23 @@
 # BRIEFING — 2026-08-15T20:07:45Z
 
 ## Mission
-Orchestrate Milestone 2 (R2): Implement Incremental MMR Accumulator, compact multi-leaf proofs, exclusion proofs, batch seals, and ZK receipt rollups in `zap-ledger` and `zap-crypto`.
+Orchestrate Milestone 2 (R2): Implement Incremental MMR Accumulator, compact multi-leaf proofs, exclusion proofs, batch seals, and ZK receipt rollups in `rivun-ledger` and `rivun-crypto`.
 
 ## 🔒 My Identity
 - Archetype: sub_orchestrator
 - Roles: orchestrator, user_liaison, human_reporter, successor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2
 - Original parent: parent
 - Original parent conversation ID: 5e9776fe-ebb1-46ac-b395-bfa1d62c469a
 
 ## 🔒 My Workflow
 - **Pattern**: Project Sub-Orchestrator
-- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\SCOPE.md
+- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\SCOPE.md
 1. **Decompose**: Assessed scope fits single iterative cycle: Explorer -> Worker -> Reviewers (2) -> Challengers (2) -> Forensic Auditor -> Gate.
 2. **Dispatch & Execute**:
    - Iteration Loop:
      a. Dispatch 3 Explorers (teamwork_preview_explorer) to analyze existing `mmr.rs`, `journal.rs`, `receipt.rs`, and crypto crates. [DONE]
-     b. Synthesize exploration, dispatch Worker (teamwork_preview_worker) with exclusive ownership of `crates/zap-ledger/` and `crates/zap-crypto/`. [IN PROGRESS - Worker 2]
+     b. Synthesize exploration, dispatch Worker (teamwork_preview_worker) with exclusive ownership of `crates/rivun-ledger/` and `crates/rivun-crypto/`. [IN PROGRESS - Worker 2]
      c. Dispatch 2 Reviewers (teamwork_preview_reviewer).
      d. Dispatch 2 Challengers (teamwork_preview_challenger) for property/scale verification (1000+ receipts, edge cases).
      e. Dispatch Forensic Auditor (teamwork_preview_auditor) for zero-facade integrity check.
@@ -42,7 +42,7 @@ Orchestrate Milestone 2 (R2): Implement Incremental MMR Accumulator, compact mul
 - Updated: 2026-08-15T15:02:45Z
 
 ## Key Decisions Made
-- Scoped M2 into a unified iteration over `crates/zap-ledger` and `crates/zap-crypto`.
+- Scoped M2 into a unified iteration over `crates/rivun-ledger` and `crates/rivun-crypto`.
 - Launched 3 parallel explorers for MMR math, Batch/ZK rollups, and Crypto/Performance.
 - Synthesized explorer findings and dispatched Worker 2 after Worker 1 encountered quota error.
 
@@ -67,6 +67,7 @@ Orchestrate Milestone 2 (R2): Implement Incremental MMR Accumulator, compact mul
 - Safety timer: none
 
 ## Artifact Index
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\SCOPE.md — Milestone 2 Scope Definition
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\progress.md — Liveness & Checkpoint Log
-- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\GATE_STATUS.md — Milestone Gate Tracker
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\SCOPE.md — Milestone 2 Scope Definition
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\progress.md — Liveness & Checkpoint Log
+- c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\GATE_STATUS.md — Milestone Gate Tracker
+

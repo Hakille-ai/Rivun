@@ -10,8 +10,8 @@
     "id": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
     "correlation_id": "00000000-0000-0000-0000-000000000000",
     "causation_id": "00000000-0000-0000-0000-000000000000",
-    "subject": "zap.capability.query",
-    "content_type": "application/zap-capability+json",
+    "subject": "rivun.capability.query",
+    "content_type": "application/rivun-capability+json",
     "metadata_base64": "",
     "body_json": {
       "schema_version": 1,

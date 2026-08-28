@@ -1,12 +1,12 @@
 schema_version = 1
-id = "zap-pack-industrial"
+id = "rivun-pack-industrial"
 name = "Industrial Automation"
 version = "0.1.0"
 status = "preview"
 description = "Auditable industrial automation workflows for PLC, OPC UA, Modbus, robotics, and safety-critical operations."
 
 [compatibility]
-zap_protocol = ">=0.1.0,<1.0.0"
+rivun_protocol = ">=0.1.0,<1.0.0"
 driver_abi = ">=1,<=2"
 
 [[capabilities]]

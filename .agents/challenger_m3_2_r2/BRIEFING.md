@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-14T19:02:30Z
 
 ## Mission
-Empirical adversarial review and stress testing of Milestone 3 remediation fixes in zap-telemetry.
+Empirical adversarial review and stress testing of Milestone 3 remediation fixes in rivun-telemetry.
 
 ## 🔒 My Identity
 - Archetype: challenger
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m3_2_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m3_2_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 3 Gate Evaluation (Round 2)
 - Instance: 2 of 2
@@ -21,7 +21,7 @@ Empirical adversarial review and stress testing of Milestone 3 remediation fixes
 - Updated: not yet
 
 ## Review Scope
-- **Files to review**: crates/zap-telemetry and its tests
+- **Files to review**: crates/rivun-telemetry and its tests
 - **Interface contracts**: .agents/orchestrator/PROJECT.md, .agents/ORIGINAL_REQUEST.md
 - **Review criteria**: Empirical correctness, secret redaction (PEM, hex64, multi-key JSON, obscure tokens), tar.gz gzip headers and extraction
 
@@ -46,3 +46,4 @@ Empirical adversarial review and stress testing of Milestone 3 remediation fixes
 - BRIEFING.md — Persistent context
 - progress.md — Liveness and progress tracker
 - handoff.md — Final adversarial evaluation report
+

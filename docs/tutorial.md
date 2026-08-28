@@ -1,6 +1,6 @@
-# ZAP End-to-End Tutorial: Smart Factory Telemetry & Control
+# rivun End-to-End Tutorial: Smart Factory Telemetry & Control
 
-This tutorial guides you through a complete, production-style deployment of ZAP. 
+This tutorial guides you through a complete, production-style deployment of rivun. 
 
 We will build a smart factory telemetry system with two nodes:
 - **Node A** (Receiver / Gateway): Responsible for executing a sandboxed WASM driver to control a thermostat, logging signed execution receipts, and enforcing safety consensus.
@@ -25,9 +25,9 @@ We will build a smart factory telemetry system with two nodes:
 Make sure your workspace matches the layout below:
 
 ```
-ZAP/
+rivun/
 ├── Cargo.toml
-├── .zap/
+├── .rivun/
 │   ├── node-a.key
 │   └── node-b.key
 ├── examples/
@@ -47,8 +47,8 @@ ZAP/
 Generate the Ed25519 node keys for both systems:
 
 ```bash
-cargo run -p zap-cli -- keygen --out .zap/node-a.key
-cargo run -p zap-cli -- keygen --out .zap/node-b.key
+cargo run -p rivun-cli -- keygen --out .rivun/node-a.key
+cargo run -p rivun-cli -- keygen --out .rivun/node-b.key
 ```
 
 Look inside the files and note down:
@@ -71,18 +71,18 @@ Create a file at `examples/wasm-drivers/thermostat/thermostat.wat`:
   (global $heap (mut i32) (i32.const 1024))
   
   ;; Host allocation helper
-  (func (export "zap_alloc") (param $len i32) (result i32)
+  (func (export "@@rivun_HEADER@@alloc") (param $len i32) (result i32)
     global.get $heap
     global.get $heap
     local.get $len
     i32.add
     global.set $heap)
     
-  (func (export "zap_dealloc") (param $ptr i32) (param $len i32))
+  (func (export "@@rivun_HEADER@@dealloc") (param $ptr i32) (param $len i32))
   
   ;; The execution hook: gets action and payload pointers
   ;; Returns a single i64 containing (result_pointer << 32) | result_length
-  (func (export "zap_execute")
+  (func (export "@@rivun_HEADER@@execute")
     (param $action_ptr i32) (param $action_len i32)
     (param $payload_ptr i32) (param $payload_len i32)
     (result i64)
@@ -101,17 +101,17 @@ Create a file at `examples/wasm-drivers/thermostat/thermostat.wat`:
 The driver author must sign the driver package to guarantee integrity before the gateway executes it.
 
 ```bash
-cargo run -p zap-cli -- driver-manifest create \
+cargo run -p rivun-cli -- driver-manifest create \
   --driver examples/wasm-drivers/thermostat/thermostat.wat \
   --action thermostat.setpoint \
-  --author-key .zap/node-a.key \
+  --author-key .rivun/node-a.key \
   --out examples/wasm-drivers/thermostat/thermostat.manifest.toml
 ```
 
 Verify that the manifest matches the driver wasm file:
 
 ```bash
-cargo run -p zap-cli -- driver-manifest verify \
+cargo run -p rivun-cli -- driver-manifest verify \
   --driver examples/wasm-drivers/thermostat/thermostat.wat \
   --manifest examples/wasm-drivers/thermostat/thermostat.manifest.toml
 ```
@@ -126,14 +126,14 @@ Create the configuration TOMLs for both Node A and Node B. Replace the placehold
 ```toml
 node_id = "<node-a-uuid>"
 bind = "127.0.0.1:7000"
-key_file = "../../.zap/node-a.key"
+key_file = "../../.rivun/node-a.key"
 
 [security]
 enforce_signatures = true
 enforce_replay_protection = true
 
 [receipts]
-dir = "../../.zap/node-a-receipts"
+dir = "../../.rivun/node-a-receipts"
 
 [[drivers]]
 action = "thermostat.setpoint"
@@ -151,7 +151,7 @@ transport_key = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2
 ```toml
 node_id = "<node-b-uuid>"
 bind = "127.0.0.1:7001"
-key_file = "../../.zap/node-b.key"
+key_file = "../../.rivun/node-b.key"
 
 [security]
 enforce_signatures = true
@@ -170,14 +170,14 @@ transport_key = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f2
 
 ### Start Node A (Receiver Daemon)
 ```bash
-cargo run -p zap-cli -- run --config examples/configs/node-a.toml
+cargo run -p rivun-cli -- run --config examples/configs/node-a.toml
 ```
 
 ### Send Temperature Event from Node B
 We send a JSON event envelope containing the temperature sensor reading:
 
 ```bash
-cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
+cargo run -p rivun-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> \
   --kind event \
   --subject sensor.temperature \
@@ -187,8 +187,8 @@ cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
 
 You should see Node A log:
 ```
-INFO zap_net: decrypted inbound datagram of size 147 from 127.0.0.1:7001
-INFO zap_node: received event envelope 'sensor.temperature' (ID: ...)
+INFO @@rivun_HEADER@@net: decrypted inbound datagram of size 147 from 127.0.0.1:7001
+INFO @@rivun_HEADER@@node: received event envelope 'sensor.temperature' (ID: ...)
 ```
 
 ---
@@ -198,22 +198,22 @@ INFO zap_node: received event envelope 'sensor.temperature' (ID: ...)
 Send a thermostat setpoint action command:
 
 ```bash
-cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
+cargo run -p rivun-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> \
   --action thermostat.setpoint \
   --payload '{"temperature_c":22.0}'
 ```
 
-On Node A, ZAP will:
+On Node A, rivun will:
 1. Verify the incoming envelope's signature.
 2. Compile and execute `thermostat.wat` inside Wasmtime with a resource limit.
-3. Write a signed execution receipt to `.zap/node-a-receipts`.
+3. Write a signed execution receipt to `.rivun/node-a-receipts`.
 
 ### Verify the Audit Trail
 Check that Node A's receipts ledger has not been tampered with:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --dir .zap/node-a-receipts
+cargo run -p rivun-cli -- receipts verify --dir .rivun/node-a-receipts
 ```
 Output:
 ```
@@ -253,14 +253,15 @@ Restart the Node A daemon.
 Try sending an emergency stop action from Node B:
 
 ```bash
-cargo run -p zap-cli -- send --config examples/configs/node-b.toml \
+cargo run -p rivun-cli -- send --config examples/configs/node-b.toml \
   --target <node-a-uuid> \
   --kind action --subject safety.emergency_stop \
   --payload '{"reason":"operator_request"}' --content-type application/json \
   --requires-consensus --poa-network
 ```
 
-ZAP will broadcast a `poa.attestation_request` to validator Node B, assemble the
-response signatures into a `ZPOA` trailer, attach it to the `ZAP_` frame, and
+rivun will broadcast a `poa.attestation_request` to validator Node B, assemble the
+response signatures into a `ZPOA` trailer, attach it to the `@@rivun_HEADER@@` frame, and
 dispatch it to Node A. Node A verifies the threshold signatures, enforces
 `message_policy`, and executes the safety procedure safely.
+

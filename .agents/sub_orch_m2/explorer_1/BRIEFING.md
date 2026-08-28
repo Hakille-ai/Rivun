@@ -6,7 +6,7 @@ Investigate current MMR implementation, and architect Incremental MMR accumulato
 ## 🔒 My Identity
 - Archetype: explorer
 - Roles: investigation, synthesis
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\explorer_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\explorer_1
 - Original parent: e3deda70-d2ee-4ab1-aa5f-49fdf7d9486a
 - Milestone: Milestone 2 (R2: Incremental MMR Accumulator & Proofs)
 
@@ -21,12 +21,12 @@ Investigate current MMR implementation, and architect Incremental MMR accumulato
 
 ## Investigation State
 - **Explored paths**:
-  - `crates/zap-ledger/src/mmr.rs`
-  - `crates/zap-ledger/src/lib.rs`
-  - `crates/zap-ledger/benches/receipt.rs`
-  - `crates/zap-ledger/tests/m1_challenger_stress.rs`
-  - `crates/zap-journal/src/lib.rs`
-  - `crates/zap-crypto/src/lib.rs`
+  - `crates/rivun-ledger/src/mmr.rs`
+  - `crates/rivun-ledger/src/lib.rs`
+  - `crates/rivun-ledger/benches/receipt.rs`
+  - `crates/rivun-ledger/tests/m1_challenger_stress.rs`
+  - `crates/rivun-journal/src/lib.rs`
+  - `crates/rivun-crypto/src/lib.rs`
 - **Key findings**:
   - `MerkleMountainRange` uses $O(N)$ RAM (`Vec<MmrHash>`) and $O(N)$ append time due to full recursive tree rebuilding on every append.
   - Designed `IncrementalMmr` with $O(\log N)$ RAM ($\le 64$ peak hashes, $< 2.5$ KB total) and amortized $O(1)$ append time via binary carry-over merging.
@@ -46,3 +46,4 @@ Investigate current MMR implementation, and architect Incremental MMR accumulato
 - `progress.md` — Step-by-step progress tracking and heartbeat
 - `analysis.md` — Comprehensive technical analysis report
 - `handoff.md` — Structured 5-component handoff report
+

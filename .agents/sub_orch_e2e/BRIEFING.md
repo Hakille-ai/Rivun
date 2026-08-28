@@ -6,13 +6,13 @@ Design and deliver a comprehensive, requirement-driven, opaque-box E2E test suit
 ## 🔒 My Identity
 - Archetype: sub_orch
 - Roles: orchestrator, user_liaison, human_reporter, successor
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_e2e
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_e2e
 - Original parent: Project Orchestrator
 - Original parent conversation ID: 5e9776fe-ebb1-46ac-b395-bfa1d62c469a
 
 ## 🔒 My Workflow
 - **Pattern**: Project / E2E Testing Sub-Orchestrator
-- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_e2e\SCOPE.md
+- **Scope document**: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_e2e\SCOPE.md
 1. **Decompose**: Decompose E2E testing into Test Harness, Tier 1 (75+ tests), Tier 2 (75+ tests), Tier 3 (15+ tests), Tier 4 (8+ scenarios), and Test Docs (`TEST_INFRA.md`, `TEST_READY.md`).
 2. **Dispatch & Execute**:
    - Dispatch Test Writer / Worker (`teamwork_preview_worker`) to implement test suites and docs.
@@ -68,8 +68,9 @@ Design and deliver a comprehensive, requirement-driven, opaque-box E2E test suit
 - Safety timer: none
 
 ## Artifact Index
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_e2e\SCOPE.md` — E2E Testing scope and feature mapping
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_e2e\progress.md` — Liveness & status tracking
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_e2e\GATE_STATUS.md` — Gate verdicts
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\TEST_INFRA.md` — Test infrastructure definition
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\TEST_READY.md` — Test readiness signaling
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_e2e\SCOPE.md` — E2E Testing scope and feature mapping
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_e2e\progress.md` — Liveness & status tracking
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_e2e\GATE_STATUS.md` — Gate verdicts
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\TEST_INFRA.md` — Test infrastructure definition
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\TEST_READY.md` — Test readiness signaling
+

@@ -1,15 +1,15 @@
-# Handoff Report: `zap-driver-sdk` Specification & API Design for Milestone 3
+# Handoff Report: `rivun-driver-sdk` Specification & API Design for Milestone 3
 
 **Agent**: `explorer_m3_2`  
 **Milestone**: Milestone 3 — Async WASM Driver Pipeline & Inter-Driver IPC  
 **Date**: 2026-08-15  
-**Full Report**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m3_explorer_2\analysis.md`
+**Full Report**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m3_explorer_2\analysis.md`
 
 ---
 
 ## 1. Observation
-1. **Existing Driver SDK (`crates/zap-driver-sdk/src/lib.rs:13-74`)**:
-   - SDK defines ABI version 1 with exports `memory`, `zap_alloc`, `zap_dealloc`, and `zap_execute`.
+1. **Existing Driver SDK (`crates/rivun-driver-sdk/src/lib.rs:13-74`)**:
+   - SDK defines ABI version 1 with exports `memory`, `@@rivun_HEADER@@alloc`, `@@rivun_HEADER@@dealloc`, and `@@rivun_HEADER@@execute`.
    - Defines synchronous trait:
      ```rust
      pub trait ZapDriver {
@@ -17,7 +17,7 @@
      }
      ```
    - Only dependencies in `Cargo.toml` is currently `criterion` in dev-dependencies.
-2. **Current Runtime Pipeline (`crates/zap-runtime/src/pipeline.rs:60-173`)**:
+2. **Current Runtime Pipeline (`crates/rivun-runtime/src/pipeline.rs:60-173`)**:
    - `DriverPipeline` executes stages sequentially, accumulating fuel and chaining intermediate outputs with BLAKE3 hashes.
    - Synchronous host execution requires non-blocking asynchronous streaming and zero-copy IPC pipes.
 3. **Workspace Configuration (`Cargo.toml:31-63`)**:
@@ -40,13 +40,13 @@
 ---
 
 ## 3. Caveats
-- Host-side Tokio scheduling engine (`AsyncWasmExecutor`) and lock-free ring-buffer internals are being investigated by companion explorer `explorer_m3_3` in `crates/zap-runtime`. The interface contracts defined here in `zap-driver-sdk` align directly with `zap-runtime` host function bindings.
-- WASM target compilation (`wasm32-unknown-unknown`) requires that non-WASM-compatible host system calls are avoided in guest code; all guest I/O goes through `zap::ipc_send` and `zap::ipc_recv` imports.
+- Host-side Tokio scheduling engine (`AsyncWasmExecutor`) and lock-free ring-buffer internals are being investigated by companion explorer `explorer_m3_3` in `crates/rivun-runtime`. The interface contracts defined here in `rivun-driver-sdk` align directly with `rivun-runtime` host function bindings.
+- WASM target compilation (`wasm32-unknown-unknown`) requires that non-WASM-compatible host system calls are avoided in guest code; all guest I/O goes through `rivun::ipc_send` and `rivun::ipc_recv` imports.
 
 ---
 
 ## 4. Conclusion
-The specification and API design for `crates/zap-driver-sdk` is complete and documented in detail in `analysis.md`. The design includes:
+The specification and API design for `crates/rivun-driver-sdk` is complete and documented in detail in `analysis.md`. The design includes:
 1. `AsyncZapDriver` trait with full lifecycle (`init`, `process_stream`, `handle_event`, `shutdown`).
 2. Zero-copy buffer views: `PinnedBuffer`, `BufferSlice`, `BufferSliceMut`, and `MemoryMapper`.
 3. Inter-driver IPC primitives: `IpcMessage`, `IpcChannelConfig`, `IpcPipe`, `IpcFlags`, `BackpressureStrategy`.
@@ -56,9 +56,10 @@ The specification and API design for `crates/zap-driver-sdk` is complete and doc
 ---
 
 ## 5. Verification Method
-1. Inspect the full specification report in `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m3_explorer_2\analysis.md`.
+1. Inspect the full specification report in `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m3_explorer_2\analysis.md`.
 2. Verify workspace dependencies in `Cargo.toml` and existing SDK tests:
    ```powershell
-   cargo test -p zap-driver-sdk
+   cargo test -p rivun-driver-sdk
    ```
 3. Invalidation conditions: Any breaking change to `ZapDriver::execute` signature or `DRIVER_ABI_VERSION = 1` exports that breaks existing M1/M2 tests.
+

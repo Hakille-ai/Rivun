@@ -1,6 +1,6 @@
 # Forensic Audit Report — Milestone 2 (Signed Domain Pack Lifecycle & Marketplace)
 
-**Work Product**: Milestone 2 domain pack lifecycle & marketplace implementation (`crates/zap-store`, `crates/zap-pack`, `crates/zap-cli`)
+**Work Product**: Milestone 2 domain pack lifecycle & marketplace implementation (`crates/rivun-store`, `crates/rivun-pack`, `crates/rivun-cli`)
 **Profile**: General Project / Integrity Forensics
 **Integrity Mode**: Development (from `ORIGINAL_REQUEST.md`)
 **Verdict**: CLEAN
@@ -11,41 +11,41 @@
 
 A complete static code and structural audit was conducted across all files modified or added in Milestone 2:
 
-- **`crates/zap-store/src/bundle.rs`**:
+- **`crates/rivun-store/src/bundle.rs`**:
   - `DomainPackBundle`: Implements a binary container format starting with magic bytes `ZPACK001`. Encodes and decodes length-prefixed JSON manifests and file artifact payloads (`encode_bytes`, `decode_bytes`).
   - Integrity check: `verify_integrity()` computes SHA-256 digests for all internal artifacts and matches them against expected hashes and sizes in the manifest.
   - Roundtrip I/O: `build_from_dir()`, `open_from_file()`, `write_to_file()`, `extract_to_dir()` implement genuine file system traversal, SHA-256 calculation, and atomic directory extraction.
-  - `DomainPackBundleSignature`: Implements authentic Ed25519 signing (`ed25519_dalek::SigningKey::sign`) over a deterministic JSON payload under domain `ZAP-DOMAIN-PACK-BUNDLE-v1`. Signature verification (`verify` and `verify_against_trusted_keys`) decodes public keys, validates signer Node ID derivation, and enforces trusted key whitelist matching.
+  - `DomainPackBundleSignature`: Implements authentic Ed25519 signing (`ed25519_dalek::SigningKey::sign`) over a deterministic JSON payload under domain `rivun-DOMAIN-PACK-BUNDLE-v1`. Signature verification (`verify` and `verify_against_trusted_keys`) decodes public keys, validates signer Node ID derivation, and enforces trusted key whitelist matching.
 
-- **`crates/zap-store/src/resolver.rs`**:
+- **`crates/rivun-store/src/resolver.rs`**:
   - `DomainPackDependencyResolver`: Implements dependency graph resolution against `DomainPackRegistry`.
   - `matches_version_req`: Performs semver requirement matching supporting `^`, `>=`, `=`, and `*`.
-  - Cycle detection: Employs `visited_branch` HashSet tracking to detect circular dependencies and return `ZapStoreError::CircularDomainPackDependency`.
+  - Cycle detection: Employs `visited_branch` HashSet tracking to detect circular dependencies and return `RivunStoreError::CircularDomainPackDependency`.
   - Capability aggregation: Collects required and provided capabilities across the dependency tree.
 
-- **`crates/zap-store/src/validator.rs`**:
-  - `DomainPackPolicyValidator`: Performs static parsing and rule counting for `.policy`/`.toml` files via `zap_policy::PolicySet::from_toml_str`, validates route tables via `zap_router::RouteTable`, and parses `.json` schemas. Collects syntax errors into `DomainPackValidationResult`.
+- **`crates/rivun-store/src/validator.rs`**:
+  - `DomainPackPolicyValidator`: Performs static parsing and rule counting for `.policy`/`.toml` files via `@@rivun_HEADER@@policy::PolicySet::from_toml_str`, validates route tables via `@@rivun_HEADER@@router::RouteTable`, and parses `.json` schemas. Collects syntax errors into `DomainPackValidationResult`.
 
-- **`crates/zap-store/src/audit.rs`**:
+- **`crates/rivun-store/src/audit.rs`**:
   - `audit_pack_dir` & `audit_bundle`: Evaluates capability risk levels (`low`, `medium`, `high`, `critical`) and pack statuses (`active`, `deprecated`, `revoked`), generating structured `PackAuditReport` instances.
 
-- **`crates/zap-pack`**:
-  - Crate registered in root `Cargo.toml` workspace with `crates/zap-pack/src/lib.rs` re-exporting `zap-store` bundle, resolver, validator, and audit modules. Includes unit test `test_pack_bundle_lifecycle` testing build, sign, verify, and audit.
+- **`crates/rivun-pack`**:
+  - Crate registered in root `Cargo.toml` workspace with `crates/rivun-pack/src/lib.rs` re-exporting `rivun-store` bundle, resolver, validator, and audit modules. Includes unit test `test_pack_bundle_lifecycle` testing build, sign, verify, and audit.
 
-- **`crates/zap-cli/src/main.rs`**:
+- **`crates/rivun-cli/src/main.rs`**:
   - Implements full CLI subcommands under `PackCommand`: `init`, `build`, `sign`, `verify`, `install`, `audit`, `validate`, `inspect`, `list`.
   - All subcommands invoke genuine underlying functions (`pack_init`, `pack_build`, `pack_sign`, `pack_verify`, `pack_install`, `pack_audit`, `pack_validate`, `pack_inspect`, `pack_list`).
 
 - **Unit and Integration Test Analysis**:
-  - `crates/zap-store/tests/pack_tests.rs`: Contains 4 independent unit tests (`test_bundle_creation_extraction_and_signing`, `test_policy_validator`, `test_dependency_resolver`, `test_security_audit`) generating dynamic Ed25519 keypairs, reading/writing temporary archives, testing untrusted key rejection, and verifying cycle/policy failure paths.
-  - `crates/zap-cli/tests/pack_cli_tests.rs`: Contains `test_zap_pack_cli_lifecycle` verifying end-to-end CLI workflow primitives.
+  - `crates/rivun-store/tests/pack_tests.rs`: Contains 4 independent unit tests (`test_bundle_creation_extraction_and_signing`, `test_policy_validator`, `test_dependency_resolver`, `test_security_audit`) generating dynamic Ed25519 keypairs, reading/writing temporary archives, testing untrusted key rejection, and verifying cycle/policy failure paths.
+  - `crates/rivun-cli/tests/pack_cli_tests.rs`: Contains `test_@@rivun_HEADER@@pack_cli_lifecycle` verifying end-to-end CLI workflow primitives.
 
 ---
 
 ## 2. Logic Chain
 
 1. **Static Analysis of Core Logic**:
-   - Inspected source files in `crates/zap-store`, `crates/zap-pack`, and `crates/zap-cli`.
+   - Inspected source files in `crates/rivun-store`, `crates/rivun-pack`, and `crates/rivun-cli`.
    - Verified that cryptographic signing and verification use actual `ed25519_dalek` operations and SHA-256 digest computations rather than fixed returns or dummy checks.
    - Verified that binary serialization uses byte packing with `ZPACK001` magic header and SHA-256 payload validation.
    - Deduction: No facade logic or hardcoded outputs exist in the core domain pack implementation.
@@ -79,17 +79,18 @@ Milestone 2 (Signed Domain Pack Lifecycle & Marketplace) is genuinely and robust
 Independent verification can be executed by running:
 
 ```powershell
-cargo test -p zap-cli -p zap-pack -p zap-store
+cargo test -p rivun-cli -p rivun-pack -p rivun-store
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 Or via CLI commands:
 ```powershell
-cargo run -p zap-cli -- pack init --dir ./tmp/test-pack --id com.example.finance --name "Finance Pack" --version 1.0.0
-cargo run -p zap-cli -- pack build --pack ./tmp/test-pack --out ./tmp/finance-1.0.0.zpack
-cargo run -p zap-cli -- keygen --out ./tmp/author.key
-cargo run -p zap-cli -- pack sign --bundle ./tmp/finance-1.0.0.zpack --key ./tmp/author.key --out ./tmp/finance-1.0.0.zpack.sig
-cargo run -p zap-cli -- pack verify --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig
-cargo run -p zap-cli -- pack install --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig --store-dir ./tmp/store
-cargo run -p zap-cli -- pack audit --pack ./tmp/test-pack --max-risk medium
+cargo run -p rivun-cli -- pack init --dir ./tmp/test-pack --id com.example.finance --name "Finance Pack" --version 1.0.0
+cargo run -p rivun-cli -- pack build --pack ./tmp/test-pack --out ./tmp/finance-1.0.0.zpack
+cargo run -p rivun-cli -- keygen --out ./tmp/author.key
+cargo run -p rivun-cli -- pack sign --bundle ./tmp/finance-1.0.0.zpack --key ./tmp/author.key --out ./tmp/finance-1.0.0.zpack.sig
+cargo run -p rivun-cli -- pack verify --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig
+cargo run -p rivun-cli -- pack install --bundle ./tmp/finance-1.0.0.zpack --signature ./tmp/finance-1.0.0.zpack.sig --store-dir ./tmp/store
+cargo run -p rivun-cli -- pack audit --pack ./tmp/test-pack --max-risk medium
 ```
+

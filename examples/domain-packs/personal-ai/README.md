@@ -51,5 +51,5 @@ The default posture is fail-closed:
 ## Validate
 
 ```powershell
-cargo run -p zap-cli -- pack validate --pack examples/domain-packs/personal-ai --json
+cargo run -p rivun-cli -- pack validate --pack examples/domain-packs/personal-ai --json
 ```

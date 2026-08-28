@@ -6,7 +6,7 @@ Complete SDK conformance, resolve CLI race condition, align E2E test suite with 
 ## 🔒 My Identity
 - Archetype: implementer / qa / specialist
 - Roles: implementer, qa, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_worker_m5_final
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_worker_m5_final
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: M5 & FINAL
 
@@ -23,14 +23,14 @@ Complete SDK conformance, resolve CLI race condition, align E2E test suite with 
 
 ## Task Summary
 - **What to build**:
-  1. Go SDK Parity (`sdks/go/zapstore.go` & `protocol_test.go`)
+  1. Go SDK Parity (`sdks/go/RivunStore.go` & `protocol_test.go`)
   2. Rust SDK Parity (`sdks/rust/src/lib.rs`)
-  3. Fix CLI Gateway Status Test Race (`crates/zap-cli/tests/gateway_cli_tests.rs`)
+  3. Fix CLI Gateway Status Test Race (`crates/rivun-cli/tests/gateway_cli_tests.rs`)
   4. E2E Test Suite Alignment (`tests/e2e/Cargo.toml` & `tests/e2e/tests/e2e_suite.rs`)
   5. Run Workspace Final Verification Commands
 - **Success criteria**: 0 test failures, clippy clean, 100% fixture verification across 4 SDKs.
-- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\PROJECT.md`
-- **Code layout**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\PROJECT.md § Code Layout`
+- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\PROJECT.md`
+- **Code layout**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\PROJECT.md § Code Layout`
 
 ## Change Tracker
 - **Files modified**: None yet
@@ -53,3 +53,4 @@ Complete SDK conformance, resolve CLI race condition, align E2E test suite with 
 - `.agents/teamwork_preview_worker_m5_final/BRIEFING.md` — Agent state and memory
 - `.agents/teamwork_preview_worker_m5_final/progress.md` — Heartbeat and task progress
 - `.agents/teamwork_preview_worker_m5_final/handoff.md` — 5-component handoff report
+

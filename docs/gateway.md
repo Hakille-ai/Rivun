@@ -1,11 +1,11 @@
-# ZAP Gateway
+# rivun Gateway
 
-`zap-gateway` is the inbound integration surface for ZAP: a Model Context
+`rivun-gateway` is the inbound integration surface for rivun: a Model Context
 Protocol (MCP) server, a native HTTP REST/SSE/WebSocket server, and the
 cryptographic provenance chain engine that links agent stages into a single
 verifiable audit trail.
 
-It is an optional component. The core node (`zap-node`), wire protocol, and
+It is an optional component. The core node (`rivun-node`), wire protocol, and
 transport remain fully functional without a gateway.
 
 ## Capabilities
@@ -22,11 +22,11 @@ transport remain fully functional without a gateway.
 
 ## Configuration
 
-`zap gateway start` accepts:
+`rivun gateway start` accepts:
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--config` | — | Optional `zap.toml` providing node/peer context |
+| `--config` | — | Optional `rivun.toml` providing node/peer context |
 | `--http-bind` | `127.0.0.1:8080` | REST/SSE/WebSocket bind address |
 | `--mcp-stdio` | off | Enable MCP server over stdin/stdout |
 | `--auth-token` | — | Optional bearer token for HTTP endpoints |
@@ -45,18 +45,18 @@ standard error codes. Supported methods include `initialize`,
 `tools/list`, `tools/call`, `resources/list`, `resources/read`,
 `prompts/list`, and `prompts/get`.
 
-Available MCP tools wrap core ZAP actions:
+Available MCP tools wrap core rivun actions:
 
-- `zap_send` / `zap_send_transaction` — dispatch typed action envelopes;
+- `@@rivun_HEADER@@send` / `@@rivun_HEADER@@send_transaction` — dispatch typed action envelopes;
 - receipt and memory tools backed by `ReceiptJournalStore` and
   `MemoryJournalStore`.
 
-Resources are exposed as `zap://` URIs:
+Resources are exposed as `rivun://` URIs:
 
-- `zap://ledger/receipts`
-- `zap://node/status`
-- `zap://fleet/topology`
-- `zap://fleet/status`
+- `rivun://ledger/receipts`
+- `rivun://node/status`
+- `rivun://fleet/topology`
+- `rivun://fleet/status`
 
 Prompts include `goal_decomposition`, `capability_negotiation`, and
 `safe_execution_verification`.
@@ -81,7 +81,7 @@ UDP transport.
 
 ## Provenance Chain
 
-The provenance engine (`zap-agent::provenance`) records a root-signed chain of
+The provenance engine (`rivun-agent::provenance`) records a root-signed chain of
 stage digests:
 
 ```
@@ -89,7 +89,7 @@ intent → negotiation → policy → driver → poa → receipt → root
 ```
 
 Each stage produces a digest over the previous stage hash plus its own
-canonical payload (SHA-256, domain-separated `ZAP-PROVENANCE-CHAIN-v1`). The
+canonical payload (SHA-256, domain-separated `rivun-PROVENANCE-CHAIN-v1`). The
 root stage signs the full chain with the node Ed25519 key, so any modification
 of an intermediate stage invalidates the root signature.
 
@@ -105,14 +105,14 @@ Stages in the default flow:
 Verify a provenance chain digest offline:
 
 ```bash
-cargo run -p zap-cli -- provenance verify \
-  --chain chain.json --key .zap/node.key --json
+cargo run -p rivun-cli -- provenance verify \
+  --chain chain.json --key .rivun/node.key --json
 ```
 
 Receipt journals can also be verified with their provenance digests:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --dir logs/receipts --provenance
+cargo run -p rivun-cli -- receipts verify --dir logs/receipts --provenance
 ```
 
 A missing or tampered stage link (`MissingStep`,
@@ -124,11 +124,11 @@ A missing or tampered stage link (`MissingStep`,
 The gateway accepts the agent protocol messages documented in
 [Agent Protocol](agent-protocol.md):
 
-- `zap.agent.intent` — order work from an agent;
-- `zap.agent.session` — manage a session lifecycle;
-- `zap.agent.delegation.request/response` — hand scoped work to another agent;
-- `zap.agent.capability_negotiation.request/response` — negotiate capabilities;
-- `zap.agent.status/result/error` — report progress and terminal outcomes.
+- `rivun.agent.intent` — order work from an agent;
+- `rivun.agent.session` — manage a session lifecycle;
+- `rivun.agent.delegation.request/response` — hand scoped work to another agent;
+- `rivun.agent.capability_negotiation.request/response` — negotiate capabilities;
+- `rivun.agent.status/result/error` — report progress and terminal outcomes.
 
 ## Security
 
@@ -141,6 +141,6 @@ The gateway accepts the agent protocol messages documented in
 
 ## Tests
 
-`crates/zap-gateway/tests/` covers MCP initialize/list/call, REST intents and
+`crates/rivun-gateway/tests/` covers MCP initialize/list/call, REST intents and
 receipts, sessions/negotiation/delegation, WebSocket framing and handshake,
 SSE fan-out, CORS and auth behavior, and adversarial stress cases.

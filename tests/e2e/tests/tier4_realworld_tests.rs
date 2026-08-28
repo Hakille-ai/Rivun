@@ -12,18 +12,18 @@ use std::{
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use zap_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder};
-use zap_capability::DriverPermissions;
-use zap_core::now_micros;
-use zap_ledger::MerkleMountainRange;
-use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{Peer, PeerHealth, VectorClock, ZapEndpoint, ZapEndpointConfig};
-use zap_pact::{ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation};
-use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
-use zap_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
-use zap_telemetry::{FleetDoctor, IncidentCapturer, SecretRedactor};
+use rivun_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder};
+use rivun_capability::DriverPermissions;
+use rivun_core::now_micros;
+use rivun_ledger::MerkleMountainRange;
+use rivun_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
+use rivun_net::{Peer, PeerHealth, VectorClock, RivunEndpoint, RivunEndpointConfig};
+use rivun_pact::{RivunPact, RivunPactBundle, RivunPactError, RivunPactRevocation};
+use rivun_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
+use rivun_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
+use rivun_telemetry::{FleetDoctor, IncidentCapturer, SecretRedactor};
 
-use zap_e2e::harness::*;
+use rivun_e2e::harness::*;
 
 /// SCENARIO 1: Autonomous Multi-Agent Swarm Resource Settlement
 /// Multi-agent negotiation -> PACT locking -> WASM execution -> Quorum consensus -> MMR receipt sealing.
@@ -50,14 +50,14 @@ fn tc_t4_01_autonomous_multi_agent_swarm_resource_settlement() -> Result<()> {
     intent.intent_id = intent_id;
 
     // 2. Multi-Party PACT Creation and Escrow Locking
-    let mut pact = ZapPact::new(
+    let mut pact = RivunPact::new(
         "resource_consumer",
         "resource_provider",
         "Settle compute allocation",
         1_700_000,
     );
     pact.object = serde_json::json!({"allocation_id": "alloc_99", "units": 100});
-    pact.terms = serde_json::json!({"escrow_zap": 500, "deadline_micros": 1_800_000});
+    pact.terms = serde_json::json!({"escrow_rivun": 500, "deadline_micros": 1_800_000});
     pact.sign(&coordinator.keypair)?;
     assert!(pact.verify(Some(1_750_000))?.valid);
 
@@ -347,17 +347,17 @@ fn tc_t4_06_multi_party_agent_sla_breach_dispute_arbitration() -> Result<()> {
     let key_arbitrator = generate_keypair();
 
     // 1. Initial SLA Pact
-    let mut pact = ZapPact::new("agent.alice", "agent.bob", "high_speed_compute", 1_700_000);
+    let mut pact = RivunPact::new("agent.alice", "agent.bob", "high_speed_compute", 1_700_000);
     pact.terms = serde_json::json!({
         "max_latency_ms": 50,
-        "stake_zap": 1000,
+        "stake_rivun": 1000,
         "slash_on_breach": true
     });
     pact.sign(&key_alice)?;
     let pact_id = pact.pact_id;
 
     // 2. Bob breaches SLA -> Arbitrator creates dispute claim and signs revocation
-    let mut revocation = ZapPactRevocation::new(
+    let mut revocation = RivunPactRevocation::new(
         pact_id,
         "arbitrator.ops",
         "SLA latency exceeded (150ms > 50ms)",
@@ -365,13 +365,13 @@ fn tc_t4_06_multi_party_agent_sla_breach_dispute_arbitration() -> Result<()> {
     );
     revocation.sign(&key_arbitrator)?;
 
-    let mut bundle = ZapPactBundle::new(pact);
+    let mut bundle = RivunPactBundle::new(pact);
     bundle.revocations.push(revocation);
 
     // Bundle is now confirmed revoked
     let res = bundle.verify(Some(1_760_000));
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapPactError::Revoked));
+    assert!(matches!(res.unwrap_err(), RivunPactError::Revoked));
 
     // 3. Dispute Policy evaluates slashing distribution
     let rule = PolicyRule {
@@ -413,9 +413,9 @@ async fn tc_t4_07_end_to_end_encrypted_peer_mesh_with_replay_defense() -> Result
     let id_b = Uuid::new_v4();
 
     let endpoint_a =
-        ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, id_a)).await?;
+        RivunEndpoint::bind(RivunEndpointConfig::new("127.0.0.1:0".parse()?, id_a)).await?;
     let endpoint_b =
-        ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, id_b)).await?;
+        RivunEndpoint::bind(RivunEndpointConfig::new("127.0.0.1:0".parse()?, id_b)).await?;
 
     endpoint_a
         .add_peer(Peer::new(id_b, endpoint_b.local_addr()?, key))
@@ -468,7 +468,7 @@ fn tc_t4_08_enterprise_fleet_health_monitoring_and_incident_investigation() -> R
     assert!(!redacted_config.contains("super_secret_node_key_12345"));
     assert!(redacted_config.contains("[REDACTED]"));
 
-    let snapshot = IncidentCapturer::capture(node.node_id, "zap_replay_rejections_total 0\n", None);
+    let snapshot = IncidentCapturer::capture(node.node_id, "rivun_replay_rejections_total 0\n", None);
     let archive_bytes = IncidentCapturer::build_tar_archive(&snapshot)?;
     assert!(archive_bytes.len() >= 512);
     Ok(())

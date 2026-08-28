@@ -1,9 +1,9 @@
 # Test Strategy, Fixture Architecture & Verification Blueprint: Milestone 1 (R1)
 ## P2P Swarm Gossip Consensus & Adaptive Quorum Mesh
 
-**Document Reference**: `ZAP-M1-TEST-STRATEGY-2026`  
-**Working Directory**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\m1_explorer_3`  
-**Target Crates**: `crates/zap-net`, `crates/zap-agent`, `crates/zap-node`  
+**Document Reference**: `rivun-M1-TEST-STRATEGY-2026`  
+**Working Directory**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\m1_explorer_3`  
+**Target Crates**: `crates/rivun-net`, `crates/rivun-agent`, `crates/rivun-node`  
 **Milestone**: Milestone 1 (R1: P2P Swarm Gossip Consensus & Adaptive Quorum Mesh)  
 **Status**: Comprehensive Test Architecture & Complete Fixture Specification  
 
@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary & Test Philosophy
 
-Milestone 1 establishes the foundational networking, Byzantine-fault-tolerant (BFT) swarm consensus, and adaptive mesh health fabric for the ZAP Next-Gen architecture. Distributed systems of this complexity cannot rely solely on standard happy-path unit tests or slow, non-deterministic live network tests.
+Milestone 1 establishes the foundational networking, Byzantine-fault-tolerant (BFT) swarm consensus, and adaptive mesh health fabric for the rivun Next-Gen architecture. Distributed systems of this complexity cannot rely solely on standard happy-path unit tests or slow, non-deterministic live network tests.
 
 To achieve **100% test coverage with zero clippy warnings and zero test flakiness**, the M1 test strategy employs a **tripartite verification model**:
 
@@ -83,7 +83,7 @@ To test distributed edge cases without relying on physical network delays or non
 ### 2.2 Reusable Mock Harness Implementation
 
 ```rust
-// Embedded fixture in crates/zap-net/tests/common/mock_net.rs
+// Embedded fixture in crates/rivun-net/tests/common/mock_net.rs
 
 use bytes::Bytes;
 use std::{
@@ -213,7 +213,7 @@ impl MockSwarmRouter {
 
 ## 3. Comprehensive Test Inventory & Test Case Specifications
 
-### 3.1 Suite 1: Epidemic Gossip Dissemination & Anti-Entropy Sync (`crates/zap-net/tests/gossip_test.rs`)
+### 3.1 Suite 1: Epidemic Gossip Dissemination & Anti-Entropy Sync (`crates/rivun-net/tests/gossip_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -276,7 +276,7 @@ async fn test_anti_entropy_sync_under_packet_drops() {
 
 ---
 
-### 3.2 Suite 2: Byzantine Fault Tolerant (BFT) Swarm Consensus (`crates/zap-net/tests/consensus_test.rs`)
+### 3.2 Suite 2: Byzantine Fault Tolerant (BFT) Swarm Consensus (`crates/rivun-net/tests/consensus_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -304,12 +304,12 @@ async fn test_bft_equivocation_slashing_proof() {
     // Offender signs Proposal A
     let digest_a = blake3::hash(b"proposal_tx_set_A").into();
     let vote_a_msg = format!("VOTE:{epoch}:{view}:{round}:prevote:{}", hex::encode(digest_a));
-    let sig_a = offender_key.sign_domain_message(b"ZAP-CONSENSUS-VOTE-v1", vote_a_msg.as_bytes());
+    let sig_a = offender_key.sign_domain_message(b"rivun-CONSENSUS-VOTE-v1", vote_a_msg.as_bytes());
 
     // Offender simultaneously signs conflicting Proposal B for same (epoch, view, round)
     let digest_b = blake3::hash(b"proposal_tx_set_B").into();
     let vote_b_msg = format!("VOTE:{epoch}:{view}:{round}:prevote:{}", hex::encode(digest_b));
-    let sig_b = offender_key.sign_domain_message(b"ZAP-CONSENSUS-VOTE-v1", vote_b_msg.as_bytes());
+    let sig_b = offender_key.sign_domain_message(b"rivun-CONSENSUS-VOTE-v1", vote_b_msg.as_bytes());
 
     // Observer collects both and constructs EquivocationProof
     let proof = EquivocationProof {
@@ -327,8 +327,8 @@ async fn test_bft_equivocation_slashing_proof() {
     // Verify proof
     let vk = offender_key.verifying_key();
     assert_ne!(proof.digest_a, proof.digest_b);
-    assert!(vk.verify_domain_message(b"ZAP-CONSENSUS-VOTE-v1", vote_a_msg.as_bytes(), &proof.signature_a).is_ok());
-    assert!(vk.verify_domain_message(b"ZAP-CONSENSUS-VOTE-v1", vote_b_msg.as_bytes(), &proof.signature_b).is_ok());
+    assert!(vk.verify_domain_message(b"rivun-CONSENSUS-VOTE-v1", vote_a_msg.as_bytes(), &proof.signature_a).is_ok());
+    assert!(vk.verify_domain_message(b"rivun-CONSENSUS-VOTE-v1", vote_b_msg.as_bytes(), &proof.signature_b).is_ok());
 
     // Apply Slashing Action
     let mut peer_trust = PeerTrustConfig::default();
@@ -344,7 +344,7 @@ async fn test_bft_equivocation_slashing_proof() {
 
 ---
 
-### 3.3 Suite 3: Phi Accrual Failure Detector & Heartbeat Dynamics (`crates/zap-net/tests/phi_detector_test.rs`)
+### 3.3 Suite 3: Phi Accrual Failure Detector & Heartbeat Dynamics (`crates/rivun-net/tests/phi_detector_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -392,7 +392,7 @@ fn test_phi_accrual_gaussian_cdf_calculation() {
 
 ---
 
-### 3.4 Suite 4: Network Partition Detection & Split-Brain Mitigation (`crates/zap-net/tests/partition_test.rs`)
+### 3.4 Suite 4: Network Partition Detection & Split-Brain Mitigation (`crates/rivun-net/tests/partition_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -442,7 +442,7 @@ async fn test_symmetric_partition_majority_minority_split() {
 
 ---
 
-### 3.5 Suite 5: Dynamic 2-Hop Relay Failover Routing (`crates/zap-net/tests/relay_routing_test.rs`)
+### 3.5 Suite 5: Dynamic 2-Hop Relay Failover Routing (`crates/rivun-net/tests/relay_routing_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -501,7 +501,7 @@ async fn test_direct_route_failover_to_two_hop_relay() {
 
 ---
 
-### 3.6 Suite 6: Swarm Coordinator & Cryptographic Provenance Chain (`crates/zap-agent/tests/swarm_provenance_test.rs`)
+### 3.6 Suite 6: Swarm Coordinator & Cryptographic Provenance Chain (`crates/rivun-agent/tests/swarm_provenance_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -556,7 +556,7 @@ fn test_provenance_chain_binds_consensus_certificate() {
 
 ---
 
-### 3.7 Suite 7: Tokio Daemon Actor Concurrency & Stress (`crates/zap-node/tests/daemon_concurrency_test.rs`)
+### 3.7 Suite 7: Tokio Daemon Actor Concurrency & Stress (`crates/rivun-node/tests/daemon_concurrency_test.rs`)
 
 | Test ID | Test Case Name | Objective | Assertions |
 | :--- | :--- | :--- | :--- |
@@ -573,7 +573,7 @@ To guarantee **zero clippy warnings** under `cargo clippy --workspace --all-targ
 ### 4.1 Strict Rust Code Guardrails for Implementers
 
 1. **Explicit Error Propagation**:
-   - Never use `unwrap()` or `expect()` in library code (`crates/zap-net`, `zap-agent`, `zap-node`).
+   - Never use `unwrap()` or `expect()` in library code (`crates/rivun-net`, `rivun-agent`, `rivun-node`).
    - Use `thiserror` for library error enums and `anyhow::Context` in binary/CLI layers.
 2. **Deterministic Time Handling**:
    - In unit/mock tests, inject virtual time or duration offsets rather than invoking `std::thread::sleep`.
@@ -593,17 +593,18 @@ The complete test suite is verified via the following standardized commands:
 
 ```bash
 # 1. Run all unit and integration tests across Milestone 1 crates
-cargo test -p zap-net -p zap-agent -p zap-node --all-targets
+cargo test -p rivun-net -p rivun-agent -p rivun-node --all-targets
 
 # 2. Run deterministic chaos and stress benchmarks
-cargo test -p zap-net --test gossip_test --test consensus_test --test phi_detector_test --test partition_test --test relay_routing_test
+cargo test -p rivun-net --test gossip_test --test consensus_test --test phi_detector_test --test partition_test --test relay_routing_test
 
 # 3. Verify zero Clippy warnings across all workspace targets
 cargo clippy --workspace --all-targets -- -D warnings
 
 # 4. Verify test coverage and documentation builds cleanly
-cargo doc --no-deps -p zap-net -p zap-agent -p zap-node
+cargo doc --no-deps -p rivun-net -p rivun-agent -p rivun-node
 ```
 
 ---
 *Report compiled by Explorer 3 (Test Strategy & Validation Specialist) for Milestone 1.*
+

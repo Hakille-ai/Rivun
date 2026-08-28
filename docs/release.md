@@ -1,9 +1,9 @@
 # Release Process
 
-This document defines the maintainer checklist for cutting ZAP releases.
+This document defines the maintainer checklist for cutting rivun releases.
 
 Public release packaging is automated by `.github/workflows/release.yml`. The
-workflow validates tag versioning, builds `zap` for Linux, macOS, and Windows,
+workflow validates tag versioning, builds `rivun` for Linux, macOS, and Windows,
 publishes SHA-256 checksums, creates keyless Sigstore bundles with GitHub OIDC,
 and uploads the release artifacts.
 
@@ -15,7 +15,7 @@ and uploads the release artifacts.
   new envelope helpers.
 - **Major**: breaking public API, documented CLI behavior, or protocol behavior.
 
-ZAP is pre-1.0. Even so, releases should be predictable and migration notes
+rivun is pre-1.0. Even so, releases should be predictable and migration notes
 should be clear.
 
 ## Checklist
@@ -40,10 +40,10 @@ should be clear.
    cargo fmt --all -- --check
    cargo test --workspace --all-targets --locked
    cargo clippy --workspace --all-targets --locked -- -D warnings
-   docker build -t zap:release-candidate .
+   docker build -t rivun:release-candidate .
    ```
 
-6. Run `zap check-config` against any updated example configs.
+6. Run `rivun check-config` against any updated example configs.
 7. Verify docs mention any behavior, config, or security posture changes.
 8. Tag the release as `vMAJOR.MINOR.PATCH`.
 9. Publish release notes with:
@@ -61,9 +61,9 @@ verifiable Phase 7 release-readiness checklist. It must pass before packaging a
 stable release. The command verifies:
 
 - protocol fixtures with
-  `cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --json`;
+  `cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --json`;
 - the domain pack catalog with
-  `cargo run --locked -p zap-cli -- pack list --root examples/domain-packs --json`;
+  `cargo run --locked -p rivun-cli -- pack list --root examples/domain-packs --json`;
 - SDK conformance for Python, TypeScript, Rust, and Go;
 - website documentation lint with `npm run lint` in `website`.
 
@@ -87,9 +87,9 @@ when they match the workspace version.
 
 Each platform job emits:
 
-- `zap-VERSION-x86_64-unknown-linux-gnu.tar.gz`;
-- `zap-VERSION-x86_64-apple-darwin.tar.gz`;
-- `zap-VERSION-x86_64-pc-windows-msvc.zip`;
+- `rivun-VERSION-x86_64-unknown-linux-gnu.tar.gz`;
+- `rivun-VERSION-x86_64-apple-darwin.tar.gz`;
+- `rivun-VERSION-x86_64-pc-windows-msvc.zip`;
 - a per-archive `.sha256` file.
 
 The publish job creates:
@@ -97,7 +97,7 @@ The publish job creates:
 - `SHA256SUMS`;
 - `SHA256SUMS.sigstore.json`;
 - one `.sigstore.json` bundle per archive;
-- `zap-release-manifest.json` using the `zap-ops` release schema, with
+- `rivun-release-manifest.json` using the `rivun-ops` release schema, with
   per-artifact SHA-256 and BLAKE3 digests.
 
 Consumers should verify the checksum first, then verify the Sigstore bundle
@@ -122,7 +122,7 @@ Migration notes are required when a release changes:
 - policy defaults such as `message_policy.default_decision`;
 - protocol fixtures, envelope fields, or parser rejection behavior;
 - PACT profile fields, canonical signing payload, signature domain, fixture
-  hashes, or `zap pact` CLI JSON behavior;
+  hashes, or `rivun pact` CLI JSON behavior;
 - domain pack schema, required metadata, or risk levels;
 - SDK public methods, package layout, or fixture expectations;
 - website or docs routes used by operators.
@@ -136,9 +136,9 @@ Driver registry changes are release inputs, not incidental files. Before a
 stable release:
 
 ```bash
-cargo run -p zap-cli -- registry verify-signature --registry registry.index.toml
-cargo run -p zap-cli -- registry publication verify --registry registry.index.toml --publication registry.publication.json --json
-cargo run -p zap-cli -- registry bundle verify --bundle zapstore-bundle --require-drivers --json
+cargo run -p rivun-cli -- registry verify-signature --registry registry.index.toml
+cargo run -p rivun-cli -- registry publication verify --registry registry.index.toml --publication registry.publication.json --json
+cargo run -p rivun-cli -- registry bundle verify --bundle RivunStore-bundle --require-drivers --json
 ```
 
 Archive the signed registry, publication JSON, install plans, and bundle
@@ -167,3 +167,4 @@ Protocol changes require extra care:
 Security releases may skip feature freeze rules. Keep details private until a
 fixed version is available, then publish an advisory and concise upgrade
 guidance.
+

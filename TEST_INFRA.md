@@ -1,12 +1,12 @@
-# ZAP Next-Gen Frontier E2E Test Infrastructure (`TEST_INFRA.md`)
+# rivun Next-Gen Frontier E2E Test Infrastructure (`TEST_INFRA.md`)
 
 ## 1. Executive Summary
 
-The ZAP End-to-End (E2E) Test Suite (`zap-e2e`) provides a comprehensive, requirement-driven, opaque-box testing framework for the ZAP Next-Gen Frontier decentralized mesh runtime. The test suite exercises all 15 features defined in `PROJECT.md § Feature Inventory` across four structured testing tiers without mocking or modifying core production logic.
+The rivun End-to-End (E2E) Test Suite (`rivun-e2e`) provides a comprehensive, requirement-driven, opaque-box testing framework for the rivun Next-Gen Frontier decentralized mesh runtime. The test suite exercises all 15 features defined in `PROJECT.md § Feature Inventory` across four structured testing tiers without mocking or modifying core production logic.
 
 ## 2. Test Architecture
 
-The E2E test harness resides in `tests/e2e` as a first-class workspace member (`zap-e2e`).
+The E2E test harness resides in `tests/e2e` as a first-class workspace member (`rivun-e2e`).
 
 ```
 tests/e2e/
@@ -34,7 +34,7 @@ tests/e2e/
    - `simulate_partition(isolated_ids)` for testing split-brain, Phi Accrual dead transitions, and failover.
    - `reach_consensus(proposer_id, topic, terms_hash, voters)` for $T$-of-$N$ quorum proposal generation and vote finalization.
 3. **WASM Bytecode Fixture Generators**:
-   - `compile_echo_wasm()`: Compiles standard WAT echo driver ABI (`zap_alloc`, `zap_dealloc`, `zap_execute`).
+   - `compile_echo_wasm()`: Compiles standard WAT echo driver ABI (`@@rivun_HEADER@@alloc`, `@@rivun_HEADER@@dealloc`, `@@rivun_HEADER@@execute`).
    - `compile_reverse_wasm()`: Compiles transforming WAT driver that reverses arbitrary payload byte buffers.
 
 ---
@@ -78,31 +78,31 @@ tests/e2e/
 
 ### Run Full E2E Test Suite
 ```bash
-cargo test -p zap-e2e
+cargo test -p rivun-e2e
 ```
 
 ### Run Specific Test Tiers
 ```bash
 # Run Tier 1 Feature Tests
-cargo test -p zap-e2e --test e2e tier1_feature_tests
+cargo test -p rivun-e2e --test e2e tier1_feature_tests
 
 # Run Tier 2 Boundary & Negative Tests
-cargo test -p zap-e2e --test e2e tier2_boundary_tests
+cargo test -p rivun-e2e --test e2e tier2_boundary_tests
 
 # Run Tier 3 Cross-Feature Combination Tests
-cargo test -p zap-e2e --test e2e tier3_combination_tests
+cargo test -p rivun-e2e --test e2e tier3_combination_tests
 
 # Run Tier 4 Real-World Application Workload Scenarios
-cargo test -p zap-e2e --test e2e tier4_realworld_tests
+cargo test -p rivun-e2e --test e2e tier4_realworld_tests
 ```
 
 ### Run Specific Real-World Scenario
 ```bash
-cargo test -p zap-e2e tc_t4_01_autonomous_multi_agent_swarm_resource_settlement
+cargo test -p rivun-e2e tc_t4_01_autonomous_multi_agent_swarm_resource_settlement
 ```
 
 ---
 
 ## 6. Integrity and Verification Mandate
 
-All tests in `zap-e2e` perform actual cryptographic signature generation, Blake3 hashing, WASM compilation and execution in Wasmtime, Merkle mountain range root computations, vector clock increments, and ChaCha20-Poly1305 frame encryption/decryption. No hardcoded results, mocked stubs, or bypasses are used.
+All tests in `rivun-e2e` perform actual cryptographic signature generation, Blake3 hashing, WASM compilation and execution in Wasmtime, Merkle mountain range root computations, vector clock increments, and ChaCha20-Poly1305 frame encryption/decryption. No hardcoded results, mocked stubs, or bypasses are used.

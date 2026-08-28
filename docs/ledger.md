@@ -1,20 +1,20 @@
-# ZAP Ledger
+# rivun Ledger
 
-The ledger stack makes ZAP execution history verifiable in three complementary
+The ledger stack makes rivun execution history verifiable in three complementary
 ways:
 
-1. **Append-only journal** (`zap-journal`) — tamper-evident binary storage with
+1. **Append-only journal** (`rivun-journal`) — tamper-evident binary storage with
    entry hash chaining and signed segment sealing;
-2. **Signed receipts + batch seals** (`zap-ledger`) — per-action Ed25519
+2. **Signed receipts + batch seals** (`rivun-ledger`) — per-action Ed25519
    receipts, batch root commitments, and validator quorum seals;
-3. **MMR and blinded rollups** (`zap-ledger::mmr`, `zap-ledger::zk`) —
+3. **MMR and blinded rollups** (`rivun-ledger::mmr`, `rivun-ledger::zk`) —
    cryptographic accumulation for inclusion/exclusion proofs and confidential
    audit commitments.
 
-Receipts are **audit records, not financial records**. ZAP has no ledger in the
+Receipts are **audit records, not financial records**. rivun has no ledger in the
 payment sense of the word.
 
-## Journal segments (`zap-journal`)
+## Journal segments (`rivun-journal`)
 
 `JournalStore` writes append-only binary segments:
 
@@ -30,16 +30,16 @@ payment sense of the word.
   bounds disk usage; `verify` walks hashes and rebuilds indexes in place.
 - Profiles: `Receipts` (1) and `Memory` (2); default max segment size 64 MB.
 
-The CLI exposes journal operations through `zap receipts ...` and
-`zap memory ...`; see [Receipts](receipts.md) and
+The CLI exposes journal operations through `rivun receipts ...` and
+`rivun memory ...`; see [Receipts](receipts.md) and
 [Capability, Router & Memory](capability-router-memory.md).
 
-## Signed receipts (`zap-ledger`)
+## Signed receipts (`rivun-ledger`)
 
 `ActionReceipt` records the receiver node, source/target nodes, action name,
 frame/payload/output BLAKE3 hashes, timestamps, flags, optional PoA summary,
 and optional PACT reference. `SignedActionReceipt` signs a deterministic JSON
-payload with domain `ZAP-ACTION-RECEIPT-v1`; verification re-derives the signer
+payload with domain `rivun-ACTION-RECEIPT-v1`; verification re-derives the signer
 node id from the public key.
 
 Verification is adaptive: scalar below 4 receipts, parallel rayon batches at
@@ -50,18 +50,18 @@ Verification is adaptive: scalar below 4 receipts, parallel rayon batches at
 - `append` (with fsync policy), `query`/`query_fast`;
 - `rotate_and_seal_segment`, `seal_segment_batch` (`*.zjseal.json`);
 - `build_incremental_mmr`, `import_jsonl`/`export_jsonl`, `compact`;
-- peer replication over `zap.receipts.request/response` with cursor-style
+- peer replication over `rivun.receipts.request/response` with cursor-style
   pagination (default limit 50, max 500).
 
-## Batch seals (`zap-ledger::batch`)
+## Batch seals (`rivun-ledger::batch`)
 
 `ReceiptBatchSeal` commits to a contiguous receipt range: sequence range, MMR
 root, and state transitions. `SignedReceiptBatch` adds validator signatures
-(domain `ZAP-RECEIPT-BATCH-SEAL-v1`, unpadded Base64 signatures) with
+(domain `rivun-RECEIPT-BATCH-SEAL-v1`, unpadded Base64 signatures) with
 threshold quorum checks (`sign_with_validator`, `verify_quorum`). Batch seals
 let auditors verify a range of receipts without re-verifying every signature.
 
-## Merkle Mountain Range (`zap-ledger::mmr`)
+## Merkle Mountain Range (`rivun-ledger::mmr`)
 
 `IncrementalMmr` is an append-only accumulator (binary format `ZAPMMR01`)
 supporting:
@@ -76,7 +76,7 @@ supporting:
 
 Domains: `MMR_LEAF_DOMAIN`, `MMR_NODE_DOMAIN`, `MMR_PEAK_BAG_DOMAIN`.
 
-## Blinded rollup commitments (`zap-ledger::zk`)
+## Blinded rollup commitments (`rivun-ledger::zk`)
 
 `BlindedReceiptCommitment` hides receipt payloads while committing to them:
 
@@ -96,23 +96,23 @@ without exposing payload bytes.
 
 ```bash
 # Verify a receipt journal (optionally with provenance digests)
-cargo run -p zap-cli -- receipts verify --dir logs/receipts --provenance
+cargo run -p rivun-cli -- receipts verify --dir logs/receipts --provenance
 
 # Pull and archive peer receipts
-cargo run -p zap-cli -- receipts pull --config zap.toml --target <peer-node-id> --out-dir logs/peer-receipts
+cargo run -p rivun-cli -- receipts pull --config rivun.toml --target <peer-node-id> --out-dir logs/peer-receipts
 
 # Export/import JSONL archives and compact journals
-cargo run -p zap-cli -- receipts export-jsonl --dir logs/receipts --out logs/receipts.jsonl
-cargo run -p zap-cli -- receipts import-jsonl --in logs/receipts.jsonl --dir logs/receipts
-cargo run -p zap-cli -- receipts compact --dir logs/receipts --out logs/receipts.compacted
+cargo run -p rivun-cli -- receipts export-jsonl --dir logs/receipts --out logs/receipts.jsonl
+cargo run -p rivun-cli -- receipts import-jsonl --in logs/receipts.jsonl --dir logs/receipts
+cargo run -p rivun-cli -- receipts compact --dir logs/receipts --out logs/receipts.compacted
 ```
 
 ## Relationship to other components
 
-- `zap-node` appends a signed receipt per processed action
+- `rivun-node` appends a signed receipt per processed action
   (`[receipts].dir`).
-- `zap-gateway` exposes receipt queries (`zap://ledger/receipts`) and its
+- `rivun-gateway` exposes receipt queries (`rivun://ledger/receipts`) and its
   provenance chain terminates in the receipt stage.
-- `zap-telemetry`'s fleet doctor cross-verifies journal segment manifests and
+- `rivun-telemetry`'s fleet doctor cross-verifies journal segment manifests and
   receipt log integrity.
 - Receipts carry optional PACT references; see [PACT](pact.md).

@@ -6,7 +6,7 @@ Empirically challenge Milestone 3 implementation (FleetDoctor, incident snapshot
 ## 🔒 My Identity
 - Archetype: empirical_challenger
 - Roles: critic, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\challenger_m3_1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\challenger_m3_1
 - Original parent: af9ffcbe-7c8d-446c-a0a8-f72a3e173c84
 - Milestone: M3
 - Instance: 1 of 1
@@ -20,13 +20,13 @@ Empirically challenge Milestone 3 implementation (FleetDoctor, incident snapshot
 - Updated: 2026-08-14T21:14:00Z
 
 ## Review Scope
-- **Files to review**: `crates/zap-telemetry/**`, `crates/zap-node/**`, `crates/zap-cli/**`
+- **Files to review**: `crates/rivun-telemetry/**`, `crates/rivun-node/**`, `crates/rivun-cli/**`
 - **Interface contracts**: FleetDoctor criteria, IncidentCapturer, SecretRedactor, Prometheus metrics
 - **Review criteria**: Correctness, edge cases, failure detection (corrupted WAL, missing segment manifests, invalid pack signatures, quorum threshold T > N), metrics parity, archive integrity
 
 ## Key Decisions Made
-- Wrote and executed comprehensive empirical test harness (`crates/zap-telemetry/tests/challenger_empirical_tests.rs`) covering corrupted WAL files, invalid journal segment magic, tampered segment manifests, invalid pack registry signatures, quorum threshold degradation, edge-case secret redaction, gzip archive integrity, and Prometheus metrics label escaping.
-- Confirmed all tests pass across `zap-telemetry`, `zap-node`, and `zap-cli`.
+- Wrote and executed comprehensive empirical test harness (`crates/rivun-telemetry/tests/challenger_empirical_tests.rs`) covering corrupted WAL files, invalid journal segment magic, tampered segment manifests, invalid pack registry signatures, quorum threshold degradation, edge-case secret redaction, gzip archive integrity, and Prometheus metrics label escaping.
+- Confirmed all tests pass across `rivun-telemetry`, `rivun-node`, and `rivun-cli`.
 - Decided on explicit verdict: `APPROVE`.
 
 ## Artifact Index
@@ -48,3 +48,4 @@ Empirically challenge Milestone 3 implementation (FleetDoctor, incident snapshot
 
 ## Loaded Skills
 - None
+

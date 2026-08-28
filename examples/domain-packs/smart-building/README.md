@@ -1,6 +1,6 @@
 # Smart Building Pack
 
-This preview domain pack describes auditable smart-building workflows over ZAP.
+This preview domain pack describes auditable smart-building workflows over Rivun.
 It focuses on common commercial building integrations: environmental telemetry,
 HVAC setpoints, lighting, access control, alarms, and camera snapshots.
 
@@ -42,8 +42,8 @@ The pack reserves these action subjects:
 - `alarm.arm`
 - `camera.snapshot`
 
-Agent protocol messages such as `zap.agent.intent`, `zap.agent.status`, and
-`zap.agent.result` should be used to link building automations to the actions
+Agent protocol messages such as `rivun.agent.intent`, `rivun.agent.status`, and
+`rivun.agent.result` should be used to link building automations to the actions
 above.
 
 ## Operating Notes
@@ -61,3 +61,4 @@ above.
 - add expected receipt fixtures for security-sensitive actions;
 - add an end-to-end demo: sensor read -> comfort decision -> bounded actuator
   change -> receipt audit.
+

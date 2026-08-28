@@ -1,6 +1,6 @@
-# ZAP Protocol
+# rivun Protocol
 
-ZAP is a universal low-latency protocol. It is independent of AI models, LLM providers, and application runtimes: any adapter can produce or consume ZAP messages as long as it follows the wire and envelope contracts. ZAP does not define billing, settlement, rewards, or financial rails.
+rivun is a universal low-latency protocol. It is independent of AI models, LLM providers, and application runtimes: any adapter can produce or consume rivun messages as long as it follows the wire and envelope contracts. rivun does not define billing, settlement, rewards, or financial rails.
 
 The implementation is split into layers:
 
@@ -13,18 +13,18 @@ The implementation is split into layers:
 
 ## Wire Frame
 
-Every ZAP frame starts with a strict 64-byte big-endian header.
+Every rivun frame starts with a strict 64-byte big-endian header.
 
 | Offset | Size | Field | Notes |
 | --- | ---: | --- | --- |
-| 0 | 4 | `MAGIC_NUMBER` | `0x5A41505F`, ASCII `ZAP_` |
+| 0 | 4 | `MAGIC_NUMBER` | `0x5A41505F`, ASCII `@@rivun_HEADER@@` |
 | 4 | 2 | `VERSION` | v1 is `0x0001` |
 | 6 | 2 | `FLAGS` | encrypted, priority, consensus, signed, broadcast |
 | 8 | 16 | `SOURCE_NODE` | UUID derived from the sender public key |
 | 24 | 16 | `TARGET_NODE` | receiver UUID, or all zeroes for broadcast |
 | 40 | 8 | `TIMESTAMP` | Unix microseconds |
-| 48 | 8 | `ZAP_LEN` | payload length, max 16 MiB in v1 |
-| 56 | 8 | `ZAP_SIGN` | fast signature hint, not a complete signature |
+| 48 | 8 | `@@rivun_HEADER@@LEN` | payload length, max 16 MiB in v1 |
+| 56 | 8 | `@@rivun_HEADER@@SIGN` | fast signature hint, not a complete signature |
 
 The encoded wire frame layout is:
 
@@ -41,7 +41,7 @@ signature_len: u16 = 64
 signature: [u8; 64]
 ```
 
-The Ed25519 signature transcript is the first 56 header bytes plus payload. `ZAP_SIGN` is excluded to avoid self-referential signatures.
+The Ed25519 signature transcript is the first 56 header bytes plus payload. `@@rivun_HEADER@@SIGN` is excluded to avoid self-referential signatures.
 
 When `REQUIRES_CONSENSUS` is set, a frame can carry a Proof-of-Action trailer after the auth trailer:
 
@@ -61,7 +61,7 @@ The `frame_digest` is a domain-separated BLAKE3 digest of the signed frame witho
 
 ## Universal Envelope
 
-The wire payload can be a universal ZAP envelope. Envelopes start with a 74-byte `ZENV` header and are parsed independently from transport and node policy:
+The wire payload can be a universal rivun envelope. Envelopes start with a 74-byte `ZENV` header and are parsed independently from transport and node policy:
 
 ```text
 magic: "ZENV"
@@ -94,7 +94,7 @@ Envelope kinds in v1 are encoded as `u16`:
 | 7 | `action` |
 | 8 | `control` |
 
-The `zap-envelope` API exposes owned constructors such as `ZapEnvelope::action(subject, body)`, `event`, `data`, `query`, and `response` using the default content type. Callers that need explicit media types can use `ZapEnvelope::new(kind, subject, content_type, body)` or `with_content_type(...)`. `ZapEnvelopeRef::parse(&[u8])` inspects encoded envelope bytes without copying the body.
+The `rivun-envelope` API exposes owned constructors such as `ZapEnvelope::action(subject, body)`, `event`, `data`, `query`, and `response` using the default content type. Callers that need explicit media types can use `ZapEnvelope::new(kind, subject, content_type, body)` or `with_content_type(...)`. `ZapEnvelopeRef::parse(&[u8])` inspects encoded envelope bytes without copying the body.
 
 ## Control Subjects
 
@@ -104,36 +104,36 @@ include:
 
 | Subject | Content type | Purpose |
 | --- | --- | --- |
-| `zap.capability.query` | `application/zap-capability+json` | Ask a peer for advertised capabilities and grants |
-| `zap.capability.response` | `application/zap-capability+json` | Return a signed peer capability advertisement |
-| `zap.capability.announce` | `application/zap-capability+json` | Push an unsolicited signed capability advertisement |
-| `zap.discovery.announce` | `application/zap-discovery+json` | Signed service and peer advertisement |
-| `zap.discovery.query` | `application/zap-discovery+json` | Query a peer's services, peers, and learned announcements |
-| `zap.discovery.response` | `application/zap-discovery+json` | Signed discovery response with services, peers, and known announcements |
-| `zap.poa.validator_set.request` | `application/zap-poa-validator-set+json` | Request a signed versioned PoA validator set from a peer |
-| `zap.poa.validator_set.response` | `application/zap-poa-validator-set+json` | Return a signed PoA validator set or an unavailable reason |
-| `zap.pact.verify` | `application/zap-pact+json` | Exchange offline PACT verification requests or results |
-| `zap.pact.revoke` | `application/zap-pact+json` | Exchange signed PACT revocation evidence |
-| `zap.pact.bundle` | `application/zap-pact+json` | Exchange portable PACT bundles for offline verification |
-| `zap.registry.index.request` | `application/zap-registry-index+json` | Request a peer's ZapStore registry index |
-| `zap.registry.index.response` | `application/zap-registry-index+json` | Return a registry index or an unavailable reason |
-| `zap.registry.bundle.manifest.request` | `application/zap-registry-bundle-manifest+json` | Request a peer's ZapStore bundle manifest |
-| `zap.registry.bundle.manifest.response` | `application/zap-registry-bundle-manifest+json` | Return a bundle manifest or an unavailable reason |
-| `zap.receipts.request` | `application/zap-receipts+json` | Request signed receipts from a peer receipt journal |
-| `zap.receipts.response` | `application/zap-receipts+json` | Return verified signed receipts, with a truncation flag |
-| `zap.agent.intent` | `application/zap-agent+json` | Typed agent intent (see [Agent Protocol](agent-protocol.md)) |
-| `zap.agent.session` | `application/zap-agent+json` | Agent session lifecycle |
-| `zap.agent.delegation.request` | `application/zap-agent+json` | Delegate scoped work to another agent |
-| `zap.agent.delegation.response` | `application/zap-agent+json` | Accept, reject, or counter-offer a delegation |
-| `zap.agent.capability_negotiation.request` | `application/zap-agent+json` | Negotiate required and optional capabilities |
-| `zap.agent.capability_negotiation.response` | `application/zap-agent+json` | Capability negotiation outcome |
-| `zap.agent.status` | `application/zap-agent+json` | Agent progress status |
-| `zap.agent.result` | `application/zap-agent+json` | Terminal agent result |
-| `zap.agent.error` | `application/zap-agent+json` | Structured agent error |
-| `zap.swarm.intent.propose` | `application/zap-swarm+json` | Swarm consensus proposal |
-| `zap.swarm.intent.commit` | `application/zap-swarm+json` | Swarm consensus commit certificate |
-| `poa.attestation_request` | `application/zap-poa+json` | Request a PoA attestation from a validator peer |
-| `poa.attestation_response` | `application/zap-poa+json` | Signed PoA attestation response |
+| `rivun.capability.query` | `application/rivun-capability+json` | Ask a peer for advertised capabilities and grants |
+| `rivun.capability.response` | `application/rivun-capability+json` | Return a signed peer capability advertisement |
+| `rivun.capability.announce` | `application/rivun-capability+json` | Push an unsolicited signed capability advertisement |
+| `rivun.discovery.announce` | `application/rivun-discovery+json` | Signed service and peer advertisement |
+| `rivun.discovery.query` | `application/rivun-discovery+json` | Query a peer's services, peers, and learned announcements |
+| `rivun.discovery.response` | `application/rivun-discovery+json` | Signed discovery response with services, peers, and known announcements |
+| `rivun.poa.validator_set.request` | `application/rivun-poa-validator-set+json` | Request a signed versioned PoA validator set from a peer |
+| `rivun.poa.validator_set.response` | `application/rivun-poa-validator-set+json` | Return a signed PoA validator set or an unavailable reason |
+| `rivun.pact.verify` | `application/rivun-pact+json` | Exchange offline PACT verification requests or results |
+| `rivun.pact.revoke` | `application/rivun-pact+json` | Exchange signed PACT revocation evidence |
+| `rivun.pact.bundle` | `application/rivun-pact+json` | Exchange portable PACT bundles for offline verification |
+| `rivun.registry.index.request` | `application/rivun-registry-index+json` | Request a peer's RivunStore registry index |
+| `rivun.registry.index.response` | `application/rivun-registry-index+json` | Return a registry index or an unavailable reason |
+| `rivun.registry.bundle.manifest.request` | `application/rivun-registry-bundle-manifest+json` | Request a peer's RivunStore bundle manifest |
+| `rivun.registry.bundle.manifest.response` | `application/rivun-registry-bundle-manifest+json` | Return a bundle manifest or an unavailable reason |
+| `rivun.receipts.request` | `application/rivun-receipts+json` | Request signed receipts from a peer receipt journal |
+| `rivun.receipts.response` | `application/rivun-receipts+json` | Return verified signed receipts, with a truncation flag |
+| `rivun.agent.intent` | `application/rivun-agent+json` | Typed agent intent (see [Agent Protocol](agent-protocol.md)) |
+| `rivun.agent.session` | `application/rivun-agent+json` | Agent session lifecycle |
+| `rivun.agent.delegation.request` | `application/rivun-agent+json` | Delegate scoped work to another agent |
+| `rivun.agent.delegation.response` | `application/rivun-agent+json` | Accept, reject, or counter-offer a delegation |
+| `rivun.agent.capability_negotiation.request` | `application/rivun-agent+json` | Negotiate required and optional capabilities |
+| `rivun.agent.capability_negotiation.response` | `application/rivun-agent+json` | Capability negotiation outcome |
+| `rivun.agent.status` | `application/rivun-agent+json` | Agent progress status |
+| `rivun.agent.result` | `application/rivun-agent+json` | Terminal agent result |
+| `rivun.agent.error` | `application/rivun-agent+json` | Structured agent error |
+| `rivun.swarm.intent.propose` | `application/rivun-swarm+json` | Swarm consensus proposal |
+| `rivun.swarm.intent.commit` | `application/rivun-swarm+json` | Swarm consensus commit certificate |
+| `poa.attestation_request` | `application/rivun-poa+json` | Request a PoA attestation from a validator peer |
+| `poa.attestation_response` | `application/rivun-poa+json` | Signed PoA attestation response |
 
 PoA validator-set requests can include a minimum epoch. Responses are signed as
 normal frames and carry a nested signed validator-set document. Receivers should
@@ -162,11 +162,11 @@ signature and each nested receipt signature before archiving or merging.
 
 ## PACT Profile
 
-PACT is a ZAP-native profile for portable signed action records. A
-`zap.pact.record` message uses `kind = action`, subject `zap.pact.record`, and
-content type `application/zap-pact+json`. Verification, revocation, and bundle
-exchange use `kind = control` with `zap.pact.verify`, `zap.pact.revoke`, and
-`zap.pact.bundle`.
+PACT is a rivun-native profile for portable signed action records. A
+`rivun.pact.record` message uses `kind = action`, subject `rivun.pact.record`, and
+content type `application/rivun-pact+json`. Verification, revocation, and bundle
+exchange use `kind = control` with `rivun.pact.verify`, `rivun.pact.revoke`, and
+`rivun.pact.bundle`.
 
 The canonical PACT signature payload contains only these ordered fields:
 `pact_id`, `actor`, `target`, `intent`, `object`, `terms`, `consent`, `proof`,
@@ -175,14 +175,14 @@ The canonical PACT signature payload contains only these ordered fields:
 excluded. Nested JSON object keys are sorted before hashing so Rust,
 TypeScript, Python, and Go SDKs reproduce the same BLAKE3 digest.
 
-PACT signatures reuse the existing ZAP Ed25519 domain-message transcript with
-domain `ZAP-PACT-v1`. PACT execution evidence is recorded as optional receipt
+PACT signatures reuse the existing rivun Ed25519 domain-message transcript with
+domain `rivun-PACT-v1`. PACT execution evidence is recorded as optional receipt
 metadata; it does not replace the signed receipt schema or introduce a
 financial ledger.
 
 ## Encrypted UDP Datagram
 
-`zap-net` wraps encoded frames in an authenticated UDP datagram:
+`rivun-net` wraps encoded frames in an authenticated UDP datagram:
 
 ```text
 magic: "ZAPD"
@@ -197,3 +197,4 @@ ciphertext: ChaCha20-Poly1305(frame bytes)
 The datagram header is AEAD associated data. Reserved bytes must be zero in v1 and are rejected otherwise. The nonce is a random 32-bit endpoint prefix followed by a big-endian 64-bit counter.
 
 For direct messages, the datagram `target_node` and inner frame `TARGET_NODE` both equal the receiving node id. For broadcast, each encrypted datagram still targets one concrete receiving peer for routing and key selection, while the inner frame sets `TARGET_NODE` to UUID nil and `BROADCAST` in `FLAGS`.
+

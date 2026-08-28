@@ -1,0 +1,49 @@
+[package]
+name = "rivun-cli"
+description = "Command line interface for ZAP."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "rivun"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+base64.workspace = true
+bytes.workspace = true
+clap.workspace = true
+flate2.workspace = true
+hex.workspace = true
+rand_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+rivun-agent.workspace = true
+rivun-capability.workspace = true
+rivun-core = { path = "../rivun-core" }
+rivun-crypto = { path = "../rivun-crypto" }
+rivun-envelope = { path = "../rivun-envelope" }
+rivun-gateway = { path = "../rivun-gateway" }
+rivun-ledger = { path = "../rivun-ledger" }
+rivun-memory.workspace = true
+rivun-net = { path = "../rivun-net" }
+rivun-node = { path = "../rivun-node" }
+rivun-pact.workspace = true
+rivun-pack.workspace = true
+rivun-policy.workspace = true
+rivun-router.workspace = true
+rivun-runtime = { path = "../rivun-runtime" }
+rivun-schema.workspace = true
+rivun-store = { path = "../rivun-store" }
+rivun-telemetry = { path = "../rivun-telemetry" }
+toml.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

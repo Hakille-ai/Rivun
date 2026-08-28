@@ -1,6 +1,6 @@
 # Governance
 
-ZAP is currently maintained as a small, security-focused open-source project.
+rivun is currently maintained as a small, security-focused open-source project.
 The governance model is intentionally lightweight until the contributor base is
 larger.
 

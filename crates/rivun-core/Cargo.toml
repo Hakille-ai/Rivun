@@ -1,0 +1,22 @@
+[package]
+name = "rivun-core"
+description = "rivun-Wire binary protocol primitives."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+bitflags.workspace = true
+bytes.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+hex.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "protocol"
+harness = false

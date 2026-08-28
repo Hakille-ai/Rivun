@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-15T01:10:00Z
 
 ## Mission
-Adversarial and quality review of Milestone 4 (AI Agent Gateway & Multi-Transport Integration) implementation in ZAP.
+Adversarial and quality review of Milestone 4 (AI Agent Gateway & Multi-Transport Integration) implementation in rivun.
 
 ## 🔒 My Identity
 - Archetype: reviewer
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m4_2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m4_2
 - Original parent: 93ddb720-b792-416a-9e98-289b84dbd0f2
 - Milestone: Milestone 4 (AI Agent Gateway & Multi-Transport Integration)
 - Instance: 2 of 2
@@ -21,22 +21,22 @@ Adversarial and quality review of Milestone 4 (AI Agent Gateway & Multi-Transpor
 - Updated: 2026-08-15T01:10:00Z
 
 ## Review Scope
-- **Files to review**: `crates/zap-agent/**`, `crates/zap-gateway/**`, `tests/e2e/**`
+- **Files to review**: `crates/rivun-agent/**`, `crates/rivun-gateway/**`, `tests/e2e/**`
 - **Interface contracts**: `ORIGINAL_REQUEST.md` (R4), `PROJECT.md`
 - **Review criteria**: Correctness, integrity, error handling, protocol adherence, adversarial stress-testing
 
 ## Key Decisions Made
-- Confirmed full compliance and zero integrity violations across `zap-agent` and `zap-gateway`.
+- Confirmed full compliance and zero integrity violations across `rivun-agent` and `rivun-gateway`.
 - Verified RFC 6455 WebSocket framing, 1009 message too big close codes, MCP JSON-RPC -32700..-32603 codes, and 6-stage provenance causal chain verification.
 - Verdict: APPROVE.
 
 ## Review Checklist
 - **Items reviewed**:
-  - `crates/zap-agent/src/lib.rs` & `crates/zap-agent/src/provenance.rs`
-  - `crates/zap-gateway/src/lib.rs`, `src/config.rs`, `src/error.rs`, `src/server.rs`
-  - `crates/zap-gateway/src/mcp/` (`protocol.rs`, `tools.rs`, `resources.rs`, `prompts.rs`, `stdio.rs`, `mod.rs`)
-  - `crates/zap-gateway/src/transports/` (`http.rs`, `sse.rs`, `ws.rs`, `mod.rs`)
-  - `crates/zap-gateway/tests/` (`gateway_tests.rs`, `adversarial_stress_tests.rs`, `adversarial_challenger_m4_2.rs`)
+  - `crates/rivun-agent/src/lib.rs` & `crates/rivun-agent/src/provenance.rs`
+  - `crates/rivun-gateway/src/lib.rs`, `src/config.rs`, `src/error.rs`, `src/server.rs`
+  - `crates/rivun-gateway/src/mcp/` (`protocol.rs`, `tools.rs`, `resources.rs`, `prompts.rs`, `stdio.rs`, `mod.rs`)
+  - `crates/rivun-gateway/src/transports/` (`http.rs`, `sse.rs`, `ws.rs`, `mod.rs`)
+  - `crates/rivun-gateway/tests/` (`gateway_tests.rs`, `adversarial_stress_tests.rs`, `adversarial_challenger_m4_2.rs`)
   - `tests/e2e/tests/e2e_suite.rs` (F09, F10, F11, B09-B11, X006-X015, RW001-RW010)
 - **Verdict**: APPROVE
 - **Unverified claims**: None
@@ -57,3 +57,4 @@ Adversarial and quality review of Milestone 4 (AI Agent Gateway & Multi-Transpor
 - `.agents/reviewer_m4_2/handoff.md` — Review and Challenge Handoff Report
 - `.agents/reviewer_m4_2/progress.md` — Progress tracker
 - `.agents/reviewer_m4_2/DISPATCH.md` — Inbound instructions record
+

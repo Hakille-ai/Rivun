@@ -6,7 +6,7 @@ Independently re-review Milestone 2 remediation fixes (Round 2) as Reviewer 2 & 
 ## 🔒 My Identity
 - Archetype: reviewer / critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m2_2_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m2_2_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 2 Gate Evaluation (Round 2)
 - Instance: 2 of 2
@@ -25,24 +25,24 @@ Independently re-review Milestone 2 remediation fixes (Round 2) as Reviewer 2 & 
 
 ## Review Scope
 - **Files to review**:
-  1. Struct alignment in `crates/zap-store/src/lib.rs` and call sites.
+  1. Struct alignment in `crates/rivun-store/src/lib.rs` and call sites.
   2. Zip Slip path sanitization in `DomainPackBundle::extract_to_dir` and `decode_bytes`.
   3. Public key Base64/hex parsing in `verify_against_trusted_keys`.
   4. SemVer matching and transitive dependency resolution in `DomainPackDependencyResolver`.
   5. Policy validator and audit status checks.
-  6. `zap pack verify` (executes `bundle.verify_integrity()`) and `zap pack install` (dependency resolution).
+  6. `rivun pack verify` (executes `bundle.verify_integrity()`) and `rivun pack install` (dependency resolution).
 - **Interface contracts**: `PROJECT.md`
 - **Review criteria**: Correctness, security/safety, completeness, code quality, test coverage, integrity.
 
 ## Review Checklist
 - **Items reviewed**:
-  - `crates/zap-store/src/lib.rs` (Struct definitions: `DomainPackStatus`, `DomainPackCompatibility`, `DomainPackArtifact`, `DomainPackRegistryEntry`)
-  - `crates/zap-store/src/bundle.rs` (Zip Slip protection in `extract_to_dir` and `decode_bytes`, `parse_public_key_str` hex/base64 key matching)
-  - `crates/zap-store/src/resolver.rs` (`matches_version_req` 0.x SemVer rules, `resolve_dep` transitive resolution)
-  - `crates/zap-store/src/validator.rs` (`extract_declared_paths_from_toml` policy validation)
-  - `crates/zap-store/src/audit.rs` (`audit_pack_dir` and `audit_bundle` status risk mapping)
-  - `crates/zap-cli/src/main.rs` (`pack_verify` integrity check, `pack_install` dependency resolution & registry update)
-  - `crates/zap-store/tests/pack_tests.rs` & `adversarial_m2_tests.rs` (Unit & adversarial regression tests)
+  - `crates/rivun-store/src/lib.rs` (Struct definitions: `DomainPackStatus`, `DomainPackCompatibility`, `DomainPackArtifact`, `DomainPackRegistryEntry`)
+  - `crates/rivun-store/src/bundle.rs` (Zip Slip protection in `extract_to_dir` and `decode_bytes`, `parse_public_key_str` hex/base64 key matching)
+  - `crates/rivun-store/src/resolver.rs` (`matches_version_req` 0.x SemVer rules, `resolve_dep` transitive resolution)
+  - `crates/rivun-store/src/validator.rs` (`extract_declared_paths_from_toml` policy validation)
+  - `crates/rivun-store/src/audit.rs` (`audit_pack_dir` and `audit_bundle` status risk mapping)
+  - `crates/rivun-cli/src/main.rs` (`pack_verify` integrity check, `pack_install` dependency resolution & registry update)
+  - `crates/rivun-store/tests/pack_tests.rs` & `adversarial_m2_tests.rs` (Unit & adversarial regression tests)
 - **Verdict**: APPROVE
 - **Unverified claims**: Execution of `cargo test` timed out on permission prompt in environment; verified via thorough line-by-line static analysis.
 
@@ -66,3 +66,4 @@ Independently re-review Milestone 2 remediation fixes (Round 2) as Reviewer 2 & 
 - `.agents/reviewer_m2_2_r2/DISPATCH.md` — Dispatch log
 - `.agents/reviewer_m2_2_r2/BRIEFING.md` — Working memory briefing
 - `.agents/reviewer_m2_2_r2/handoff.md` — Final review handoff report
+

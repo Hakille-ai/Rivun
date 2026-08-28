@@ -1,6 +1,6 @@
 # Signed Receipts
 
-ZAP can write signed action receipts for auditability. Receipts are not a billing, settlement, or payment system.
+rivun can write signed action receipts for auditability. Receipts are not a billing, settlement, or payment system.
 
 Enable the binary receipt journal in node config:
 
@@ -22,15 +22,15 @@ segments (`*.zjseg`) with rebuildable sidecar indexes (`*.zjidx`) and manifests
 - frame and processing timestamps;
 - frame flags;
 - optional Proof-of-Action summary;
-- optional PACT reference for verified `zap.pact.record` messages.
+- optional PACT reference for verified `rivun.pact.record` messages.
 
-The receipt signature is Ed25519 over a deterministic JSON payload with the domain prefix `ZAP-ACTION-RECEIPT-v1`. The signer is the node that processed the action.
+The receipt signature is Ed25519 over a deterministic JSON payload with the domain prefix `rivun-ACTION-RECEIPT-v1`. The signer is the node that processed the action.
 
 Verify an append-only receipt journal offline:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --dir logs/receipts
-cargo run -p zap-cli -- receipts verify --dir logs/receipts --json
+cargo run -p rivun-cli -- receipts verify --dir logs/receipts
+cargo run -p rivun-cli -- receipts verify --dir logs/receipts --json
 ```
 
 Verification walks the binary segments, checks the BLAKE3 journal hash chain,
@@ -39,8 +39,8 @@ kept only for import/export/debug paths.
 
 ## PACT References
 
-When the processed message is a signed `zap.pact.record` envelope with
-`content_type = application/zap-pact+json`, `zap-node` verifies the PACT body
+When the processed message is a signed `rivun.pact.record` envelope with
+`content_type = application/rivun-pact+json`, `rivun-node` verifies the PACT body
 before writing the receipt. The receipt then includes an optional `pact` object
 with the PACT id, intent, canonical hash, status, optional policy decision,
 optional PoA summary, and optional output hash.
@@ -53,10 +53,10 @@ remain execution records and are not financial records.
 Import or export legacy JSONL archives explicitly:
 
 ```bash
-cargo run -p zap-cli -- receipts import-jsonl \
+cargo run -p rivun-cli -- receipts import-jsonl \
   --in logs/actions.legacy.jsonl \
   --dir logs/receipts
-cargo run -p zap-cli -- receipts export-jsonl \
+cargo run -p rivun-cli -- receipts export-jsonl \
   --dir logs/receipts \
   --out logs/actions.archive.jsonl
 ```
@@ -64,7 +64,7 @@ cargo run -p zap-cli -- receipts export-jsonl \
 Compact a journal into a fresh binary directory after verification:
 
 ```bash
-cargo run -p zap-cli -- receipts compact \
+cargo run -p rivun-cli -- receipts compact \
   --dir logs/receipts \
   --out logs/receipts.compacted
 ```
@@ -76,8 +76,8 @@ Pull signed receipts from a configured peer over signed `ZENV` control
 messages:
 
 ```bash
-cargo run -p zap-cli -- receipts pull \
-  --config zap.toml \
+cargo run -p rivun-cli -- receipts pull \
+  --config rivun.toml \
   --target <peer-node-id> \
   --after-processed-at-micros 1735689600000000 \
   --until-processed-at-micros 1735776000000000 \
@@ -86,8 +86,8 @@ cargo run -p zap-cli -- receipts pull \
   --json
 ```
 
-`pull` sends `zap.receipts.request`, verifies the signed
-`zap.receipts.response`, verifies every nested receipt signature, and writes a
+`pull` sends `rivun.receipts.request`, verifies the signed
+`rivun.receipts.response`, verifies every nested receipt signature, and writes a
 binary journal that can be passed to `receipts verify`, `export-jsonl`, or
 `compact`.
 Requests can filter by processed timestamp, kind, subject, source node, and
@@ -111,7 +111,7 @@ verification.
 
 ## Cryptographic accumulation
 
-Beyond plain verification, the ledger layer (`zap-ledger`) accumulates the
+Beyond plain verification, the ledger layer (`rivun-ledger`) accumulates the
 receipt stream into verifiable commitments:
 
 - **Batch seals** — `SignedReceiptBatch` commits to a contiguous receipt
@@ -132,3 +132,4 @@ rotation. See [Ledger](ledger.md) for the full API surface and threat
 properties.
 
 Receipts make local and future distributed operation auditable without creating financial semantics.
+

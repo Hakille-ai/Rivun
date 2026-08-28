@@ -14,7 +14,7 @@ Describe the change and why it matters.
 
 ## Compatibility
 
-- [ ] No ZAP-Wire or `ZENV` binary layout change
+- [ ] No @@@@rivun_HEADER@@WIRE@@ or `ZENV` binary layout change
 - [ ] Wire/envelope change documented with tests and golden vectors
 - [ ] CLI/config behavior change documented
 - [ ] Security model unchanged or documented
@@ -39,7 +39,7 @@ RFC/ZEP:
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] Performance-sensitive changes reviewed against the benchmark summary
 - [ ] Docker build checked when packaging changes
-- [ ] Domain packs validated with `zap pack validate`
+- [ ] Domain packs validated with `rivun pack validate`
 - [ ] SDK tests run when SDK surfaces change
 - [ ] Website/docs lint run when website changes
 
@@ -52,3 +52,4 @@ Call out protocol, crypto, runtime, deployment, or migration risks.
 - User-facing change:
 - Operator/security note:
 - Breaking change:
+

@@ -6,7 +6,7 @@ Direct empirical observations and verification results from remediation executio
 
 ### 1.1 Tests Verification
 
-1. **`cargo test -p zap-agent`**:
+1. **`cargo test -p rivun-agent`**:
    - Status: **PASSED** (18 tests: 12 unit tests + 6 golden fixture tests, 0 failures).
    ```text
    running 12 tests
@@ -34,7 +34,7 @@ Direct empirical observations and verification results from remediation executio
    test result: ok. 6 passed; 0 failed
    ```
 
-2. **`cargo test -p zap-gateway`**:
+2. **`cargo test -p rivun-gateway`**:
    - Status: **PASSED** (30 tests: 1 unit test in `src/lib.rs` + 10 integration tests in `adversarial_challenger_m4_2.rs` + 9 tests in `adversarial_stress_tests.rs` + 10 tests in `gateway_tests.rs`, 0 failures).
    ```text
    running 1 test
@@ -80,7 +80,7 @@ Direct empirical observations and verification results from remediation executio
    test result: ok. 10 passed; 0 failed
    ```
 
-3. **`cargo test -p zap-cli --test gateway_cli_tests`**:
+3. **`cargo test -p rivun-cli --test gateway_cli_tests`**:
    - Status: **PASSED** (5 tests, 0 failures).
    ```text
    running 5 tests
@@ -94,10 +94,10 @@ Direct empirical observations and verification results from remediation executio
 
 ### 1.2 Clippy Verification
 
-1. **`cargo clippy -p zap-agent -p zap-gateway --all-targets -- -D warnings`**:
+1. **`cargo clippy -p rivun-agent -p rivun-gateway --all-targets -- -D warnings`**:
    - Status: **PASSED** with 0 warnings, exit code 0.
 
-2. **`cargo clippy --workspace --all-targets --exclude zap-e2e -- -D warnings`**:
+2. **`cargo clippy --workspace --all-targets --exclude rivun-e2e -- -D warnings`**:
    - Status: **PASSED** with 0 warnings across all workspace packages and targets, exit code 0.
 
 ---
@@ -111,23 +111,23 @@ Direct empirical observations and verification results from remediation executio
    - All 10 adversarial challenger integration tests now compile and pass.
 
 2. **Clippy Lint Elimination**:
-   - `crates/zap-agent/src/provenance.rs`:
+   - `crates/rivun-agent/src/provenance.rs`:
      - Line 331: removed unnecessary reference in `data_hasher.update(processed_at_micros.to_be_bytes())`.
      - Line 579: collapsed nested `if let Some(expected_prev) = &last_hash && prev != expected_prev`.
-   - `crates/zap-gateway/src/mcp/tools.rs`:
+   - `crates/rivun-gateway/src/mcp/tools.rs`:
      - Line 448: collapsed nested `if let Some(node) = &ctx.node && !report.valid`.
-   - `crates/zap-gateway/src/transports/http.rs`:
+   - `crates/rivun-gateway/src/transports/http.rs`:
      - Line 687: removed `let_and_return` for public key byte decoding.
      - Line 717: collapsed nested `if let Some(node) = &self.node && !report.valid`.
-   - `crates/zap-gateway/src/transports/ws.rs`:
+   - `crates/rivun-gateway/src/transports/ws.rs`:
      - Line 66: replaced `0..80` range index loop with `for (i, &w_i) in w.iter().enumerate()`.
-   - `crates/zap-cli/src/main.rs`:
+   - `crates/rivun-cli/src/main.rs`:
      - Fixed `ReceiptJournalStore` and `MemoryJournalStore` instantiation and removed obsolete `expect` calls on non-Result return values.
-   - `crates/zap-cli/tests/gateway_cli_tests.rs`:
+   - `crates/rivun-cli/tests/gateway_cli_tests.rs`:
      - Fixed `SignedActionReceipt` creation and set `tokio::test(flavor = "multi_thread")` to prevent blocking the async runtime on child process execution.
 
 3. **HTTP Request Body Buffering & Payload Guardrails**:
-   - In `HttpAgentGateway::handle_connection` (`crates/zap-gateway/src/transports/http.rs`):
+   - In `HttpAgentGateway::handle_connection` (`crates/rivun-gateway/src/transports/http.rs`):
      - Implemented dynamic header parsing and `Content-Length` extraction.
      - Enforced `self.config.max_frame_size` limit: requests with `Content-Length > max_frame_size` immediately return `413 Payload Too Large` with JSON error.
      - Loop-buffers remaining body chunks up to `Content-Length` using `tokio::time::timeout(50ms, stream.read())` to handle chunked payloads safely without indefinite hanging on short writes.
@@ -138,18 +138,18 @@ Direct empirical observations and verification results from remediation executio
 
 ## 3. Caveats
 
-- Milestone 4 crates (`zap-agent` and `zap-gateway`) and their CLI bridges are fully verified and clean. The standalone `zap-e2e` crate contains tests planned for update in Milestone 5 / Final verification.
+- Milestone 4 crates (`rivun-agent` and `rivun-gateway`) and their CLI bridges are fully verified and clean. The standalone `rivun-e2e` crate contains tests planned for update in Milestone 5 / Final verification.
 
 ---
 
 ## 4. Conclusion
 
 All 3 issues identified in reviewer_m4_1 report plus all additional clippy warnings have been resolved cleanly:
-1. `crates/zap-gateway/tests/adversarial_challenger_m4_2.rs` compiles cleanly and all 10 tests pass.
-2. All 6 clippy lints across `zap-agent` and `zap-gateway` have been fixed; `cargo clippy` runs with 0 warnings.
+1. `crates/rivun-gateway/tests/adversarial_challenger_m4_2.rs` compiles cleanly and all 10 tests pass.
+2. All 6 clippy lints across `rivun-agent` and `rivun-gateway` have been fixed; `cargo clippy` runs with 0 warnings.
 3. HTTP request body buffering based on `Content-Length` with `max_frame_size` validation, 413 status response, and bounded read timeouts is fully implemented and tested.
 
-All 48 agent/gateway tests (18 in `zap-agent`, 30 in `zap-gateway`) pass with 0 failures.
+All 48 agent/gateway tests (18 in `rivun-agent`, 30 in `rivun-gateway`) pass with 0 failures.
 
 ---
 
@@ -158,18 +158,19 @@ All 48 agent/gateway tests (18 in `zap-agent`, 30 in `zap-gateway`) pass with 0 
 To independently verify the fixes:
 
 ```bash
-# 1. Run all zap-agent unit and fixture tests
-cargo test -p zap-agent
+# 1. Run all rivun-agent unit and fixture tests
+cargo test -p rivun-agent
 
-# 2. Run all zap-gateway unit, integration, and stress tests
-cargo test -p zap-gateway
+# 2. Run all rivun-gateway unit, integration, and stress tests
+cargo test -p rivun-gateway
 
 # 3. Run gateway CLI integration tests
-cargo test -p zap-cli --test gateway_cli_tests
+cargo test -p rivun-cli --test gateway_cli_tests
 
 # 4. Verify 0 clippy warnings across M4 crates
-cargo clippy -p zap-agent -p zap-gateway --all-targets -- -D warnings
+cargo clippy -p rivun-agent -p rivun-gateway --all-targets -- -D warnings
 
 # 5. Verify 0 clippy warnings across workspace targets
-cargo clippy --workspace --all-targets --exclude zap-e2e -- -D warnings
+cargo clippy --workspace --all-targets --exclude rivun-e2e -- -D warnings
 ```
+

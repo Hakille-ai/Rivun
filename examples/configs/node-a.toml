@@ -1,13 +1,13 @@
 bind = "127.0.0.1:7000"
-key_file = "../../.zap/node-a.key"
+key_file = "../../.rivun/node-a.key"
 require_signed = true
 routes = []
 
 [[peers]]
-node_id = "b299a511-2804-88b8-a046-5a68ef82f1b7"
+node_id = "f7779780-6aa5-8dcc-a246-ca03297d658f"
 addr = "127.0.0.1:7001"
-public_key = "yXppuwaQUlSfJboDlJqSjFmRaHSrIDN6l0BxAFtFDwA"
-transport_key = "4242424242424242424242424242424242424242424242424242424242424242"
+public_key = "2eccdc40-f3b2-8cd7-acdd-3554f5b56846"
+transport_key = "QTqrBc0wKbdf3M0WKmtPq7uFdziUCIY/3edG160VzVE"
 
 [peers.trust]
 status = "trusted"
@@ -52,17 +52,17 @@ require_peer_expiry = false
 [poa]
 required_threshold = 1
 validators = []
-validator_set = "../../.zap/poa-validators.json"
+validator_set = "../../.rivun/poa-validators.json"
 validator_set_authority = "ub04BmALK4loxSDH2CYepq8cy/qWaJuJQdKeGSkKRzY"
 
 [receipts]
-dir = "../../.zap/receipts"
+dir = "../../.rivun/receipts"
 
 [registry]
 require_signature = false
 
 [memory]
-dir = "../../.zap/memory"
+dir = "../../.rivun/memory"
 allow_driver_read = false
 allow_driver_write = false
 

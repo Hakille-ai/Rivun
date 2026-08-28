@@ -1,36 +1,36 @@
-# ZAP SDKs
+# rivun SDKs
 
 The first external SDK distribution lives under `sdks/` and focuses on
 protocol-compatible helpers with lightweight local transports:
 
-- `sdks/python`: Python dataclasses for `ZENV` control envelopes, ZapStore
+- `sdks/python`: Python dataclasses for `ZENV` control envelopes, RivunStore
   request/response payloads, PACT helpers, and a stdlib UDP client.
 - `sdks/typescript`: TypeScript helpers that run in Node, including UDP,
   BLAKE3, Ed25519 verification, typecheck, and declaration build scripts.
 - `sdks/go`: Go package for control envelope bytes, UDP transport, canonical
-  BLAKE3 hashes, Ed25519 verification, and ZapStore JSON types.
-- `sdks/rust`: Rust SDK crate that wraps the canonical local ZAP crates through
+  BLAKE3 hashes, Ed25519 verification, and RivunStore JSON types.
+- `sdks/rust`: Rust SDK crate that wraps the canonical local rivun crates through
   path dependencies.
 
 ## Common Surface
 
-Each SDK can build and parse ZAP control envelopes for current ZapStore control
+Each SDK can build and parse rivun control envelopes for current RivunStore control
 subjects:
 
-- `zap.registry.index.request`
-- `zap.registry.index.response`
-- `zap.registry.bundle.manifest.request`
-- `zap.registry.bundle.manifest.response`
+- `rivun.registry.index.request`
+- `rivun.registry.index.response`
+- `rivun.registry.bundle.manifest.request`
+- `rivun.registry.bundle.manifest.response`
 
-Each SDK also includes base ZapStore types for registry index entries, bundle
+Each SDK also includes base RivunStore types for registry index entries, bundle
 manifests, bundle entries, install plan requests, install plans, install plan
 entries, and PACT record/bundle conformance helpers.
 
 Shared protocol subjects are catalogued in `fixtures/control-subjects-v1.json`
-and now cover agent protocol messages (`zap.agent.*`), receipt replication
-(`zap.receipts.*`), PACT (`zap.pact.*`), registry (`zap.registry.*`),
-discovery (`zap.discovery.*`), and PoA validator sets
-(`zap.poa.validator_set.*`). SDK helpers build and parse envelopes for the
+and now cover agent protocol messages (`rivun.agent.*`), receipt replication
+(`rivun.receipts.*`), PACT (`rivun.pact.*`), registry (`rivun.registry.*`),
+discovery (`rivun.discovery.*`), and PoA validator sets
+(`rivun.poa.validator_set.*`). SDK helpers build and parse envelopes for the
 subjects the SDK's test surface supports; see the per-SDK test files for the
 exact coverage.
 
@@ -47,16 +47,16 @@ result.
 The fixture directory is the SDK conformance source of truth for stable protocol
 examples:
 
-- `zenv-control-registry-bundle-manifest-request.json`: a v1 `ZENV` control
-  envelope carrying `zap.registry.bundle.manifest.request`.
+- `ZENV-control-registry-bundle-manifest-request.json`: a v1 `ZENV` control
+  envelope carrying `rivun.registry.bundle.manifest.request`.
 - `control-subjects-v1.json`: the current v1 control subject catalogue and
   media types.
-- `agent-intent-message-v1.json`: a v1 `application/zap-agent+json` intent
+- `agent-intent-message-v1.json`: a v1 `application/rivun-agent+json` intent
   payload that can be carried by SDK control envelope helpers.
-- `pact-record-v1.json`: a signed v1 `application/zap-pact+json` action record
+- `pact-record-v1.json`: a signed v1 `application/rivun-pact+json` action record
   used for canonical hash and signature verification.
 - `pact-bundle-v1.json`: a portable PACT bundle containing the signed record.
-- `protocol/zenv-unsigned-control-frame-v1.json`: a deterministic unsigned
+- `protocol/ZENV-unsigned-control-frame-v1.json`: a deterministic unsigned
   registry index request frame for header and body round-trip checks.
 - `protocol/signed-control-frame-v1.json`: a deterministic signed control frame
   shape with an Ed25519 auth trailer.
@@ -80,18 +80,18 @@ in extra runtime services.
 The CLI can also check fixture coverage for each SDK layout:
 
 ```bash
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/typescript --json
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/python --json
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/go --json
-cargo run --locked -p zap-cli -- fixtures verify --fixtures fixtures --sdk sdks/rust --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/typescript --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/python --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/go --json
+cargo run --locked -p rivun-cli -- fixtures verify --fixtures fixtures --sdk sdks/rust --json
 ```
 
-| SDK | ZENV encode/decode | ZapStore payloads | Shared fixture tests | Integrity helpers | Local test command |
+| SDK | ZENV encode/decode | RivunStore payloads | Shared fixture tests | Integrity helpers | Local test command |
 | --- | --- | --- | --- | --- | --- |
-| Python | Yes | Yes | `zenv`, `agent-intent`, unsigned frame, receipt, PACT | Shape validation always; receipt and PACT signing-message helpers; BLAKE3 and Ed25519 with `crypto` extra | `PYTHONPATH=sdks/python/src python -m unittest discover -s sdks/python/tests` |
-| TypeScript | Yes | Yes | `zenv`, `control-subjects`, `agent-intent`, unsigned frame, receipt, PACT | BLAKE3, receipt/PACT signing-message helpers, and Ed25519 through Noble packages | `npm --prefix sdks/typescript test` |
-| Go | Yes | Yes | `zenv`, `control-subjects`, unsigned frame, receipt, PACT | BLAKE3 and standard Ed25519 | `go test ./sdks/go/...` |
-| Rust | Yes, via canonical crates | Yes, via canonical crates | Canonical crate tests plus PACT fixture verification | Canonical ZAP crate helpers | `cargo test --manifest-path sdks/rust/Cargo.toml` |
+| Python | Yes | Yes | `ZENV`, `agent-intent`, unsigned frame, receipt, PACT | Shape validation always; receipt and PACT signing-message helpers; BLAKE3 and Ed25519 with `crypto` extra | `PYTHONPATH=sdks/python/src python -m unittest discover -s sdks/python/tests` |
+| TypeScript | Yes | Yes | `ZENV`, `control-subjects`, `agent-intent`, unsigned frame, receipt, PACT | BLAKE3, receipt/PACT signing-message helpers, and Ed25519 through Noble packages | `npm --prefix sdks/typescript test` |
+| Go | Yes | Yes | `ZENV`, `control-subjects`, unsigned frame, receipt, PACT | BLAKE3 and standard Ed25519 | `go test ./sdks/go/...` |
+| Rust | Yes, via canonical crates | Yes, via canonical crates | Canonical crate tests plus PACT fixture verification | Canonical rivun crate helpers | `cargo test --manifest-path sdks/rust/Cargo.toml` |
 
 Known limitations:
 
@@ -104,18 +104,18 @@ Known limitations:
 
 ## Integrity Helpers
 
-ZapStore artifact hashes are canonical `blake3:<64 hex chars>` values.
+RivunStore artifact hashes are canonical `blake3:<64 hex chars>` values.
 
 Python and TypeScript expose constants for the receipt replication subjects
-(`zap.receipts.request`, `zap.receipts.response`), the receipt media type
-(`application/zap-receipts+json`), and the agent message media type/subjects.
+(`rivun.receipts.request`, `rivun.receipts.response`), the receipt media type
+(`application/rivun-receipts+json`), and the agent message media type/subjects.
 They also expose receipt response shape validation helpers and
 `receipt_signing_message` / `receiptSigningMessage`, which builds the exact
 domain-prefixed message bytes that Ed25519 verification expects for current
 receipt payloads. The helper does not invent missing signature material; callers
 must still provide the canonical receipt JSON, signer public key, and signature.
 
-The Rust SDK reuses `zap-store` and can compute canonical BLAKE3 hashes and run
+The Rust SDK reuses `rivun-store` and can compute canonical BLAKE3 hashes and run
 existing signature verification methods. Python can compute/verify when its
 `crypto` extra is installed. TypeScript uses `@noble/hashes` and
 `@noble/ed25519`. Go uses `lukechampine.com/blake3` and the standard Ed25519
@@ -143,3 +143,4 @@ go test ./sdks/go/...
 
 The SDK workflow installs Python, Node, Go, and Rust toolchains and runs these
 checks in CI.
+

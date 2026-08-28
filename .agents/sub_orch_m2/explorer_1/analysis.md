@@ -2,16 +2,16 @@
 
 **Milestone**: M2 (R2: Incremental MMR Accumulator & Compact Proofs)  
 **Author**: Explorer 1 (`sub_orch_m2/explorer_1`)  
-**Target Crates**: `crates/zap-ledger`, `crates/zap-crypto`  
+**Target Crates**: `crates/rivun-ledger`, `crates/rivun-crypto`  
 **Date**: 2026-08-15  
 
 ---
 
 ## 1. Executive Summary & Problem Scope
 
-Milestone 2 (R2) transforms ZAP's audit ledger into a high-throughput, cross-cluster cryptographic receipt accumulator. In high-velocity distributed multi-agent swarms (targeting 10,000+ consensus operations/sec), every action frame, Proof-of-Action (PoA) attestation, and inter-agent pact execution generates a durable receipt. 
+Milestone 2 (R2) transforms rivun's audit ledger into a high-throughput, cross-cluster cryptographic receipt accumulator. In high-velocity distributed multi-agent swarms (targeting 10,000+ consensus operations/sec), every action frame, Proof-of-Action (PoA) attestation, and inter-agent pact execution generates a durable receipt. 
 
-To achieve sub-millisecond batch sealing and validation without incurring prohibitive memory or network overhead, ZAP requires:
+To achieve sub-millisecond batch sealing and validation without incurring prohibitive memory or network overhead, rivun requires:
 1. An **Incremental Merkle Mountain Range (`IncrementalMmr`)** accumulator operating in strictly $O(\log N)$ RAM ($\le 64$ peak hashes, $< 2.5$ KB total memory) with amortized $O(1)$ append time via binary carry-over tree merging.
 2. A **Deduplicated Multi-Leaf Batch Inclusion Proof (`MmrBatchInclusionProof`)** that compresses shared ancestor/sister nodes across $K$ queried receipts, reducing proof payloads by up to 99% compared to naive independent inclusion proofs.
 3. A **Cryptographic Non-Membership / Exclusion Proof (`MmrExclusionProof`)** supporting four distinct non-existence assertions (`BeforeRange`, `AfterRange`, `SequenceGap`, and `HashBound`).
@@ -19,29 +19,29 @@ To achieve sub-millisecond batch sealing and validation without incurring prohib
 
 ---
 
-## 2. Investigation of Current MMR Implementation (`crates/zap-ledger/src/mmr.rs`)
+## 2. Investigation of Current MMR Implementation (`crates/rivun-ledger/src/mmr.rs`)
 
 ### 2.1 Code Structure & Observations
-Inspection of `crates/zap-ledger/src/mmr.rs` (lines 1–434) and `crates/zap-ledger/src/lib.rs` (lines 738–756) reveals the existing baseline:
+Inspection of `crates/rivun-ledger/src/mmr.rs` (lines 1–434) and `crates/rivun-ledger/src/lib.rs` (lines 738–756) reveals the existing baseline:
 
 1. **Domain Separators and Hashing**:
    - `hash_leaf(data: &[u8]) -> MmrHash` (`mmr.rs:31–36`):
      ```rust
      let mut hasher = Hasher::new();
-     hasher.update(b"ZAP-MMR-LEAF-v1:");
+     hasher.update(b"rivun-MMR-LEAF-v1:");
      hasher.update(data);
      *hasher.finalize().as_bytes()
      ```
    - `hash_nodes(left: &MmrHash, right: &MmrHash) -> MmrHash` (`mmr.rs:38–44`):
      ```rust
      let mut hasher = Hasher::new();
-     hasher.update(b"ZAP-MMR-NODE-v1:");
+     hasher.update(b"rivun-MMR-NODE-v1:");
      hasher.update(left);
      hasher.update(right);
      *hasher.finalize().as_bytes()
      ```
    - `bag_peaks(peaks: &[MmrHash]) -> MmrHash` (`mmr.rs:46–62`):
-     - Left-to-right sequential hashing with domain `b"ZAP-MMR-PEAK-BAG-v1:"`.
+     - Left-to-right sequential hashing with domain `b"rivun-MMR-PEAK-BAG-v1:"`.
      - Base cases: 0 peaks $\to [0u8; 32]$, 1 peak $\to \text{peaks}[0]$.
 
 2. **In-Memory Accumulator (`MerkleMountainRange`)**:
@@ -125,7 +125,7 @@ pub fn bag_peaks(peaks: &[MmrHash]) -> MmrHash {
     let mut current = peaks[0];
     for peak in &peaks[1..] {
         let mut hasher = Hasher::new();
-        hasher.update(b"ZAP-MMR-PEAK-BAG-v1:");
+        hasher.update(b"rivun-MMR-PEAK-BAG-v1:");
         hasher.update(&current);
         hasher.update(peak);
         current = *hasher.finalize().as_bytes();
@@ -483,16 +483,16 @@ Journal Directory:
 ## 8. Implementation & Verification Plan
 
 ### 8.1 Files to Modify & Create
-1. `crates/zap-ledger/src/mmr.rs`:
+1. `crates/rivun-ledger/src/mmr.rs`:
    - Implement `IncrementalMmr` with `[Option<MmrHash>; 64]`, `append_leaf`, `append_bytes`, `get_peaks`, `get_root`, `to_zmmr_bytes`, `from_zmmr_bytes`, `save_to_file`, `load_from_file`.
    - Implement `MmrBatchInclusionProof` generation and `verify` method with multi-leaf DAG deduplication.
    - Implement `MmrExclusionProof` enum and `verify` method for all 4 non-membership variants.
    - Maintain backward compatibility for `MerkleMountainRange` and `MmrInclusionProof`.
-2. `crates/zap-ledger/src/lib.rs`:
+2. `crates/rivun-ledger/src/lib.rs`:
    - Integrate `IncrementalMmr` into `ReceiptJournalStore`.
    - Update `rotate_and_seal_segment` to write `<sequence:020>.zmmr`.
    - Update `open` / `open_with_keypair` to load latest `.zmmr` snapshot.
-3. `crates/zap-ledger/benches/receipt.rs` & `benches/mmr_scale.rs`:
+3. `crates/rivun-ledger/benches/receipt.rs` & `benches/mmr_scale.rs`:
    - Benchmark incremental appending at 100,000+ receipts.
    - Benchmark batch proof generation and DAG verification.
    - Benchmark exclusion proof verification.
@@ -500,4 +500,5 @@ Journal Directory:
 ---
 
 ## 9. Conclusion
-The proposed architecture for `IncrementalMmr`, `MmrBatchInclusionProof`, `MmrExclusionProof`, and `.zmmr` disk persistence provides a mathematically robust, memory-optimal ($O(\log N)$ RAM, amortized $O(1)$ append), and lightning-fast cryptographic foundation for ZAP Milestone 2.
+The proposed architecture for `IncrementalMmr`, `MmrBatchInclusionProof`, `MmrExclusionProof`, and `.zmmr` disk persistence provides a mathematically robust, memory-optimal ($O(\log N)$ RAM, amortized $O(1)$ append), and lightning-fast cryptographic foundation for rivun Milestone 2.
+

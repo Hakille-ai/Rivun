@@ -6,7 +6,7 @@ Formulate a comprehensive fix blueprint for Milestone 1 addressing all auditor, 
 ## 🔒 My Identity
 - Archetype: Teamwork explorer
 - Roles: Read-only investigation & fix blueprint synthesis
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_explorer_m1_fix1
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_explorer_m1_fix1
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Milestone: Milestone 1 Fix Plan
 
@@ -20,11 +20,11 @@ Formulate a comprehensive fix blueprint for Milestone 1 addressing all auditor, 
 
 ## Investigation State
 - **Explored paths**:
-  - `crates/zap-net/src/durable_replay.rs` & `crates/zap-net/src/lib.rs`
-  - `crates/zap-node/src/durable_replay.rs`
-  - `crates/zap-journal/src/lib.rs` & `crates/zap-journal/tests/m1_journal_stress.rs`
-  - `crates/zap-ledger/src/lib.rs` & `crates/zap-ledger/tests/m1_challenger_stress.rs`
-  - `crates/zap-net/tests/durable_replay_stress.rs` & `crates/zap-node/tests/durable_replay_stress.rs`
+  - `crates/rivun-net/src/durable_replay.rs` & `crates/rivun-net/src/lib.rs`
+  - `crates/rivun-node/src/durable_replay.rs`
+  - `crates/rivun-journal/src/lib.rs` & `crates/rivun-journal/tests/m1_journal_stress.rs`
+  - `crates/rivun-ledger/src/lib.rs` & `crates/rivun-ledger/tests/m1_challenger_stress.rs`
+  - `crates/rivun-net/tests/durable_replay_stress.rs` & `crates/rivun-node/tests/durable_replay_stress.rs`
 - **Key findings**:
   - Detailed root causes and exact code remediations for WAL truncation, `compact()` node_id preservation, safe timestamp arithmetic, peer WAL isolation, hash chain pruning fix, index building post-pruning, automatic segment manifest signing, and clippy/compilation fixes.
 - **Unexplored areas**: None.
@@ -34,3 +34,4 @@ Formulate a comprehensive fix blueprint for Milestone 1 addressing all auditor, 
 
 ## Artifact Index
 - handoff.md — Fix blueprint report (created and populated)
+

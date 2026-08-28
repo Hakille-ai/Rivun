@@ -1,0 +1,21 @@
+[package]
+name = "rivun-policy"
+description = "Deterministic ZAP message policy evaluation."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+uuid.workspace = true
+rivun-capability.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "policy"
+harness = false

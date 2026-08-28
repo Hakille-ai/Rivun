@@ -5,7 +5,7 @@
 Direct empirical observations from executing adversarial test suites, stress harnesses, and inspecting Milestone 3 telemetry, incident snapshot, redactor, and node components:
 
 1. **Adversarial Test Suite Execution (`adversarial_m3_tests.rs`)**:
-   - Executed command: `cargo test -p zap-telemetry --test adversarial_m3_tests`
+   - Executed command: `cargo test -p rivun-telemetry --test adversarial_m3_tests`
    - Result: 3 passed; 0 failed; 0 ignored; duration: 0.02s
    - Tests verified:
      - `test_adversarial_secret_redactor_leaks`: verified redaction of transport keys, PEM private key blocks (`-----BEGIN PRIVATE KEY-----`), API keys/bearer tokens, and preservation of JSON syntax.
@@ -13,24 +13,24 @@ Direct empirical observations from executing adversarial test suites, stress har
      - `test_adversarial_process_and_socket_state_hardcoding`: verified live querying of process PID (`std::process::id()`), non-zero RSS and VMS memory bytes via Win32 `K32GetProcessMemoryInfo` (and `/proc/self/status` on Linux), thread count $\ge 1$, and non-empty listening ports and active sockets in `SocketState::collect()`.
 
 2. **Challenger Empirical & Telemetry Test Suites (`challenger_empirical_tests.rs`, `telemetry_tests.rs`)**:
-   - Executed command: `cargo test -p zap-telemetry`
+   - Executed command: `cargo test -p rivun-telemetry`
    - Result: 15 passed across all test binaries:
      - `adversarial_m3_tests.rs`: 3 tests passed
      - `challenger_empirical_tests.rs`: 7 tests passed (corrupted WAL magic detection, tampered segment manifest verification failure, invalid pack registry signature detection, quorum threshold failure and degradation, complex PEM/JSON secret redaction, tar.gz decompression and contents inspection, Prometheus label escaping and all 17 metrics formatting)
      - `telemetry_tests.rs`: 5 tests passed (6 criteria doctor report, secret redactor, all 16 metrics parity, incident snapshot redaction and tar archive, corrupted WAL and manifest failures)
 
 3. **Workspace Suite & Milestone 3 Core Dependencies**:
-   - `cargo test -p zap-node`: 75 tests passed (70 unit tests + 5 durable replay stress tests in `durable_replay_stress.rs`).
-   - `cargo test -p zap-cli`: 78 tests passed (76 in `cli.rs`, 1 in `pack_cli_tests.rs`, 1 in `smoke_node.rs`).
-   - `cargo test --workspace --exclude zap-e2e`: 23 workspace crates passed with 0 test failures.
-   - `cargo clippy -p zap-telemetry -p zap-node -p zap-store -p zap-pack -p zap-journal -p zap-ledger -p zap-net --all-targets -- -D warnings`: Completed with 0 warnings.
+   - `cargo test -p rivun-node`: 75 tests passed (70 unit tests + 5 durable replay stress tests in `durable_replay_stress.rs`).
+   - `cargo test -p rivun-cli`: 78 tests passed (76 in `cli.rs`, 1 in `pack_cli_tests.rs`, 1 in `smoke_node.rs`).
+   - `cargo test --workspace --exclude rivun-e2e`: 23 workspace crates passed with 0 test failures.
+   - `cargo clippy -p rivun-telemetry -p rivun-node -p rivun-store -p rivun-pack -p rivun-journal -p rivun-ledger -p rivun-net --all-targets -- -D warnings`: Completed with 0 warnings.
 
-4. **Prometheus Metrics Parity (`zap_replay_drops_total`)**:
-   - Verified `zap_replay_drops_total` is present in `ZapNodeMetricsSnapshot` (`crates/zap-telemetry/src/metrics.rs:49`) and formatted in `to_prometheus_text()` (`crates/zap-telemetry/src/metrics.rs:203-208`).
-   - Verified `ZapNode::record_replay_drop()` atomically increments both `replay_drops_total` and `replay_rejections_total` under mutex protection (`crates/zap-node/src/lib.rs:2248-2253`).
+4. **Prometheus Metrics Parity (`@@rivun_HEADER@@replay_drops_total`)**:
+   - Verified `@@rivun_HEADER@@replay_drops_total` is present in `ZapNodeMetricsSnapshot` (`crates/rivun-telemetry/src/metrics.rs:49`) and formatted in `to_prometheus_text()` (`crates/rivun-telemetry/src/metrics.rs:203-208`).
+   - Verified `ZapNode::record_replay_drop()` atomically increments both `replay_drops_total` and `replay_rejections_total` under mutex protection (`crates/rivun-node/src/lib.rs:2248-2253`).
 
 5. **FleetDoctor 6 Health Check Criteria**:
-   - Verified genuine verification logic in `FleetDoctor::evaluate()` (`crates/zap-telemetry/src/doctor.rs:98-255`):
+   - Verified genuine verification logic in `FleetDoctor::evaluate()` (`crates/rivun-telemetry/src/doctor.rs:98-255`):
      - `network`: queries active peers vs configured nodes in `FleetTopology`.
      - `storage`: checks receipt and memory directory existence on disk.
      - `replay_guard`: validates WAL framing magic header `b"ZAPFRM01"`. Corrupted magic or unreadable WAL files immediately return `FleetDoctorStatus::Failed`.
@@ -56,7 +56,7 @@ Direct empirical observations from executing adversarial test suites, stress har
    - `IncidentCapturer::build_tar_gz_archive()` encodes tar streams with `flate2::write::GzEncoder`, producing valid RFC 1952 gzip archives with header `[0x1f, 0x8b]` that cleanly decompress using standard gzip decoders (`flate2::read::GzDecoder`).
 
 4. **Prometheus Text Exposition & Label Escaping**:
-   - All 17 metrics (including `zap_replay_drops_total` and `zap_peers_active`) follow Prometheus text exposition syntax (version 0.0.4) with explicit `# HELP` and `# TYPE` declarations.
+   - All 17 metrics (including `@@rivun_HEADER@@replay_drops_total` and `@@rivun_HEADER@@peers_active`) follow Prometheus text exposition syntax (version 0.0.4) with explicit `# HELP` and `# TYPE` declarations.
    - String label values (such as `reason` and `action`) pass through `prometheus_escape()`, preventing newline or quote injection.
 
 5. **Strict Fleet Doctor Evaluation**:
@@ -68,7 +68,7 @@ Direct empirical observations from executing adversarial test suites, stress har
 ## 3. Caveats
 
 - **Out of Scope (Milestone 4)**:
-  - `crates/zap-gateway` is currently being implemented under Milestone 4 (AI Agent Gateway & Multi-Transport Integration). Compilation and clippy errors in `zap-gateway` do not affect Milestone 3 crates (`zap-telemetry`, `zap-node`, `zap-cli`, `zap-store`, `zap-pack`, `zap-journal`, `zap-ledger`, `zap-net`), all of which build cleanly, pass all tests, and have 0 clippy warnings.
+  - `crates/rivun-gateway` is currently being implemented under Milestone 4 (AI Agent Gateway & Multi-Transport Integration). Compilation and clippy errors in `rivun-gateway` do not affect Milestone 3 crates (`rivun-telemetry`, `rivun-node`, `rivun-cli`, `rivun-store`, `rivun-pack`, `rivun-journal`, `rivun-ledger`, `rivun-net`), all of which build cleanly, pass all tests, and have 0 clippy warnings.
 
 ---
 
@@ -80,7 +80,7 @@ The Milestone 3 (Fleet Topology, Health & Incident Telemetry) implementation sat
 - Process memory and socket state collection query genuine live OS metrics without dummy constants.
 - The `SecretRedactor` robustly eliminates secret leakage across PEM blocks, 15 sensitive keywords, inline JSON keypairs, and 64-character hex keys without corrupting syntax.
 - Gzip tarball archive creation strictly adheres to RFC 1952 gzip format and 512-byte POSIX ustar block alignment.
-- Prometheus exporter parity is complete across all metrics, including `zap_replay_drops_total`.
+- Prometheus exporter parity is complete across all metrics, including `@@rivun_HEADER@@replay_drops_total`.
 - `FleetDoctor` evaluates all 6 criteria with genuine cryptographic, magic header, and quorum threshold verification logic.
 
 ---
@@ -91,25 +91,26 @@ To independently reproduce the empirical verification results:
 
 1. **Run Adversarial M3 Test Suite**:
    ```powershell
-   cargo test -p zap-telemetry --test adversarial_m3_tests
+   cargo test -p rivun-telemetry --test adversarial_m3_tests
    ```
 
-2. **Run All Zap-Telemetry Test Suites (15 Tests)**:
+2. **Run All rivun-Telemetry Test Suites (15 Tests)**:
    ```powershell
-   cargo test -p zap-telemetry
+   cargo test -p rivun-telemetry
    ```
 
-3. **Run Zap-Node & Durable Replay Stress Tests (75 Tests)**:
+3. **Run rivun-Node & Durable Replay Stress Tests (75 Tests)**:
    ```powershell
-   cargo test -p zap-node
+   cargo test -p rivun-node
    ```
 
-4. **Run Zap-CLI Test Suite (78 Tests)**:
+4. **Run rivun-CLI Test Suite (78 Tests)**:
    ```powershell
-   cargo test -p zap-cli
+   cargo test -p rivun-cli
    ```
 
 5. **Run Clippy on M3 Crates**:
    ```powershell
-   cargo clippy -p zap-telemetry -p zap-node -p zap-cli --all-targets -- -D warnings
+   cargo clippy -p rivun-telemetry -p rivun-node -p rivun-cli --all-targets -- -D warnings
    ```
+

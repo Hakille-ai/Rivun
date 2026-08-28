@@ -1,8 +1,8 @@
 {
   "fixture_schema_version": 1,
   "description": "Agent capability negotiation response payload for the zap.agent.capability_negotiation.response ZENV subject.",
-  "subject": "zap.agent.capability_negotiation.response",
-  "content_type": "application/zap-agent+json",
+  "subject": "rivun.agent.capability_negotiation.response",
+  "content_type": "application/rivun-agent+json",
   "body_json": {
     "type": "capability_negotiation_response",
     "payload": {

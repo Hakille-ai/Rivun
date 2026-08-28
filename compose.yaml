@@ -1,11 +1,11 @@
-name: zap
+name: rivun
 
 services:
   node:
     build:
       context: .
-    image: zap:local
-    command: ["run", "--config", "/etc/zap/zap.toml"]
+    image: rivun:local
+    command: ["run", "--config", "/etc/rivun/rivun.toml"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:7000:7000/udp"
@@ -14,14 +14,14 @@ services:
     volumes:
       - type: bind
         source: ./examples/configs/container-node.toml
-        target: /etc/zap/zap.toml
+        target: /etc/rivun/rivun.toml
         read_only: true
       - type: bind
-        source: ./.zap/container
-        target: /var/lib/zap
+        source: ./.rivun/container
+        target: /var/lib/rivun
       - type: bind
         source: ./examples/wasm-drivers
-        target: /opt/zap/drivers
+        target: /opt/rivun/drivers
         read_only: true
     read_only: true
     tmpfs:

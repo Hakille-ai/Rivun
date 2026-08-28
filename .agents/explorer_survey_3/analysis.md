@@ -1,24 +1,24 @@
 # Comprehensive Technical Survey & Architectural Blueprint
 # R4 (Pact & Dispute Resolution) & R5 (Cluster Simulator & Swarm Benchmarking)
 
-**Author:** Explorer 3 (ZAP Next-Gen Frontier Survey Phase)  
+**Author:** Explorer 3 (rivun Next-Gen Frontier Survey Phase)  
 **Date:** 2026-08-15  
-**Working Directory:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_3`  
-**Target Codebase:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP`  
+**Working Directory:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_3`  
+**Target Codebase:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun`  
 
 ---
 
 ## Executive Summary
 
 This survey provides an exhaustive architectural inspection, gap analysis, and implementation blueprint for:
-1. **R4: Decentralized Agent Pact & Dispute Resolution Engine** (`crates/zap-pact`, `crates/zap-policy`, `crates/zap-agent`, `crates/zap-ledger`, `crates/zap-crypto`).
-2. **R5: Cluster Simulator & Swarm Benchmarking Tooling** (`crates/zap-cli`, `crates/zap-telemetry`, workspace test harness, multi-language SDKs).
+1. **R4: Decentralized Agent Pact & Dispute Resolution Engine** (`crates/rivun-pact`, `crates/rivun-policy`, `crates/rivun-agent`, `crates/rivun-ledger`, `crates/rivun-crypto`).
+2. **R5: Cluster Simulator & Swarm Benchmarking Tooling** (`crates/rivun-cli`, `crates/rivun-telemetry`, workspace test harness, multi-language SDKs).
 
-The investigation verifies that while ZAP possesses robust foundations (single-actor signed PACT records, deterministic TOML policy sets, 6-stage provenance chains, and gossip quorum voting), it currently lacks:
+The investigation verifies that while rivun possesses robust foundations (single-actor signed PACT records, deterministic TOML policy sets, 6-stage provenance chains, and gossip quorum voting), it currently lacks:
 - **Multi-party conditional execution contracts** with escrow lock states, timeout-triggered slashing, and threshold multi-signature releases.
 - **Deterministic policy dispute mediation** that programmatically adjudicates breach claims without out-of-band arbitration.
 - **Full causal chain linking** from pact negotiation through resource allocation, WASM driver execution, PoA attestations, cryptographic settlement receipts, and MMR root commitments.
-- **`zap cluster` & `zap swarm` CLI commands**, live multi-node topology cluster simulation, Byzantine chaos injection fixtures, and automated stress benchmarks verifying **10,000+ consensus operations/sec**.
+- **`rivun cluster` & `rivun swarm` CLI commands**, live multi-node topology cluster simulation, Byzantine chaos injection fixtures, and automated stress benchmarks verifying **10,000+ consensus operations/sec**.
 
 Below is the detailed survey, state machines, data structures, and backwards-compatible evolution plan.
 
@@ -26,8 +26,8 @@ Below is the detailed survey, state machines, data structures, and backwards-com
 
 ## 1. Codebase Inventory & Current State Assessment
 
-### 1.1 `crates/zap-pact` (Current Implementation)
-- **Primary Source:** `crates/zap-pact/src/lib.rs` (720 lines).
+### 1.1 `crates/rivun-pact` (Current Implementation)
+- **Primary Source:** `crates/rivun-pact/src/lib.rs` (720 lines).
 - **Core Entities:**
   - `ZapPact`: Schema version `1`. Fields: `pact_id` (Uuid), `actor` (String), `target` (String), `intent` (String), `object` (JSON Value), `terms` (JSON Value), `consent` (JSON Value), `proof` (JSON Value), `created_at_micros` (u64), `expires_at_micros` (Option<u64>), `actor_public_key` (Option<String>), `hash` (Option<String>), `signature` (Option<String>), `status` (`ZapPactStatus`), `verification` (Option<ZapPactVerification>), `revocation` (Option<ZapPactRevocation>), `timeline` (Vec<ZapPactTimelineEntry>).
   - `ZapPactStatus`: Enum with 5 states: `Draft`, `Active`, `Expired`, `Revoked`, `Invalid`.
@@ -35,8 +35,8 @@ Below is the detailed survey, state machines, data structures, and backwards-com
   - `ZapPactRevocation`: `pact_id`, `revoked_by`, `reason`, `revoked_at_micros`, `signature`.
   - `ZapPactBundle`: Groups a `ZapPact` with its verifications and revocations.
 - **Canonical Serialization & Cryptography:**
-  - Domain Signature: `b"ZAP-PACT-v1"` using Ed25519.
-  - Revocation Signature Domain: `b"ZAP-PACT-REVOCATION-v1"`.
+  - Domain Signature: `b"rivun-PACT-v1"` using Ed25519.
+  - Revocation Signature Domain: `b"rivun-PACT-REVOCATION-v1"`.
   - Canonical Hash: `blake3:<64 lowercase hex>` of normalized JSON payload (`signing_payload_ordered`).
 - **Observed Gaps for R4:**
   1. *Single-Party Restriction:* Only supports 1 actor (`actor_public_key`) and 1 target string. Cannot represent N-party agreements or multi-role participant graphs.
@@ -46,8 +46,8 @@ Below is the detailed survey, state machines, data structures, and backwards-com
 
 ---
 
-### 1.2 `crates/zap-policy` (Current Implementation)
-- **Primary Source:** `crates/zap-policy/src/lib.rs` (374 lines).
+### 1.2 `crates/rivun-policy` (Current Implementation)
+- **Primary Source:** `crates/rivun-policy/src/lib.rs` (374 lines).
 - **Core Entities:**
   - `PolicySet`: `default_decision` (`Allow` or `Deny`), `rules: Vec<PolicyRule>`.
   - `PolicyRule`: `name`, `kind`, `subject`, `source_node`, `target_node`, `content_type`, `decision` (`PolicyDecision`), `required_capability`, `reason`.
@@ -60,31 +60,31 @@ Below is the detailed survey, state machines, data structures, and backwards-com
 
 ---
 
-### 1.3 `crates/zap-agent` (Current Implementation)
-- **Primary Source:** `crates/zap-agent/src/lib.rs` (1,207 lines) and `crates/zap-agent/src/provenance.rs` (838 lines).
+### 1.3 `crates/rivun-agent` (Current Implementation)
+- **Primary Source:** `crates/rivun-agent/src/lib.rs` (1,207 lines) and `crates/rivun-agent/src/provenance.rs` (838 lines).
 - **Core Entities:**
   - High-level Agent Messages: `AgentIntent`, `AgentSession`, `DelegationRequest`, `DelegationResponse`, `CapabilityNegotiationRequest`, `CapabilityNegotiationResponse`, `AgentStatusUpdate`, `AgentResult`, `AgentErrorReport`.
   - Provenance Engine (`provenance.rs`):
     - `ProvenanceStage`: `Intent`, `Negotiation`, `Policy`, `Driver`, `Poa`, `Receipt`.
     - `ProvenanceStep`: `stage`, `step_hash`, `previous_hash`, `input_data_hash`, `timestamp_micros`, `metadata`.
-    - `ProvenanceChainDigest`: Sequential chain of steps verified against SHA-256 links and signed by node's Ed25519 key over `ZAP-PROVENANCE-CHAIN-v1`.
+    - `ProvenanceChainDigest`: Sequential chain of steps verified against SHA-256 links and signed by node's Ed25519 key over `rivun-PROVENANCE-CHAIN-v1`.
 - **Observed Gaps for R4:**
   1. `ProvenanceStage` does not explicitly incorporate `PactCommit`, `EscrowLock`, `DisputeMediation`, or `SettlementReceipt`.
   2. Provenance is currently single-node focused, lacking multi-agent cross-signing for cooperative pact settlements.
 
 ---
 
-### 1.4 `crates/zap-cli` (Current Implementation)
-- **Primary Source:** `crates/zap-cli/src/main.rs` (11,748 lines).
+### 1.4 `crates/rivun-cli` (Current Implementation)
+- **Primary Source:** `crates/rivun-cli/src/main.rs` (11,748 lines).
 - **Existing Commands:** 26 commands (`Keygen`, `Run`, `CheckConfig`, `Doctor`, `Send`, `Inspect`, `Capability`, `Discovery`, `Memory`, `Route`, `Trust`, `Peer`, `Schema`, `Agent`, `Pact`, `Policy`, `Pack`, `Fixtures`, `DriverManifest`, `Registry`, `Receipts`, `Incident`, `Fleet`, `Poa`, `Bench`, `Gateway`, `Provenance`).
 - **Observed Gaps for R5:**
-  1. *No `zap cluster` command:* Missing `zap cluster up --nodes N`, `zap cluster status`, `zap cluster down`.
-  2. *No `zap swarm` command:* Missing `zap swarm bench --rate R --duration D`, `zap swarm partition-test`.
+  1. *No `rivun cluster` command:* Missing `rivun cluster up --nodes N`, `rivun cluster status`, `rivun cluster down`.
+  2. *No `rivun swarm` command:* Missing `rivun swarm bench --rate R --duration D`, `rivun swarm partition-test`.
   3. `BenchCommand` only contains `Parse { iterations }`.
 
 ---
 
-### 1.5 `crates/zap-telemetry` (Current Implementation)
+### 1.5 `crates/rivun-telemetry` (Current Implementation)
 - **Primary Source:** `src/doctor.rs`, `src/incident.rs`, `src/metrics.rs`, `src/topology.rs`.
 - **Capabilities:**
   - `FleetDoctor`: 6 diagnostic categories (`network`, `storage`, `replay_guard`, `journal`, `pack_registry`, `certificate_validity`).
@@ -115,7 +115,7 @@ In multi-agent collaborative workflows (e.g. autonomous trading, distributed com
 
 ---
 
-### 2.2 Extended Multi-Party Pact Data Structures (`crates/zap-pact`)
+### 2.2 Extended Multi-Party Pact Data Structures (`crates/rivun-pact`)
 
 #### 2.2.1 Participant Graph & Roles
 ```rust
@@ -146,7 +146,7 @@ pub struct PactParticipant {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PactEscrowLock {
     pub escrow_id: Uuid,
-    pub resource_type: String,       // e.g. "fuel_units", "compute_credits", "zap_token"
+    pub resource_type: String,       // e.g. "fuel_units", "compute_credits", "@@rivun_HEADER@@token"
     pub amount: u64,
     pub depositor: Uuid,
     pub locked_at_micros: u64,
@@ -314,7 +314,7 @@ pub enum MediationAuthority {
 }
 ```
 
-#### 2.3.2 Deterministic Dispute Policy Evaluation in `zap-policy`
+#### 2.3.2 Deterministic Dispute Policy Evaluation in `rivun-policy`
 When a dispute occurs, the dispute engine executes `PolicySet::evaluate_dispute`:
 ```rust
 pub struct DisputePolicyInput<'a> {
@@ -350,7 +350,7 @@ impl PolicySet {
                 payout_allocations: BTreeMap::new(),
                 slash_penalty,
                 burn_amount,
-                mediated_at_micros: zap_core::now_micros().unwrap_or(0),
+                mediated_at_micros: @@rivun_HEADER@@core::now_micros().unwrap_or(0),
                 mediation_proof_hash: format!("blake3:{}", blake3::hash(b"timeout_slash").to_hex()),
             };
         }
@@ -367,7 +367,7 @@ impl PolicySet {
                 payout_allocations: BTreeMap::new(),
                 slash_penalty: 0,
                 burn_amount: 0,
-                mediated_at_micros: zap_core::now_micros().unwrap_or(0),
+                mediated_at_micros: @@rivun_HEADER@@core::now_micros().unwrap_or(0),
                 mediation_proof_hash: format!("blake3:{}", blake3::hash(b"valid_poa_release").to_hex()),
             };
         }
@@ -386,7 +386,7 @@ impl PolicySet {
             payout_allocations: BTreeMap::new(),
             slash_penalty: 0,
             burn_amount: 0,
-            mediated_at_micros: zap_core::now_micros().unwrap_or(0),
+            mediated_at_micros: @@rivun_HEADER@@core::now_micros().unwrap_or(0),
             mediation_proof_hash: format!("blake3:{}", blake3::hash(b"equal_split").to_hex()),
         }
     }
@@ -421,28 +421,28 @@ pub enum ProvenanceStage {
 ## 3. Requirement R5: Cluster Simulator & Swarm Benchmarking Tooling
 
 ### 3.1 Problem Boundary & Scope
-To validate ZAP's real-world scalability and fault tolerance:
-1. Operators require direct CLI commands (`zap cluster up`, `zap swarm bench`, `zap swarm partition-test`) to spin up local virtual meshes and evaluate latency/throughput.
+To validate rivun's real-world scalability and fault tolerance:
+1. Operators require direct CLI commands (`rivun cluster up`, `rivun swarm bench`, `rivun swarm partition-test`) to spin up local virtual meshes and evaluate latency/throughput.
 2. The benchmark tooling must generate and verify **10,000+ consensus operations per second** under concurrent client workloads.
 3. The cluster simulator must deterministically inject network chaos (packet loss, latency spikes, Byzantine nodes, split-brain partitions) and prove that the swarm detects partitions, recovers gracefully, and preserves ledger consistency.
 
 ---
 
-### 3.2 CLI Command Specifications (`zap-cli`)
+### 3.2 CLI Command Specifications (`rivun-cli`)
 
-#### 3.2.1 `zap cluster` Command Tree
+#### 3.2.1 `rivun cluster` Command Tree
 ```
-zap cluster
+rivun cluster
 ├── up        # Launch an in-process / multi-process simulated cluster topology
 ├── status    # Query live health and topology across active cluster nodes
 └── down      # Gracefully tear down running simulated cluster
 ```
 
-**Options for `zap cluster up`:**
+**Options for `rivun cluster up`:**
 - `--nodes <N>`: Number of cluster nodes (default: 3).
 - `--topology <ring|mesh|star|bipartite>`: Interconnection network topology (default: `mesh`).
 - `--bind-base-port <PORT>`: Starting UDP port for simulated nodes (default: `9000`).
-- `--data-dir <PATH>`: Directory for ephemeral keys, memory, and receipt journals (default: `.zap/cluster`).
+- `--data-dir <PATH>`: Directory for ephemeral keys, memory, and receipt journals (default: `.rivun/cluster`).
 - `--poa-threshold <T>`: Required PoA quorum threshold (default: $\lfloor 2N/3 \rfloor + 1$).
 - `--daemon`: Run in background; emit PID file and socket path.
 - `--json`: Output machine-readable cluster topology metadata.
@@ -450,23 +450,23 @@ zap cluster
 **Example Invocations:**
 ```bash
 # Launch a 5-node full-mesh cluster with 4-of-5 PoA threshold
-zap cluster up --nodes 5 --topology mesh --poa-threshold 4
+rivun cluster up --nodes 5 --topology mesh --poa-threshold 4
 
 # Query status
-zap cluster status --json
+rivun cluster status --json
 
 # Terminate cluster
-zap cluster down
+rivun cluster down
 ```
 
-#### 3.2.2 `zap swarm` Command Tree
+#### 3.2.2 `rivun swarm` Command Tree
 ```
-zap swarm
+rivun swarm
 ├── bench             # Execute high-throughput concurrent consensus benchmark
 └── partition-test    # Run automated network partition and chaos recovery test
 ```
 
-**Options for `zap swarm bench`:**
+**Options for `rivun swarm bench`:**
 - `--rate <R>`: Target operations per second (e.g. `10000` or `0` for uncapped max throughput).
 - `--duration <D>`: Test duration in seconds (e.g. `10s`, `30s`, `60s`).
 - `--concurrency <C>`: Number of concurrent worker tasks/threads (default: `num_cpus * 4`).
@@ -475,7 +475,7 @@ zap swarm
 - `--payload-size <BYTES>`: Size of dummy payload per frame (default: `128`).
 - `--metrics-out <PATH>`: Optional JSON path to write benchmark summary and latency percentiles.
 
-**Options for `zap swarm partition-test`:**
+**Options for `rivun swarm partition-test`:**
 - `--nodes <N>`: Number of nodes in test cluster (default: 5).
 - `--partition-mode <MODE>`: `split-brain` (e.g. 3 vs 2), `isolate-node`, `packet-loss`, `latency-spike`.
 - `--loss-rate <FLOAT>`: Packet drop probability (0.0 to 1.0) when testing packet loss.
@@ -583,14 +583,14 @@ pub struct ChaosConfig {
 
 ### 4.1 Backward Compatibility Verification
 1. **Existing Golden Fixtures:**
-   - `fixtures/pact-record-v1.json`: Uses single-actor `actor`, `target`, `hash`, `signature`. Must continue validating under `zap-pact::ZapPact`.
+   - `fixtures/pact-record-v1.json`: Uses single-actor `actor`, `target`, `hash`, `signature`. Must continue validating under `rivun-pact::ZapPact`.
    - `fixtures/pact-bundle-v1.json`: Must continue verifying offline with `ZapPactBundle`.
    - `fixtures/protocol/*.json`: Wire frames and control envelopes must maintain unchanged binary offsets and JSON tags.
 2. **SDK Parity Matrix:**
    - **Rust:** Native implementation across all crates.
-   - **Python (`sdks/python`):** `zap_sdk/zapstore.py` and `protocol.py` verify PACT hashes (`pact_hash`) and signatures (`verify_pact`).
+   - **Python (`sdks/python`):** `@@rivun_HEADER@@sdk/RivunStore.py` and `protocol.py` verify PACT hashes (`pact_hash`) and signatures (`verify_pact`).
    - **Go (`sdks/go`):** `protocol_test.go` verifies `PactCanonicalSigningBytes` and `PactHash`.
-   - **TypeScript (`sdks/typescript`):** `protocol.ts` and `zapstore.ts` verify offline PACT bundles.
+   - **TypeScript (`sdks/typescript`):** `protocol.ts` and `RivunStore.ts` verify offline PACT bundles.
 3. **Compatibility Strategy:**
    - Single-party `ZapPact` remains intact with `schema_version = 1`.
    - Multi-party contracts use `MultiPartyPact` or optional additive fields (`parties: Option<Vec<PactParticipant>>`, `escrow: Option<PactEscrowLock>`, `dispute: Option<PactDisputeRecord>`).
@@ -604,26 +604,26 @@ pub struct ChaosConfig {
 
 | Crate / Path | Current Status | Proposed Changes for R4 & R5 |
 |---|---|---|
-| `crates/zap-pact/src/lib.rs` | 720 lines (V1 Single-Party) | Add `PactPartyRole`, `PactParticipant`, `PactEscrowLock`, `PactDisputeRecord`, `MultiPartyPact`, `ZapPactStatus` states (`PendingDeposit`, `EscrowLocked`, `Disputed`, `MediateSettled`), multi-sig verification. |
-| `crates/zap-policy/src/lib.rs` | 374 lines (Standard Policy) | Add `DisputePolicyInput`, `DisputeMediationResult`, `DisputeDecision`, and `PolicySet::evaluate_dispute()`. |
-| `crates/zap-agent/src/provenance.rs` | 838 lines (6 stages) | Add `PactCommit`, `EscrowLock`, `DisputeMediation`, and `MmrCommitment` stages to `ProvenanceStage`. |
-| `crates/zap-cli/src/main.rs` | 11,748 lines | Add `Commands::Cluster { command: ClusterCommand }` and `Commands::Swarm { command: SwarmCommand }`. Implement in-process topology runner and live benchmarks. |
-| `crates/zap-telemetry/src/metrics.rs` | 288 lines | Add swarm benchmark metrics (`zap_consensus_ops_total`, `zap_consensus_latency_micros`, `zap_pact_disputes_total`, `zap_escrow_locked_total`). |
-| `crates/zap-telemetry/src/doctor.rs` | 595 lines | Add cluster simulation health checks to `FleetDoctor`. |
-| `tests/e2e/tests/e2e_suite.rs` | 2,142 lines | Add Tier 1-4 tests for Multi-Party Pacts, Escrow Locks, Timeout Slashes, Dispute Mediation, `zap cluster`, and `zap swarm`. |
-| `crates/zap-node/benches/` | Existing micro-benchmarks | Add `benches/swarm_consensus.rs` validating 10,000+ ops/sec throughput. |
+| `crates/rivun-pact/src/lib.rs` | 720 lines (V1 Single-Party) | Add `PactPartyRole`, `PactParticipant`, `PactEscrowLock`, `PactDisputeRecord`, `MultiPartyPact`, `ZapPactStatus` states (`PendingDeposit`, `EscrowLocked`, `Disputed`, `MediateSettled`), multi-sig verification. |
+| `crates/rivun-policy/src/lib.rs` | 374 lines (Standard Policy) | Add `DisputePolicyInput`, `DisputeMediationResult`, `DisputeDecision`, and `PolicySet::evaluate_dispute()`. |
+| `crates/rivun-agent/src/provenance.rs` | 838 lines (6 stages) | Add `PactCommit`, `EscrowLock`, `DisputeMediation`, and `MmrCommitment` stages to `ProvenanceStage`. |
+| `crates/rivun-cli/src/main.rs` | 11,748 lines | Add `Commands::Cluster { command: ClusterCommand }` and `Commands::Swarm { command: SwarmCommand }`. Implement in-process topology runner and live benchmarks. |
+| `crates/rivun-telemetry/src/metrics.rs` | 288 lines | Add swarm benchmark metrics (`@@rivun_HEADER@@consensus_ops_total`, `@@rivun_HEADER@@consensus_latency_micros`, `@@rivun_HEADER@@pact_disputes_total`, `@@rivun_HEADER@@escrow_locked_total`). |
+| `crates/rivun-telemetry/src/doctor.rs` | 595 lines | Add cluster simulation health checks to `FleetDoctor`. |
+| `tests/e2e/tests/e2e_suite.rs` | 2,142 lines | Add Tier 1-4 tests for Multi-Party Pacts, Escrow Locks, Timeout Slashes, Dispute Mediation, `rivun cluster`, and `rivun swarm`. |
+| `crates/rivun-node/benches/` | Existing micro-benchmarks | Add `benches/swarm_consensus.rs` validating 10,000+ ops/sec throughput. |
 
 ---
 
 ## 6. Synthesis & Recommended Next Steps
 
 1. **R4 Implementation Sequencing:**
-   - Step 1: Extend `zap-pact` data models (Multi-party, Escrow, Slashes, Disputes) while preserving V1 compatibility.
-   - Step 2: Implement dispute mediation in `zap-policy` and integrate with `ProvenanceChainBuilder` in `zap-agent`.
-   - Step 3: Connect pact settlement receipts to `zap-ledger` MMR batch accumulator.
+   - Step 1: Extend `rivun-pact` data models (Multi-party, Escrow, Slashes, Disputes) while preserving V1 compatibility.
+   - Step 2: Implement dispute mediation in `rivun-policy` and integrate with `ProvenanceChainBuilder` in `rivun-agent`.
+   - Step 3: Connect pact settlement receipts to `rivun-ledger` MMR batch accumulator.
 2. **R5 Implementation Sequencing:**
-   - Step 1: Implement `zap cluster` (`up`, `status`, `down`) in `zap-cli` using virtual in-process `ZapNode` actors.
-   - Step 2: Implement `zap swarm` (`bench`, `partition-test`) with chaos transport injection.
+   - Step 1: Implement `rivun cluster` (`up`, `status`, `down`) in `rivun-cli` using virtual in-process `ZapNode` actors.
+   - Step 2: Implement `rivun swarm` (`bench`, `partition-test`) with chaos transport injection.
    - Step 3: Build high-concurrency benchmark harness targeting 10,000+ consensus ops/sec with Rayon/Tokio pipelining.
 3. **Verification Protocol:**
    - Run `cargo test --workspace --all-targets`.
@@ -631,3 +631,4 @@ pub struct ChaosConfig {
    - Verify golden fixtures in `fixtures/` and run Python/Go/TS SDK tests.
 
 ---
+

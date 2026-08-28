@@ -1,12 +1,12 @@
 schema_version = 1
-id = "zap-pack-agentic-dev"
+id = "rivun-pack-agentic-dev"
 name = "Agentic Development"
 version = "0.1.0"
 status = "preview"
-description = "Auditable coding-agent workflows over ZAP."
+description = "Auditable coding-agent workflows over Rivun."
 
 [compatibility]
-zap_protocol = ">=0.1.0,<1.0.0"
+rivun_protocol = ">=0.1.0,<1.0.0"
 driver_abi = ">=1,<=2"
 
 [[capabilities]]

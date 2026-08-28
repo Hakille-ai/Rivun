@@ -4,8 +4,8 @@
 
 ### Codebase Inspection Findings
 
-1. **Replay Protection in `zap-net`**:
-   - File: `crates/zap-net/src/lib.rs` (lines 491–524)
+1. **Replay Protection in `rivun-net`**:
+   - File: `crates/rivun-net/src/lib.rs` (lines 491–524)
    - `NonceReplayCache` is defined as:
      ```rust
      struct NonceReplayCache {
@@ -16,8 +16,8 @@
      ```
    - *Observation*: Nonce tracking is strictly in-memory. Restarting the node clears `seen` and `order`, allowing an attacker to replay valid datagrams recorded prior to reboot if transmitted within the allowed clock window.
 
-2. **Replay Protection in `zap-node`**:
-   - File: `crates/zap-node/src/lib.rs` (lines 4430–4469)
+2. **Replay Protection in `rivun-node`**:
+   - File: `crates/rivun-node/src/lib.rs` (lines 4430–4469)
    - `ReplayGuard` is defined as:
      ```rust
      struct ReplayGuard {
@@ -28,22 +28,22 @@
      ```
    - Fingerprint calculation (line 4471):
      ```rust
-     fn frame_fingerprint(frame: &zap_core::ZapFrame) -> [u8; 16] {
+     fn frame_fingerprint(frame: &@@rivun_HEADER@@core::ZapFrame) -> [u8; 16] {
          let hash = blake3::hash(&frame.encode());
          hash.as_bytes()[..16].try_into().unwrap()
      }
      ```
    - *Observation*: Frame fingerprints are held in memory only (`Mutex<ReplayGuard>`). Node process restart resets the cache, introducing replay vulnerabilities across node restarts.
 
-3. **Receipt Journal & Manifests in `zap-journal`**:
-   - File: `crates/zap-journal/src/lib.rs` (lines 93–103, 463–483)
+3. **Receipt Journal & Manifests in `rivun-journal`**:
+   - File: `crates/rivun-journal/src/lib.rs` (lines 93–103, 463–483)
    - `JournalOptions` currently only contains `max_segment_bytes: u64`.
    - `JournalSegmentManifest` (lines 208–221) models segment manifest metadata (`segment_id`, `segment_sequence`, `entries`, `segment_bytes`, `segment_hash`, `first_entry_hash`, `last_entry_hash`, `first_timestamp_micros`, `last_timestamp_micros`).
    - *Observation*: `current_segment` rotates files based on size, but `JournalStore` does not explicitly seal closed segments, compute full segment cryptographic hashes, or support segment count limit triggers.
 
-4. **Signed Manifests & Indexing in `zap-ledger`**:
-   - File: `crates/zap-ledger/src/lib.rs` (lines 435–585, 679–760, 762–931)
-   - `SignedReceiptSegmentManifest` defines Ed25519 signing over domain `ZAP-RECEIPT-SEGMENT-MANIFEST-v1`.
+4. **Signed Manifests & Indexing in `rivun-ledger`**:
+   - File: `crates/rivun-ledger/src/lib.rs` (lines 435–585, 679–760, 762–931)
+   - `SignedReceiptSegmentManifest` defines Ed25519 signing over domain `rivun-RECEIPT-SEGMENT-MANIFEST-v1`.
    - `ReceiptSegmentIndex` supports sequence continuity checks and `previous_segment_hash` chain verification.
    - *Observation*: `ReceiptJournalStore` does not bind to a node `Keypair`, does not sign closed segment manifests upon rotation, does not save `.zjmanifest.json.sig` manifest files to disk, and `ReceiptJournalStore::query` does not use `ReceiptSegmentIndex` to prune candidate segments prior to scanning records.
 
@@ -53,18 +53,18 @@
 
 1. **Restart-Persistent Replay Guard**:
    - *Premise*: In distributed agent environments, network attacks include delayed datagram re-injection after target node restarts.
-   - *Deduction*: In-memory `HashSet` data structures in `zap-net` and `zap-node` do not survive process restart.
-   - *Resolution*: Implement disk-backed `DurableNonceStore` (in `zap-net`) and `DurableReplayStore` (in `zap-node`). Upon node restart, the store reads the binary WAL/log file, filters out entries older than `max_clock_skew_micros`, re-populates memory sets, and rejects any replayed nonces or frame fingerprints.
+   - *Deduction*: In-memory `HashSet` data structures in `rivun-net` and `rivun-node` do not survive process restart.
+   - *Resolution*: Implement disk-backed `DurableNonceStore` (in `rivun-net`) and `DurableReplayStore` (in `rivun-node`). Upon node restart, the store reads the binary WAL/log file, filters out entries older than `max_clock_skew_micros`, re-populates memory sets, and rejects any replayed nonces or frame fingerprints.
 
 2. **Journal Rotation & Cryptographic Sealing**:
    - *Premise*: Continuous audit storage requires bounded segment files and immutable proof of content upon segment closure.
    - *Deduction*: Automatic rotation must monitor both `max_segment_bytes` and `max_segment_count`. When a segment closes, computing `blake3::hash` over the segment byte stream produces an immutable cryptographic seal.
-   - *Resolution*: Extend `JournalOptions` in `zap-journal` with segment count and record limits. Implement `seal_segment` and `rotate_and_seal` to finalize manifest metadata and calculate BLAKE3 segment hashes upon rotation.
+   - *Resolution*: Extend `JournalOptions` in `rivun-journal` with segment count and record limits. Implement `seal_segment` and `rotate_and_seal` to finalize manifest metadata and calculate BLAKE3 segment hashes upon rotation.
 
 3. **Signed Segment Manifests**:
    - *Premise*: Receipt journal segments must carry cryptographic evidence of node authorship and chain continuity.
    - *Deduction*: Unsigned JSON manifests (`.zjmanifest.json`) can be modified post-facto. Node keypair signatures must bind the manifest hash, sequence, timestamps, and previous segment hash into a signed artifact.
-   - *Resolution*: Update `ReceiptJournalStore` in `zap-ledger` to accept an optional node `Keypair`. Upon segment rotation, automatically generate `SignedReceiptSegmentManifest` and save it to disk as `{sequence:020}.zjmanifest.json.sig`.
+   - *Resolution*: Update `ReceiptJournalStore` in `rivun-ledger` to accept an optional node `Keypair`. Upon segment rotation, automatically generate `SignedReceiptSegmentManifest` and save it to disk as `{sequence:020}.zjmanifest.json.sig`.
 
 4. **Fast Indexed Query Engine**:
    - *Premise*: Querying receipt ledgers across large segment histories must avoid full linear scans over disk records.
@@ -85,14 +85,14 @@
 
 ### Architectural Overview
 
-Milestone 1 implements a restart-persistent, high-performance durable core across `zap-net`, `zap-node`, `zap-journal`, and `zap-ledger`:
+Milestone 1 implements a restart-persistent, high-performance durable core across `rivun-net`, `rivun-node`, `rivun-journal`, and `rivun-ledger`:
 
 ```
 +-----------------------------------------------------------------------------------+
-|                                  ZAP Node Daemon                                  |
+|                                  rivun Node Daemon                                  |
 |                                                                                   |
 |  +-----------------------------+               +-------------------------------+  |
-|  |     zap-net Datagrams       |               |     zap-node Frame Dispatch   |  |
+|  |     rivun-net Datagrams       |               |     rivun-node Frame Dispatch   |  |
 |  |  +-----------------------+  |               |  +-------------------------+  |  |
 |  |  |  DurableNonceStore    |  |               |  |   DurableReplayStore    |  |  |
 |  |  |  (b"ZAPNONC1" disk)   |  |               |  |   (b"ZAPFRM01" disk)    |  |  |
@@ -103,10 +103,10 @@ Milestone 1 implements a restart-persistent, high-performance durable core acros
 |  +-----------------------------------------------------------------------------+  |
 |  |                            Receipt Journal Storage                          |  |
 |  |                                                                             |  |
-|  |   zap-journal: Segment Rotation & Sealing (max_bytes, max_count, max_records)  |  |
+|  |   rivun-journal: Segment Rotation & Sealing (max_bytes, max_count, max_records)  |  |
 |  |   - Writes: .zjseg, .zjidx, .zjmanifest.json                                 |  |
 |  |                                                                             |  |
-|  |   zap-ledger: Signed Manifests & Indexed Queries                              |  |
+|  |   rivun-ledger: Signed Manifests & Indexed Queries                              |  |
 |  |   - Signs: .zjmanifest.json.sig via Node Keypair (Ed25519)                  |  |
 |  |   - Fast Queries: ReceiptSegmentIndex Pruning + Hash Point Lookup           |  |
 |  +-----------------------------------------------------------------------------+  |
@@ -117,10 +117,10 @@ Milestone 1 implements a restart-persistent, high-performance durable core acros
 
 ### Component 1 Blueprint: Disk-Persisted Replay Stores
 
-#### File 1: `crates/zap-net/src/durable_replay.rs` (NEW)
-#### File 2: `crates/zap-net/src/lib.rs` (MODIFIED)
+#### File 1: `crates/rivun-net/src/durable_replay.rs` (NEW)
+#### File 2: `crates/rivun-net/src/lib.rs` (MODIFIED)
 
-**`crates/zap-net/src/durable_replay.rs` Definition**:
+**`crates/rivun-net/src/durable_replay.rs` Definition**:
 ```rust
 use std::collections::{HashSet, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -255,10 +255,10 @@ impl DurableNonceStore {
 }
 ```
 
-#### File 3: `crates/zap-node/src/durable_replay.rs` (NEW)
-#### File 4: `crates/zap-node/src/lib.rs` (MODIFIED)
+#### File 3: `crates/rivun-node/src/durable_replay.rs` (NEW)
+#### File 4: `crates/rivun-node/src/lib.rs` (MODIFIED)
 
-**`crates/zap-node/src/durable_replay.rs` Definition**:
+**`crates/rivun-node/src/durable_replay.rs` Definition**:
 ```rust
 use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
@@ -266,7 +266,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use anyhow::{bail, Result};
 use uuid::Uuid;
-use zap_core::ZapFrame;
+use @@rivun_HEADER@@core::ZapFrame;
 
 pub const DURABLE_FRAME_MAGIC: &[u8; 8] = b"ZAPFRM01";
 pub const DURABLE_FRAME_RECORD_LEN: usize = 8 + 16 + 16; // timestamp_micros (8B) + source_node (16B) + fingerprint (16B)
@@ -349,7 +349,7 @@ impl DurableReplayStore {
                 "replayed frame rejected: source_node={}, timestamp_micros={}, signature_hint={}",
                 source,
                 prev_ts,
-                hex_hint(frame.header.zap_sign)
+                hex_hint(frame.header.@@rivun_HEADER@@sign)
             );
         }
 
@@ -384,7 +384,7 @@ fn hex_hint(sign: [u8; 64]) -> String {
 }
 ```
 
-Integration in `crates/zap-node/src/lib.rs`:
+Integration in `crates/rivun-node/src/lib.rs`:
 - Update `ReplayGuard` struct:
   ```rust
   #[derive(Debug)]
@@ -399,9 +399,9 @@ Integration in `crates/zap-node/src/lib.rs`:
 
 ---
 
-### Component 2 Blueprint: Automatic Segment Rotation & Cryptographic Sealing (`zap-journal`)
+### Component 2 Blueprint: Automatic Segment Rotation & Cryptographic Sealing (`rivun-journal`)
 
-#### File: `crates/zap-journal/src/lib.rs` (MODIFIED)
+#### File: `crates/rivun-journal/src/lib.rs` (MODIFIED)
 
 **Updated `JournalOptions`**:
 ```rust
@@ -492,9 +492,9 @@ impl JournalStore {
 
 ---
 
-### Component 3 Blueprint: Signed Segment Manifests (`zap-ledger`)
+### Component 3 Blueprint: Signed Segment Manifests (`rivun-ledger`)
 
-#### File: `crates/zap-ledger/src/lib.rs` (MODIFIED)
+#### File: `crates/rivun-ledger/src/lib.rs` (MODIFIED)
 
 **Constant Definition**:
 ```rust
@@ -595,11 +595,11 @@ impl ReceiptJournalStore {
 
 ---
 
-### Component 4 Blueprint: Fast Indexed Query Engine (`zap-journal` / `zap-ledger`)
+### Component 4 Blueprint: Fast Indexed Query Engine (`rivun-journal` / `rivun-ledger`)
 
-#### Files: `crates/zap-journal/src/lib.rs` & `crates/zap-ledger/src/lib.rs` (MODIFIED)
+#### Files: `crates/rivun-journal/src/lib.rs` & `crates/rivun-ledger/src/lib.rs` (MODIFIED)
 
-**`zap-journal` Master Index & Pruning**:
+**`rivun-journal` Master Index & Pruning**:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SegmentSummary {
@@ -673,7 +673,7 @@ impl JournalStore {
 }
 ```
 
-**`zap-ledger` Segment Index Accelerated Query**:
+**`rivun-ledger` Segment Index Accelerated Query**:
 ```rust
 impl ReceiptJournalStore {
     /// Fast indexed query leveraging ReceiptSegmentIndex candidate filtering
@@ -729,8 +729,8 @@ impl ReceiptJournalStore {
 
 2. **Durable Replay Protection Unit & Reboot Simulation Test**:
    ```powershell
-   cargo test -p zap-net --lib durable_replay
-   cargo test -p zap-node --lib durable_replay
+   cargo test -p rivun-net --lib durable_replay
+   cargo test -p rivun-node --lib durable_replay
    ```
    *Verification Steps*:
    - Instantiate `DurableReplayStore` at `temp_dir/replay.wal`.
@@ -741,7 +741,7 @@ impl ReceiptJournalStore {
 
 3. **Segment Rotation & Sealing Test**:
    ```powershell
-   cargo test -p zap-journal --lib tests::journal_rotates_and_seals_segments
+   cargo test -p rivun-journal --lib tests::journal_rotates_and_seals_segments
    ```
    *Verification Steps*:
    - Set `max_segment_bytes = 512` in `JournalOptions`.
@@ -751,7 +751,7 @@ impl ReceiptJournalStore {
 
 4. **Signed Segment Manifest Test**:
    ```powershell
-   cargo test -p zap-ledger --lib tests::signed_segment_manifest_rotation
+   cargo test -p rivun-ledger --lib tests::signed_segment_manifest_rotation
    ```
    *Verification Steps*:
    - Open `ReceiptJournalStore` with node `Keypair`.
@@ -762,7 +762,7 @@ impl ReceiptJournalStore {
 
 5. **Fast Indexed Query Performance Test**:
    ```powershell
-   cargo test -p zap-ledger --benches -- receipt
+   cargo test -p rivun-ledger --benches -- receipt
    ```
    *Verification Steps*:
    - Verify candidate segment pruning reduces disk record scans by > 90% for narrow timestamp window queries.
@@ -770,3 +770,4 @@ impl ReceiptJournalStore {
 ### Invalidation Conditions
 - If any replay attack post-reboot succeeds during reboot simulation tests, the blueprint is invalidated.
 - If signed segment manifest chain verification fails on valid sequential segments, the ledger index implementation is invalidated.
+

@@ -4,37 +4,37 @@
 
 Direct codebase inspection and implementation verification revealed the following:
 
-1. **Workspace Registration & Crate Architecture (`Cargo.toml:10,68` & `crates/zap-gateway/`)**:
-   - `crates/zap-gateway` is registered in the root `Cargo.toml` members and `[workspace.dependencies]`.
-   - `crates/zap-gateway/Cargo.toml` defines workspace dependencies across `zap-agent`, `zap-core`, `zap-crypto`, `zap-ledger`, `zap-memory`, `zap-node`, `zap-policy`, `zap-telemetry`, `tokio`, `serde`, `sha2`, `ed25519-dalek`, and `bytes`.
+1. **Workspace Registration & Crate Architecture (`Cargo.toml:10,68` & `crates/rivun-gateway/`)**:
+   - `crates/rivun-gateway` is registered in the root `Cargo.toml` members and `[workspace.dependencies]`.
+   - `crates/rivun-gateway/Cargo.toml` defines workspace dependencies across `rivun-agent`, `rivun-core`, `rivun-crypto`, `rivun-ledger`, `rivun-memory`, `rivun-node`, `rivun-policy`, `rivun-telemetry`, `tokio`, `serde`, `sha2`, `ed25519-dalek`, and `bytes`.
    - Complete crate module structure is implemented:
      - `src/config.rs`: `GatewayConfig` with socket binding, auth tokens, 4MB max frame size limit, CORS headers, journal and memory paths.
      - `src/error.rs`: `ZapGatewayError` with JSON-RPC error codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`), step verification errors, frame size limits, and `Result<T>`.
      - `src/server.rs`: `AgentGatewayServer` orchestrating HTTP REST, SSE broker, WebSocket handler, and MCP stdio loop.
      - `src/lib.rs`: Public re-exports.
 
-2. **Cryptographic Provenance Chain Engine (`crates/zap-agent/src/provenance.rs` & `crates/zap-gateway/src/provenance/mod.rs`)**:
+2. **Cryptographic Provenance Chain Engine (`crates/rivun-agent/src/provenance.rs` & `crates/rivun-gateway/src/provenance/mod.rs`)**:
    - Implemented 6-stage causal hash chain:
      $$H_{\text{intent}} \to H_{\text{negotiation}} \to H_{\text{policy}} \to H_{\text{driver}} \to H_{\text{poa}} \to H_{\text{receipt}} \to H_{\text{root}}$$
-   - `ProvenanceChainBuilder`: Builds stages incrementally, validates data and step hashes, computes Merkle root hash with domain separator `ZAP-PROVENANCE-CHAIN-v1`, and signs with node Ed25519 keypair.
+   - `ProvenanceChainBuilder`: Builds stages incrementally, validates data and step hashes, computes Merkle root hash with domain separator `rivun-PROVENANCE-CHAIN-v1`, and signs with node Ed25519 keypair.
    - `ProvenanceChainDigest`: Provides `verify(&self, public_key: &PublicKey) -> Result<ProvenanceVerificationReport>` and `verify_step(&self, stage: ProvenanceStage) -> Result<()>` checking causal continuity, transition hashes, Merkle root hash, and Ed25519 signature.
    - Tamper detection identifies the exact corrupted step (e.g. `ProvenanceStage::Policy` or `ProvenanceStage::Driver`).
 
-3. **MCP JSON-RPC 2.0 Protocol Engine (`crates/zap-gateway/src/mcp/`)**:
+3. **MCP JSON-RPC 2.0 Protocol Engine (`crates/rivun-gateway/src/mcp/`)**:
    - Implemented protocol specification (`protocolVersion: "2024-11-05"`):
-     - `initialize`: Returns server info `{"name": "zap-gateway", "version": "0.1.0"}` and capabilities for tools, resources, and prompts.
-     - `tools/list`: Exposes `zap_send`, `zap_send_transaction`, `zap_query`, `zap_query_state`, `zap_agent_intent`, `zap_receipts_verify`, `zap_verify_provenance`, `zap_get_fleet_health`, `zap_inspect_pack`, `zap_delegate`.
+     - `initialize`: Returns server info `{"name": "rivun-gateway", "version": "0.1.0"}` and capabilities for tools, resources, and prompts.
+     - `tools/list`: Exposes `@@rivun_HEADER@@send`, `@@rivun_HEADER@@send_transaction`, `@@rivun_HEADER@@query`, `@@rivun_HEADER@@query_state`, `@@rivun_HEADER@@agent_intent`, `@@rivun_HEADER@@receipts_verify`, `@@rivun_HEADER@@verify_provenance`, `@@rivun_HEADER@@get_fleet_health`, `@@rivun_HEADER@@inspect_pack`, `@@rivun_HEADER@@delegate`.
      - `tools/call`: Evaluates deterministic policy, executes action, writes signed receipt to journal, generates provenance chain, and records metrics.
-     - `resources/list` & `resources/read`: Exposes `zap://ledger/receipts`, `zap://node/status`, `zap://fleet/topology`, `zap://fleet/status`, `zap://memory/*`, `zap://packs/*`.
+     - `resources/list` & `resources/read`: Exposes `rivun://ledger/receipts`, `rivun://node/status`, `rivun://fleet/topology`, `rivun://fleet/status`, `rivun://memory/*`, `rivun://packs/*`.
      - `prompts/list` & `prompts/get`: Exposes `agent_action_plan`, `policy_check`, `incident_diagnostics`, `goal_decomposition`, `capability_negotiation`, `safe_execution_verification`.
      - Standard JSON-RPC 2.0 error handling (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`).
      - `McpStdioTransport`: Non-blocking async stdin line reader writing clean JSON-RPC 2.0 responses to stdout.
 
-4. **Multi-Transport Gateway Engine (`crates/zap-gateway/src/transports/`)**:
+4. **Multi-Transport Gateway Engine (`crates/rivun-gateway/src/transports/`)**:
    - **HTTP REST (`src/transports/http.rs`)**:
      - `POST /v1/agent/intents`: Validates `AgentIntent`, evaluates policy, writes receipt, builds signed `ProvenanceChainDigest`, broadcasts SSE event, returns HTTP 202 Accepted.
      - `GET /v1/agent/sessions` & `GET /v1/agent/sessions/{session_id}`: Inspects session state.
-     - `POST /v1/agent/sessions`: Creates session and increments `zap_agent_sessions_active`.
+     - `POST /v1/agent/sessions`: Creates session and increments `@@rivun_HEADER@@agent_sessions_active`.
      - `GET /v1/agent/receipts`: Queries `ReceiptJournalStore` replication records.
      - `POST /v1/agent/delegate`: Processes `DelegationRequest` $\to$ `DelegationResponse`.
      - `POST /v1/agent/negotiate`: Processes `CapabilityNegotiationRequest` $\to$ `CapabilityNegotiationResponse`.
@@ -55,15 +55,15 @@ Direct codebase inspection and implementation verification revealed the followin
      - Calls `ZapNode::inc_agent_session()` and `ZapNode::dec_agent_session()`.
      - Calls `ZapNode::record_provenance_verification_failure()`.
 
-5. **CLI Commands (`crates/zap-cli/src/main.rs`)**:
-   - `zap gateway start`: Supports `--config <path>`, `--http-bind <addr>`, `--mcp-stdio`, `--auth-token <token>`, `--max-frame-size <bytes>`, `--journal-dir <path>`, `--memory-dir <path>`.
-   - `zap gateway status`: Queries running gateway HTTP endpoint with `--addr <url>` and `--json`.
-   - `zap provenance verify`: Verifies chain JSON with `--chain <path>`, `--key <key_file>`, `--public-key <hex>`, `--json`.
-   - `zap receipts verify`: Added `--provenance` flag.
+5. **CLI Commands (`crates/rivun-cli/src/main.rs`)**:
+   - `rivun gateway start`: Supports `--config <path>`, `--http-bind <addr>`, `--mcp-stdio`, `--auth-token <token>`, `--max-frame-size <bytes>`, `--journal-dir <path>`, `--memory-dir <path>`.
+   - `rivun gateway status`: Queries running gateway HTTP endpoint with `--addr <url>` and `--json`.
+   - `rivun provenance verify`: Verifies chain JSON with `--chain <path>`, `--key <key_file>`, `--public-key <hex>`, `--json`.
+   - `rivun receipts verify`: Added `--provenance` flag.
 
 6. **Test Suite Coverage**:
-   - `crates/zap-gateway/tests/gateway_tests.rs`: Unit and integration tests for MCP, provenance, HTTP REST, SSE, and WebSocket.
-   - `crates/zap-cli/tests/gateway_cli_tests.rs`: CLI tests for `gateway start`, `gateway status`, `provenance verify`, `receipts verify --provenance`.
+   - `crates/rivun-gateway/tests/gateway_tests.rs`: Unit and integration tests for MCP, provenance, HTTP REST, SSE, and WebSocket.
+   - `crates/rivun-cli/tests/gateway_cli_tests.rs`: CLI tests for `gateway start`, `gateway status`, `provenance verify`, `receipts verify --provenance`.
    - `tests/e2e/tests/e2e_suite.rs`: Complete test cases for:
      - Tier 1: `tc_f09_001` .. `tc_f09_005` (MCP), `tc_f10_001` .. `tc_f10_005` (Multi-transport), `tc_f11_001` .. `tc_f11_005` (Provenance).
      - Tier 2: `tc_b09_001` .. `tc_b09_005`, `tc_b10_001` .. `tc_b10_005`, `tc_b11_001` .. `tc_b11_005`.
@@ -75,9 +75,9 @@ Direct codebase inspection and implementation verification revealed the followin
 ## 2. Logic Chain
 
 1. **Requirement R4 & Milestone 4 Objective**:
-   - The user request requires connecting LLM AI agent frameworks to ZAP's deterministic execution engine via MCP, HTTP REST, SSE, and WebSocket, with cryptographic provenance linking.
+   - The user request requires connecting LLM AI agent frameworks to rivun's deterministic execution engine via MCP, HTTP REST, SSE, and WebSocket, with cryptographic provenance linking.
 2. **Deterministic Architecture**:
-   - `crates/zap-gateway` bridges external agents directly to ZAP's internal policy set, memory journal, receipt store, and node keypair.
+   - `crates/rivun-gateway` bridges external agents directly to rivun's internal policy set, memory journal, receipt store, and node keypair.
 3. **Cryptographic Guarantee**:
    - Every agent action can be verified independently using `ProvenanceChainDigest::verify`, ensuring non-repudiation from intent through execution to journal receipts.
 4. **Production Hardening**:
@@ -94,8 +94,8 @@ No caveats. All components are implemented with genuine logic, strict typing, an
 ## 4. Conclusion
 
 Milestone 4 implementation is complete:
-- `crates/zap-gateway` is fully functional with MCP, HTTP REST, SSE, WebSocket, and Provenance engines.
-- CLI subcommands `zap gateway start`, `zap gateway status`, `zap provenance verify`, and `zap receipts verify --provenance` are fully implemented and integrated.
+- `crates/rivun-gateway` is fully functional with MCP, HTTP REST, SSE, WebSocket, and Provenance engines.
+- CLI subcommands `rivun gateway start`, `rivun gateway status`, `rivun provenance verify`, and `rivun receipts verify --provenance` are fully implemented and integrated.
 - Comprehensive unit, integration, boundary, cross-feature, and real-world workflow tests are in place.
 
 ---
@@ -106,7 +106,7 @@ To independently verify the implementation:
 
 1. **Run Unit and Gateway Tests**:
    ```bash
-   cargo test -p zap-gateway -p zap-agent -p zap-cli
+   cargo test -p rivun-gateway -p rivun-agent -p rivun-cli
    ```
 
 2. **Run E2E Suite Feature Tests**:
@@ -123,3 +123,4 @@ To independently verify the implementation:
    ```bash
    cargo clippy --workspace --all-targets -- -D warnings
    ```
+

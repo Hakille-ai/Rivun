@@ -1,6 +1,6 @@
 # Healthcare Domain Pack
 
-This preview pack models privacy-sensitive healthcare coordination as typed ZAP
+This preview pack models privacy-sensitive healthcare coordination as typed Rivun
 subjects. It is designed for care teams that need auditable automation around
 patient-record access, alert routing, documentation proposals, device-command
 proposals, and evidence-preserving privacy workflows.
@@ -18,5 +18,5 @@ proposals, and evidence-preserving privacy workflows.
 ## Validate
 
 ```powershell
-cargo run -p zap-cli -- pack validate --pack examples/domain-packs/healthcare --json
+cargo run -p rivun-cli -- pack validate --pack examples/domain-packs/healthcare --json
 ```

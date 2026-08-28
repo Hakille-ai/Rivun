@@ -1,12 +1,12 @@
 # BRIEFING — 2026-08-15T20:23:46Z
 
 ## Mission
-Remediate compilation, test, and clippy issues across the ZAP workspace and SDKs to achieve 100% clean builds, all tests passing, and 0 warnings.
+Remediate compilation, test, and clippy issues across the rivun workspace and SDKs to achieve 100% clean builds, all tests passing, and 0 warnings.
 
 ## 🔒 My Identity
 - Archetype: worker_remediation
 - Roles: implementer, qa, specialist
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\worker_remediation
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\worker_remediation
 - Original parent: 5e9776fe-ebb1-46ac-b395-bfa1d62c469a
 - Milestone: Remediation and Integration
 
@@ -21,7 +21,7 @@ Remediate compilation, test, and clippy issues across the ZAP workspace and SDKs
 - Updated: 2026-08-15T20:23:46Z
 
 ## Task Summary
-- **What to build**: Targeted fixes in `crates/zap-net`, `crates/zap-driver-sdk`, `crates/zap-ledger`, `sdks/rust` and verification of full workspace + SDKs.
+- **What to build**: Targeted fixes in `crates/rivun-net`, `crates/rivun-driver-sdk`, `crates/rivun-ledger`, `sdks/rust` and verification of full workspace + SDKs.
 - **Success criteria**: All cargo tests pass, cargo clippy clean with -D warnings, e2e tests pass, SDK tests pass.
 - **Interface contracts**: PROJECT.md
 - **Code layout**: PROJECT.md
@@ -46,3 +46,4 @@ Remediate compilation, test, and clippy issues across the ZAP workspace and SDKs
 - `.agents/worker_remediation/DISPATCH.md` — Assignment
 - `.agents/worker_remediation/BRIEFING.md` — Agent working memory
 - `.agents/worker_remediation/progress.md` — Liveness & task progress
+

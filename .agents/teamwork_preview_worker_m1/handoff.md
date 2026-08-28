@@ -3,29 +3,29 @@
 ## 1. Observation
 
 ### Implemented Files & Key Changes
-1. **`crates/zap-net/src/durable_replay.rs`**:
+1. **`crates/rivun-net/src/durable_replay.rs`**:
    - Implemented `DurableNonceStore` with file magic `b"ZAPNONC1"`, binary record persistence (`timestamp_micros`, `node_id`, `nonce`), auto-compaction when active nonces drop below 50% of file size, and complete state reconstruction across process restarts.
    - Added unit tests: `durable_nonce_store_persists_nonces_across_restarts`.
-2. **`crates/zap-net/src/lib.rs`**:
+2. **`crates/rivun-net/src/lib.rs`**:
    - Added `durable_nonce_store_path: Option<PathBuf>` and `max_nonce_age_micros: Option<u64>` to `ZapEndpointConfig`.
    - Updated `NonceReplayCache` to wrap `Option<DurableNonceStore>`, ensuring replay protection survives endpoint restarts.
    - Added integration test: `endpoint_persists_replay_cache_across_restart`.
-3. **`crates/zap-net/Cargo.toml`**:
+3. **`crates/rivun-net/Cargo.toml`**:
    - Added `tempfile.workspace = true` to `[dev-dependencies]`.
-4. **`crates/zap-node/src/durable_replay.rs`**:
+4. **`crates/rivun-node/src/durable_replay.rs`**:
    - Implemented `DurableReplayStore` with file magic `b"ZAPFRM01"`, BLAKE3 16-byte frame fingerprints (`frame_fingerprint`), clock skew validation, binary log persistence, and restart recovery.
    - Added unit test: `durable_replay_store_persists_fingerprints_across_restart`.
-5. **`crates/zap-node/src/lib.rs`**:
+5. **`crates/rivun-node/src/lib.rs`**:
    - Added `durable_replay_store_path: Option<PathBuf>` to `SecurityConfig`.
    - Updated `ReplayGuard` to wrap `Option<DurableReplayStore>` with `with_durable_store` constructor.
    - Integrated durable replay store initialization into `NodeEngine::from_config`.
-6. **`crates/zap-journal/src/lib.rs`**:
+6. **`crates/rivun-journal/src/lib.rs`**:
    - Added `max_segment_count: Option<usize>` and `max_segment_records: Option<u64>` to `JournalOptions`.
    - Implemented automatic segment rotation based on `max_segment_bytes` and `max_segment_records`.
    - Implemented `seal_segment(sequence)`, `rotate_and_seal()`, `load_manifest(sequence)`, `load_segment_index_by_sequence(sequence)`, `prune_old_segments(max_count)`, `read_record_at(sequence, entry)`, and `query_filtered`.
    - Enhanced `JournalStore::query` to prune segments out of requested `after_timestamp_micros` / `until_timestamp_micros` window using `load_manifest`.
    - Added rotation test: `journal_rotates_and_seals_segments`.
-7. **`crates/zap-ledger/src/lib.rs`**:
+7. **`crates/rivun-ledger/src/lib.rs`**:
    - Defined `pub const SIGNED_MANIFEST_EXTENSION: &str = "zjmanifest.json.sig";`.
    - Updated `ReceiptJournalStore` to hold `keypair: Option<Keypair>`.
    - Implemented `open_with_keypair(dir, keypair)`, `set_keypair(keypair)`, `signed_manifest_path(sequence)`, `rotate_and_seal_segment(sequence)`, `load_signed_manifest(sequence)`, `build_and_verify_segment_index()`, `read_segment_receipts(sequence)`, and `query_fast(request)`.
@@ -34,9 +34,9 @@
 
 ### Verification Output Logs
 
-#### Unit & Integration Tests Output (`cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger`)
+#### Unit & Integration Tests Output (`cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger`)
 ```text
-running 6 tests in zap-journal
+running 6 tests in rivun-journal
 test tests::journal_detects_tampering ... ok
 test tests::append_manifest_hashes_segment_bytes ... ok
 test tests::journal_rebuilds_missing_indexes ... ok
@@ -45,7 +45,7 @@ test tests::journal_appends_queries_and_verifies ... ok
 test tests::journal_rotates_and_seals_segments ... ok
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
-running 19 tests in zap-net
+running 19 tests in rivun-net
 test tests::datagram_parse_rejects_nonzero_reserved_bytes ... ok
 test tests::endpoint_rejects_oversized_datagram_buffer_config ... ok
 test tests::endpoint_rejects_datagram_envelope_targeting_another_node ... ok
@@ -67,7 +67,7 @@ test tests::rejects_unknown_peer ... ok
 test tests::endpoint_persists_replay_cache_across_restart ... ok
 test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
-running 21 tests in zap-ledger
+running 21 tests in rivun-ledger
 test tests::receipt_replication_rejects_bad_limit ... ok
 test tests::receipt_replication_request_filters_receipts ... ok
 test tests::receipt_records_poa ... ok
@@ -91,14 +91,14 @@ test tests::receipt_journal_batch_verifies_query_all_and_report ... ok
 test tests::signed_segment_manifest_store_integration ... ok
 test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
-running 70 tests in zap-node
+running 70 tests in rivun-node
 test tests::action_envelope_round_trips ... ok
 test durable_replay::tests::durable_replay_store_persists_fingerprints_across_restart ... ok
 ... [68 other tests] ...
 test result: ok. 70 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
-#### Clippy Output (`cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings`)
+#### Clippy Output (`cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings`)
 ```text
 Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.96s
 ```
@@ -140,14 +140,15 @@ To independently verify the implementation:
 
 1. Run all unit and integration tests across affected crates:
    ```powershell
-   cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger
+   cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger
    ```
 2. Verify zero clippy warnings across all targets:
    ```powershell
-   cargo clippy -p zap-net -p zap-node -p zap-journal -p zap-ledger --all-targets -- -D warnings
+   cargo clippy -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger --all-targets -- -D warnings
    ```
 3. Inspect persistent store implementations:
-   - `crates/zap-net/src/durable_replay.rs`
-   - `crates/zap-node/src/durable_replay.rs`
-   - `crates/zap-journal/src/lib.rs`
-   - `crates/zap-ledger/src/lib.rs`
+   - `crates/rivun-net/src/durable_replay.rs`
+   - `crates/rivun-node/src/durable_replay.rs`
+   - `crates/rivun-journal/src/lib.rs`
+   - `crates/rivun-ledger/src/lib.rs`
+

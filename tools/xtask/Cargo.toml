@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Internal automation tasks for ZAP."
+description = "Internal automation tasks for Rivun."
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true

@@ -1,4 +1,4 @@
-use zap_sdk::{
+use rivun_sdk::{
     ControlFrame, RegistryBundleManifestRequest, registry_bundle_manifest_request_frame,
 };
 

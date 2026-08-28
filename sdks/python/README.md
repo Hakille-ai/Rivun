@@ -1,10 +1,10 @@
-# ZAP Python SDK
+# Rivun Python SDK
 
-Lightweight Python helpers for building ZAP control envelopes, local UDP
-requests, and ZapStore request/response payloads.
+Lightweight Python helpers for building Rivun control envelopes, local UDP
+requests, and RivunStore request/response payloads.
 
-The SDK prepares bytes and JSON that can be handed to any ZAP transport, and it
-includes `ZapUdpClient` for loopback/dev peer integration.
+The SDK prepares bytes and JSON that can be handed to any Rivun transport, and it
+includes `RivunUdpClient` for loopback/dev peer integration.
 
 ## Install locally
 
@@ -15,7 +15,7 @@ python -m pip install -e sdks/python
 ## Build a registry bundle manifest request
 
 ```python
-from zap_sdk import registry_bundle_manifest_request_frame
+from rivun_sdk import registry_bundle_manifest_request_frame
 
 frame = registry_bundle_manifest_request_frame(
     require_publication=True,
@@ -23,13 +23,13 @@ frame = registry_bundle_manifest_request_frame(
 )
 
 wire_payload = frame.encode()
-assert frame.subject == "zap.registry.bundle.manifest.request"
+assert frame.subject == "rivun.registry.bundle.manifest.request"
 ```
 
 ## Parse a control envelope
 
 ```python
-from zap_sdk import ControlFrame
+from rivun_sdk import ControlFrame
 
 parsed = ControlFrame.decode(wire_payload)
 print(parsed.json_body())
@@ -40,7 +40,7 @@ print(parsed.json_body())
 `validate_artifact_hash()` checks the canonical `blake3:<64 hex chars>` shape.
 `artifact_hash()` computes the canonical hash only when the optional `blake3`
 Python package is installed. Without it, the SDK raises `MissingCryptoBackend`
-instead of returning a non-ZAP checksum.
+instead of returning a non-Rivun checksum.
 
 `verify_ed25519_signature()` verifies signatures when the optional `PyNaCl`
 package is installed. Install both optional crypto backends with:
@@ -54,12 +54,12 @@ python -m pip install -e "sdks/python[crypto]"
 The Python tests read the shared protocol fixtures from the repository-level
 `fixtures/` directory. They currently assert:
 
-- `zenv-control-registry-bundle-manifest-request.json` matches the Python
-  ZapStore request helper and round-trips through `ControlFrame`.
+- `ZENV-control-registry-bundle-manifest-request.json` matches the Python
+  RivunStore request helper and round-trips through `ControlFrame`.
 - `control-subjects-v1.json` stays aligned with the registry control subjects
   exposed by the SDK.
 - `agent-intent-message-v1.json` can be carried as an
-  `application/zap-agent+json` control envelope.
+  `application/rivun-agent+json` control envelope.
 
 To add a fixture, create a small deterministic JSON file in `fixtures/`, then
 add or extend a test in `sdks/python/tests/test_protocol.py` that loads it via

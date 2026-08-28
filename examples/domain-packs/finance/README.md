@@ -1,6 +1,6 @@
 # Finance Domain Pack
 
-This preview pack models finance workflows as typed, auditable ZAP subjects. It
+This preview pack models finance workflows as typed, auditable Rivun subjects. It
 is for systems that need to separate proposals, risk checks, approvals,
 execution, and reconciliation evidence.
 
@@ -16,5 +16,5 @@ execution, and reconciliation evidence.
 ## Validate
 
 ```powershell
-cargo run -p zap-cli -- pack validate --pack examples/domain-packs/finance --json
+cargo run -p rivun-cli -- pack validate --pack examples/domain-packs/finance --json
 ```

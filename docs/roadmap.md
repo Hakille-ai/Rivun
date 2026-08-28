@@ -1,8 +1,8 @@
 # Roadmap
 
-ZAP is evolving from a secure low-latency message protocol into a universal
+rivun is evolving from a secure low-latency message protocol into a universal
 trust fabric for agents, machines, services, and human-supervised automation.
-The goal is not to make ZAP a vague general-purpose platform. The goal is to
+The goal is not to make rivun a vague general-purpose platform. The goal is to
 make every important action in a distributed system typed, signed, policy-gated,
 sandboxed when needed, observable, and auditable after the fact.
 
@@ -13,7 +13,7 @@ personal automation, healthcare, finance, and other safety-sensitive domains.
 
 ## Product Thesis
 
-ZAP should become the accountable execution layer for autonomous software and
+rivun should become the accountable execution layer for autonomous software and
 real-world automation:
 
 - typed intent before execution;
@@ -24,14 +24,14 @@ real-world automation:
 - sandboxed drivers for untrusted extensions;
 - signed receipts and hash-chained memory for audit;
 - portable SDKs and gateways for broad adoption;
-- domain packs that make ZAP useful in many industries without weakening the
+- domain packs that make rivun useful in many industries without weakening the
   core safety model.
 
 ## Current Foundation
 
 Already implemented:
 
-- strict `ZAP_` wire frame parsing and encoding;
+- strict `@@rivun_HEADER@@` wire frame parsing and encoding;
 - `ZENV` universal envelopes for actions, events, data, commands, queries,
   responses, streams, and control messages;
 - Ed25519 node identity, frame signing, verification, and PoA certificates;
@@ -41,7 +41,7 @@ Already implemented:
   simulation gates;
 - Wasmtime driver sandboxing with fuel, memory, timeout, output, and scoped host
   call limits;
-- signed driver manifests, local ZapStore registries, publications, install
+- signed driver manifests, local RivunStore registries, publications, install
   plans, and offline bundles;
 - PACT signed action records with canonical BLAKE3 hashing, Ed25519 signatures,
   revocation evidence, offline bundles, and receipt references;
@@ -55,9 +55,9 @@ Already implemented:
 
 ## North-Star Outcomes
 
-ZAP reaches the next maturity level when these outcomes are true:
+rivun reaches the next maturity level when these outcomes are true:
 
-- a new developer can install ZAP, run a two-node demo, send a typed action, and
+- a new developer can install rivun, run a two-node demo, send a typed action, and
   verify a receipt in less than five minutes;
 - production operators can run `doctor --strict` and trust that the daemon,
   policy, registry, receipts, routes, PoA, and observability posture are checked;
@@ -66,14 +66,14 @@ ZAP reaches the next maturity level when these outcomes are true:
   PACT records;
 - high-risk actions are fail-closed by policy and cannot run without explicit
   grants, PoA, human approval, or simulation when configured;
-- ZAP nodes expose real metrics and health status matching the Prometheus and
+- rivun nodes expose real metrics and health status matching the Prometheus and
   Grafana assets in the repository;
-- ZapStore can distribute signed drivers and domain packs through online and
+- RivunStore can distribute signed drivers and domain packs through online and
   offline workflows with rollback and revocation;
 - AI agent workflows can express intent, negotiate capabilities, delegate work,
   execute actions, and produce terminal receipts without relying on hidden
   natural-language interpretation inside the protocol;
-- domain packs make ZAP practical for concrete verticals such as agentic
+- domain packs make rivun practical for concrete verticals such as agentic
   development, smart buildings, industrial control, cloud operations, personal
   AI, healthcare, and finance.
 
@@ -122,7 +122,7 @@ Definition of done:
 
 ### Track C: Adoption Surface
 
-Purpose: make ZAP easy to install, understand, integrate, and extend.
+Purpose: make rivun easy to install, understand, integrate, and extend.
 
 Owns:
 
@@ -146,7 +146,7 @@ Use this ladder when deciding what to build next:
 2. Conformance fixtures that prevent protocol drift across SDKs.
 3. Install, quickstart, and example flows that reduce adoption friction.
 4. Observability and production checks that make deployments operable.
-5. Domain packs and gateways that prove ZAP works outside the core repo.
+5. Domain packs and gateways that prove rivun works outside the core repo.
 6. Performance work guided by measured bottlenecks and regression budgets.
 7. Developer-experience polish once the underlying workflow is reliable.
 
@@ -164,7 +164,7 @@ Deliverables:
 
 - define one canonical tagline and product explanation across README, website,
   docs, and release notes;
-- add "Use ZAP when..." and "Do not use ZAP when..." guidance;
+- add "Use rivun when..." and "Do not use rivun when..." guidance;
 - publish a clear comparison with MQTT, NATS, gRPC, Kafka, and generic service
   meshes;
 - create a five-minute quickstart with expected terminal output;
@@ -223,7 +223,7 @@ Success metrics:
 
 ### Phase 2: Protocol Spec and SDK Conformance
 
-Goal: make ZAP portable, testable, and safe across languages.
+Goal: make rivun portable, testable, and safe across languages.
 
 Deliverables:
 
@@ -231,7 +231,7 @@ Deliverables:
   subjects, schema versions, error codes, frame fields, datagram fields, control
   messages, and compatibility rules;
 - publish golden fixtures for unsigned frames, signed frames, auth trailers, PoA
-  trailers, `ZENV`, encrypted datagrams, ZapStore messages, capability messages,
+  trailers, `ZENV`, encrypted datagrams, RivunStore messages, capability messages,
   receipts, PACT records/bundles, and agent messages;
 - generate or validate SDK constants from the source of truth;
 - add SDK conformance tests for Rust, TypeScript, Python, and Go;
@@ -240,13 +240,13 @@ Deliverables:
   - frame encode/decode/sign/verify;
   - datagram encrypt/decrypt where the platform supports it;
   - control request/response helpers;
-  - ZapStore registry, bundle, and install plan verification;
+  - RivunStore registry, bundle, and install plan verification;
   - capability query and verification;
   - receipt verification and pull helpers;
   - PACT canonical hash, signature verification, and bundle verification;
   - agent protocol contracts.
 - publish a compatibility matrix in `docs/sdks.md`;
-- add `zap fixtures verify --sdk <path>` and `zap schema export` workflows.
+- add `rivun fixtures verify --sdk <path>` and `rivun schema export` workflows.
 
 Success metrics:
 
@@ -257,25 +257,25 @@ Success metrics:
 
 ### Phase 3: Agent Gateway and Accountable AI Workflows
 
-Goal: make ZAP the typed trust boundary between AI systems and the real world.
+Goal: make rivun the typed trust boundary between AI systems and the real world.
 
 Deliverables:
 
-- integrate `zap-agent` contracts into CLI, node, SDKs, receipts, and memory;
+- integrate `rivun-agent` contracts into CLI, node, SDKs, receipts, and memory;
 - add CLI workflows:
-  - `zap agent intent`;
-  - `zap agent session`;
-  - `zap agent delegate`;
-  - `zap agent negotiate`;
-  - `zap agent status`;
-  - `zap agent result`.
-- wrap agent messages in `ZENV` with `application/zap-agent+json`;
+  - `rivun agent intent`;
+  - `rivun agent session`;
+  - `rivun agent delegate`;
+  - `rivun agent negotiate`;
+  - `rivun agent status`;
+  - `rivun agent result`.
+- wrap agent messages in `ZENV` with `application/rivun-agent+json`;
 - link receipts to `intent_id`, `session_id`, `capabilities_used`, route
   decision, policy decision, PoA summary, output hash, and artifact references;
 - define agent memory namespaces such as `agent.session`, `agent.observation`,
   `agent.plan`, `agent.fact`, `agent.artifact`, and `policy.decision`;
 - add signed memory compaction records that reference source entries;
-- add `zap memory export-evidence` for audit bundles;
+- add `rivun memory export-evidence` for audit bundles;
 - build adapters for OpenAI tool workflows, MCP, LangGraph, AutoGen, CrewAI, and
   other agent frameworks without putting model-specific logic in the wire
   protocol;
@@ -292,7 +292,7 @@ Success metrics:
 
 ### Phase 4: Domain Packs and Capability Marketplace
 
-Goal: make ZAP universal by packaging safe, reusable domain knowledge.
+Goal: make rivun universal by packaging safe, reusable domain knowledge.
 
 Domain packs should include:
 
@@ -311,26 +311,26 @@ Domain packs should include:
 
 Priority packs:
 
-- `zap-pack-agentic-dev`: repository, patch, test, CI, review, PR, and release
+- `rivun-pack-agentic-dev`: repository, patch, test, CI, review, PR, and release
   capabilities for auditable coding agents;
-- `zap-pack-smart-building`: sensors, thermostats, lighting, locks, alarms,
+- `rivun-pack-smart-building`: sensors, thermostats, lighting, locks, alarms,
   cameras, energy controls, and human/PoA gates for risky actions;
-- `zap-pack-industrial`: PLC, Modbus, OPC UA, robot, valve, motor, emergency
+- `rivun-pack-industrial`: PLC, Modbus, OPC UA, robot, valve, motor, emergency
   stop, safety quorum, and simulation-first defaults;
-- `zap-pack-cloud-ops`: deploy, rollback, restart, scale, secret rotation,
+- `rivun-pack-cloud-ops`: deploy, rollback, restart, scale, secret rotation,
   incident mitigation, and blast-radius limits;
-- `zap-pack-personal-ai`: calendar, email draft, files, browser actions, local
+- `rivun-pack-personal-ai`: calendar, email draft, files, browser actions, local
   memory, and approval gates;
-- `zap-pack-healthcare`: record queries, alert routing, medical device commands,
+- `rivun-pack-healthcare`: record queries, alert routing, medical device commands,
   privacy defaults, and strict audit;
-- `zap-pack-finance`: trade proposal, risk check, simulation, approval, execute,
+- `rivun-pack-finance`: trade proposal, risk check, simulation, approval, execute,
   reconciliation, and regulator-friendly evidence export.
 
 Marketplace deliverables:
 
-- add `zap pack init`, `build`, `sign`, `verify`, `publish`, `install`, and
+- add `rivun pack init`, `build`, `sign`, `verify`, `publish`, `install`, and
   `audit`;
-- extend ZapStore from driver registry to signed capability and domain-pack
+- extend RivunStore from driver registry to signed capability and domain-pack
   registry;
 - add pack install plans that bind drivers, schemas, policies, routes, PoA
   defaults, docs, and migrations;
@@ -348,7 +348,7 @@ Success metrics:
 
 ### Phase 5: Fleet, Mesh, and Multi-Transport Runtime
 
-Goal: operate ZAP across real fleets while preserving auditability.
+Goal: operate rivun across real fleets while preserving auditability.
 
 Deliverables:
 
@@ -360,7 +360,7 @@ Deliverables:
   operator group;
 - add fleet topology graph: nodes, peers, routes, capabilities, grants,
   validator sets, registry versions, and receipt health;
-- add `zap fleet doctor`, `zap node health`, and `zap incident snapshot`;
+- add `rivun fleet doctor`, `rivun node health`, and `rivun incident snapshot`;
 - add remote bundle artifact transfer with authenticated manifests and external
   artifact-channel verification;
 - add staged rollout, canary, rollback, and deprecation enforcement;
@@ -379,7 +379,7 @@ Success metrics:
   invalid registries, and PoA quorum gaps;
 - stream transport handles long-running agent status and large artifacts without
   weakening frame-level identity and receipt trails;
-- bridge gateways preserve ZAP identity, policy, and audit semantics.
+- bridge gateways preserve rivun identity, policy, and audit semantics.
 
 ### Phase 6: Architecture Modularization
 
@@ -387,7 +387,7 @@ Goal: keep the codebase maintainable as the product grows.
 
 Deliverables:
 
-- reduce `zap-node` into a small orchestrator over clearer internal services;
+- reduce `rivun-node` into a small orchestrator over clearer internal services;
 - split or module-bound these responsibilities:
   - config model and validation;
   - control message serving;
@@ -413,7 +413,7 @@ Success metrics:
 
 ### Phase 7: 1.0 Readiness
 
-Goal: make ZAP stable enough for serious external adoption.
+Goal: make rivun stable enough for serious external adoption.
 
 Release gates:
 
@@ -519,16 +519,16 @@ current implementation backlog.
     PACT helpers, and agent messages.
 16. ~~Add CLI workflows for agent intent/session/delegation/negotiation/status.~~
 17. ~~Define the domain pack manifest format.~~
-18. ~~Build `zap-pack-agentic-dev` as the first complete domain pack.~~
-19. ~~Build `zap-pack-smart-building` or `zap-pack-industrial` as the first
+18. ~~Build `rivun-pack-agentic-dev` as the first complete domain pack.~~
+19. ~~Build `rivun-pack-smart-building` or `rivun-pack-industrial` as the first
     real-world automation pack.~~
 20. ~~Publish a release-readiness checklist tied to 1.0 gates.~~
 
-Newly implemented beyond this list: `zap-gateway` (MCP/HTTP/SSE/WebSocket +
-provenance chain), BFT consensus and gossip/mesh in `zap-net`, MMR/batch/ZK
-receipt accumulation in `zap-ledger`, async WASM pipeline and streaming buffers
-in `zap-runtime`, dispute/escrow engine in `zap-pact`, pack build/sign/install
-in `zap-pack`, fleet doctor/incident snapshots in `zap-telemetry`, and the
+Newly implemented beyond this list: `rivun-gateway` (MCP/HTTP/SSE/WebSocket +
+provenance chain), BFT consensus and gossip/mesh in `rivun-net`, MMR/batch/ZK
+receipt accumulation in `rivun-ledger`, async WASM pipeline and streaming buffers
+in `rivun-runtime`, dispute/escrow engine in `rivun-pact`, pack build/sign/install
+in `rivun-pack`, fleet doctor/incident snapshots in `rivun-telemetry`, and the
 174-test 4-tier E2E suite in `tests/e2e`.
 
 ## Release Cadence
@@ -555,7 +555,7 @@ Each release should publish:
 
 ## Governance Guardrails
 
-ZAP can become broad without becoming vague if changes respect these guardrails:
+rivun can become broad without becoming vague if changes respect these guardrails:
 
 - protocol changes require fixtures before implementation is considered done;
 - new authority paths require policy, receipt, and observability coverage;
@@ -567,7 +567,7 @@ ZAP can become broad without becoming vague if changes respect these guardrails:
 
 ## Non-Goals
 
-ZAP should not become:
+rivun should not become:
 
 - a natural-language agent planner embedded in the protocol;
 - a replacement for every message broker or RPC framework;
@@ -578,5 +578,6 @@ ZAP should not become:
 - an integration platform that weakens identity, policy, or receipt guarantees
   for convenience.
 
-The core promise stays narrow and strong: ZAP moves typed messages and actions
+The core promise stays narrow and strong: rivun moves typed messages and actions
 through a verifiable trust boundary. Everything else must reinforce that promise.
+

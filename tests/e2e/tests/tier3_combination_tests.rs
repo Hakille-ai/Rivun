@@ -9,23 +9,23 @@ use std::collections::{BTreeMap, BTreeSet};
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use zap_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder};
-use zap_capability::{CapabilityId, DriverPermissions};
-use zap_core::{ZapFlags, ZapFrame, now_micros};
-use zap_crypto::{Keypair, certify_frame, sign_frame};
-use zap_ledger::{
+use rivun_agent::{AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder};
+use rivun_capability::{CapabilityId, DriverPermissions};
+use rivun_core::{RivunFlags, RivunFrame, now_micros};
+use rivun_crypto::{Keypair, certify_frame, sign_frame};
+use rivun_ledger::{
     MerkleMountainRange, ReceiptJournalStore, ReceiptReplicationRequest, SignedActionReceipt,
 };
-use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{PeerHealth, VectorClock};
-use zap_pact::{ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation};
-use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
-use zap_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
-use zap_telemetry::{
-    FleetNodeHealth, FleetNodeState, FleetTopology, PrometheusExporter, ZapNodeMetricsSnapshot,
+use rivun_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
+use rivun_net::{PeerHealth, VectorClock};
+use rivun_pact::{RivunPact, RivunPactBundle, RivunPactError, RivunPactRevocation};
+use rivun_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet};
+use rivun_runtime::{DriverPipeline, ExecutionLimits, WasmExecutor};
+use rivun_telemetry::{
+    FleetNodeHealth, FleetNodeState, FleetTopology, PrometheusExporter, RivunNodeMetricsSnapshot,
 };
 
-use zap_e2e::harness::*;
+use rivun_e2e::harness::*;
 
 #[test]
 fn tc_t3_01_gossip_state_sync_with_byzantine_consensus() -> Result<()> {
@@ -63,10 +63,10 @@ fn tc_t3_02_swarm_consensus_and_poa_frame_certification() -> Result<()> {
 
     // 2. Generate Proof-of-Action certificate using validator signatures
     let proposer = cluster.get_node(&node_ids[0]).unwrap();
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         proposer.node_id,
         Uuid::nil(),
-        ZapFlags::SIGNED | ZapFlags::REQUIRES_CONSENSUS,
+        RivunFlags::SIGNED | RivunFlags::REQUIRES_CONSENSUS,
         Bytes::from_static(b"critical_actuation_payload"),
     )?;
     let signed_frame = sign_frame(&proposer.keypair, &frame)?;
@@ -159,10 +159,10 @@ fn tc_t3_04_action_execution_to_segmented_journal_and_mmr() -> Result<()> {
     )?;
 
     // 2. Create and sign ActionReceipt
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         key.node_id(),
         Uuid::nil(),
-        ZapFlags::SIGNED,
+        RivunFlags::SIGNED,
         Bytes::from_static(b"sensor_temp=24.5C"),
     )?;
     let signed = SignedActionReceipt::new(
@@ -285,14 +285,14 @@ fn tc_t3_07_agent_intent_to_pact_signing_and_policy_evaluation() -> Result<()> {
     intent.intent_id = intent_id;
 
     // 2. Pact Creation & Signing
-    let mut pact = ZapPact::new(
+    let mut pact = RivunPact::new(
         "service_consumer",
         "service_provider",
         "Request cloud compute",
         1_700_000,
     );
     pact.object = serde_json::json!({"vcpus": 8, "ram_gb": 32});
-    pact.terms = serde_json::json!({"max_cost_zap": 50});
+    pact.terms = serde_json::json!({"max_cost_rivun": 50});
     pact.sign(&key)?;
 
     // 3. Policy Evaluation
@@ -335,21 +335,21 @@ fn tc_t3_07_agent_intent_to_pact_signing_and_policy_evaluation() -> Result<()> {
 fn tc_t3_08_pact_revocation_evidence_with_bundle_verification() -> Result<()> {
     let key = generate_keypair();
     let pact = create_test_pact("agent.client", "agent.server", "task_a", &key)?;
-    let mut bundle = ZapPactBundle::new(pact.clone());
+    let mut bundle = RivunPactBundle::new(pact.clone());
 
     // Initially valid
     assert!(bundle.verify(Some(now_micros()? + 1000))?.valid);
 
     // Attach signed revocation
     let mut revocation =
-        ZapPactRevocation::new(pact.pact_id, "admin", "Contract breached", 1_750_000);
+        RivunPactRevocation::new(pact.pact_id, "admin", "Contract breached", 1_750_000);
     revocation.sign(&key)?;
     bundle.revocations.push(revocation);
 
     // Now bundle verification detects revocation
     let res = bundle.verify(Some(1_760_000));
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapPactError::Revoked));
+    assert!(matches!(res.unwrap_err(), RivunPactError::Revoked));
     Ok(())
 }
 
@@ -437,9 +437,9 @@ fn tc_t3_11_byzantine_fault_tolerance_during_quorum_voting() -> Result<()> {
 #[test]
 fn tc_t3_12_multi_party_pact_escrow_with_dispute_resolution_policy() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("depositor", "escrow_holder", "lock_escrow", 1_700_000);
+    let mut pact = RivunPact::new("depositor", "escrow_holder", "lock_escrow", 1_700_000);
     pact.terms = serde_json::json!({
-        "escrow_amount_zap": 5000,
+        "escrow_amount_rivun": 5000,
         "release_condition": "deliver_product",
         "dispute_timeout_micros": 30_000_000
     });
@@ -566,7 +566,7 @@ fn tc_t3_15_fleet_topology_health_aggregation_and_prometheus_metrics() -> Result
     assert_eq!(topo.active_peer_count(), 3);
     assert_eq!(topo.overall_health(), FleetNodeHealth::Healthy);
 
-    let snap = ZapNodeMetricsSnapshot {
+    let snap = RivunNodeMetricsSnapshot {
         node_id,
         peers_active: topo.active_peer_count() as u64,
         replay_rejections_total: 0,
@@ -574,6 +574,6 @@ fn tc_t3_15_fleet_topology_health_aggregation_and_prometheus_metrics() -> Result
     };
 
     let text = PrometheusExporter::export(&snap);
-    assert!(text.contains(&format!("zap_peers_active{{node_id=\"{node_id}\"}} 3")));
+    assert!(text.contains(&format!("rivun_peers_active{{node_id=\"{node_id}\"}} 3")));
     Ok(())
 }

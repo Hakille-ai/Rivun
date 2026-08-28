@@ -9,31 +9,31 @@ use std::collections::{BTreeMap, BTreeSet};
 use tempfile::tempdir;
 use uuid::Uuid;
 
-use zap_agent::{
-    AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder, ProvenanceStage, ZapAgentError,
+use rivun_agent::{
+    AgentId, AgentIntent, IntentKind, ProvenanceChainBuilder, ProvenanceStage, RivunAgentError,
 };
-use zap_capability::DriverPermissions;
-use zap_core::{ZapFlags, ZapFrame};
-use zap_crypto::{sign_frame, verify_frame};
-use zap_ledger::{
+use rivun_capability::DriverPermissions;
+use rivun_core::{RivunFlags, RivunFrame};
+use rivun_crypto::{sign_frame, verify_frame};
+use rivun_ledger::{
     ActionReceipt, MerkleMountainRange, MmrError, ReceiptJournalStore, ReceiptReplicationRequest,
     SignedActionReceipt,
 };
-use zap_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
-use zap_net::{
-    GossipError, GossipMesh, Peer, PeerHealth, VectorClock, ZapEndpoint, ZapEndpointConfig,
-    ZapNetError,
+use rivun_memory::{MemoryJournalStore, MemoryPut, MemoryQuery, MemoryStore};
+use rivun_net::{
+    GossipError, GossipMesh, Peer, PeerHealth, VectorClock, RivunEndpoint, RivunEndpointConfig,
+    RivunNetError,
 };
-use zap_node::ZapNodeConfig;
-use zap_pact::{Validate, ZapPact, ZapPactBundle, ZapPactError, ZapPactRevocation};
-use zap_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet, ZapPolicyError};
-use zap_runtime::{DriverPipeline, ExecutionLimits, PipelineError, WasmExecutor, ZapRuntimeError};
-use zap_telemetry::{
+use rivun_node::RivunNodeConfig;
+use rivun_pact::{Validate, RivunPact, RivunPactBundle, RivunPactError, RivunPactRevocation};
+use rivun_policy::{PolicyDecision, PolicyInput, PolicyRule, PolicySet, RivunPolicyError};
+use rivun_runtime::{DriverPipeline, ExecutionLimits, PipelineError, WasmExecutor, RivunRuntimeError};
+use rivun_telemetry::{
     FleetDoctor, FleetNodeHealth, FleetNodeState, FleetTopology, IncidentCapturer,
-    PrometheusExporter, SecretRedactor, ZapNodeMetricsSnapshot,
+    PrometheusExporter, SecretRedactor, RivunNodeMetricsSnapshot,
 };
 
-use zap_e2e::harness::*;
+use rivun_e2e::harness::*;
 
 // ============================================================================
 // FEATURE 1: P2P Swarm Gossip Protocol (Boundary & Corner Cases)
@@ -43,7 +43,7 @@ use zap_e2e::harness::*;
 fn tc_f01_06_vector_clock_compare_empty_and_disjoint() {
     let empty1 = VectorClock::new();
     let empty2 = VectorClock::new();
-    assert_eq!(empty1.compare(&empty2), zap_net::Causality::Equal);
+    assert_eq!(empty1.compare(&empty2), rivun_net::Causality::Equal);
 
     let mut c1 = VectorClock::new();
     let mut c2 = VectorClock::new();
@@ -52,7 +52,7 @@ fn tc_f01_06_vector_clock_compare_empty_and_disjoint() {
     c1.increment(n1);
     c2.increment(n2);
     // Disjoint keys are concurrent
-    assert_eq!(c1.compare(&c2), zap_net::Causality::Concurrent);
+    assert_eq!(c1.compare(&c2), rivun_net::Causality::Concurrent);
 }
 
 #[test]
@@ -70,15 +70,15 @@ async fn tc_f01_08_replayed_datagram_nonce_rejected() -> Result<()> {
     let target = Uuid::new_v4();
 
     let endpoint =
-        ZapEndpoint::bind(ZapEndpointConfig::new("127.0.0.1:0".parse()?, target)).await?;
+        RivunEndpoint::bind(RivunEndpointConfig::new("127.0.0.1:0".parse()?, target)).await?;
     let dummy_addr = "127.0.0.1:9876".parse()?;
     endpoint.add_peer(Peer::new(source, dummy_addr, key)).await;
 
     // Send valid frame
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         source,
         target,
-        ZapFlags::ENCRYPTED,
+        RivunFlags::ENCRYPTED,
         Bytes::from_static(b"packet_1"),
     )?;
     let _encoded = frame.encode();
@@ -88,7 +88,7 @@ async fn tc_f01_08_replayed_datagram_nonce_rejected() -> Result<()> {
 
 #[tokio::test]
 async fn tc_f01_09_unknown_peer_send_fails() -> Result<()> {
-    let endpoint = ZapEndpoint::bind(ZapEndpointConfig::new(
+    let endpoint = RivunEndpoint::bind(RivunEndpointConfig::new(
         "127.0.0.1:0".parse()?,
         Uuid::new_v4(),
     ))
@@ -99,14 +99,14 @@ async fn tc_f01_09_unknown_peer_send_fails() -> Result<()> {
         .send(unknown_target, Bytes::from_static(b"hello"))
         .await;
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapNetError::UnknownPeer(id) if id == unknown_target));
+    assert!(matches!(res.unwrap_err(), RivunNetError::UnknownPeer(id) if id == unknown_target));
     Ok(())
 }
 
 #[test]
 fn tc_f01_10_datagram_parse_rejects_empty_buffer() {
     let empty = [0u8; 10];
-    let res = ZapFrame::decode(&empty);
+    let res = RivunFrame::decode(&empty);
     assert!(res.is_err());
 }
 
@@ -186,7 +186,7 @@ fn tc_f02_09_action_receipt_missing_poa_when_consensus_required_fails() {
         output_hash: None,
         frame_timestamp_micros: 1000,
         processed_at_micros: 2000,
-        flags: ZapFlags::REQUIRES_CONSENSUS.bits(),
+        flags: RivunFlags::REQUIRES_CONSENSUS.bits(),
         consensus_required: true,
         poa: None, // Missing POA certificate
         pact: None,
@@ -199,10 +199,10 @@ fn tc_f02_09_action_receipt_missing_poa_when_consensus_required_fails() {
 #[test]
 fn tc_f02_10_tampered_frame_fails_signature_verification() -> Result<()> {
     let key = generate_keypair();
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         key.node_id(),
         Uuid::new_v4(),
-        ZapFlags::SIGNED,
+        RivunFlags::SIGNED,
         Bytes::from_static(b"valid_payload"),
     )?;
     let signed = sign_frame(&key, &frame)?;
@@ -415,10 +415,10 @@ fn tc_f05_09_replication_request_inverted_time_window_rejected() {
 #[test]
 fn tc_f05_10_tampered_receipt_signature_fails_verification() -> Result<()> {
     let key = generate_keypair();
-    let frame = ZapFrame::new(
+    let frame = RivunFrame::new(
         key.node_id(),
         Uuid::nil(),
-        ZapFlags::SIGNED,
+        RivunFlags::SIGNED,
         Bytes::from_static(b"receipt_body"),
     )?;
     let mut signed = SignedActionReceipt::new(&key, &frame, "action_x", None, 2000, None)?;
@@ -499,8 +499,8 @@ fn tc_f07_06_driver_missing_execute_export_fails_abi_validation() {
     let bad_wat = r#"
     (module
       (memory (export "memory") 1)
-      (func (export "zap_alloc") (param i32) (result i32) (i32.const 0))
-      (func (export "zap_dealloc") (param i32 i32)))
+      (func (export "rivun_alloc") (param i32) (result i32) (i32.const 0))
+      (func (export "rivun_dealloc") (param i32 i32)))
     "#;
     let wasm = wat::parse_str(bad_wat).unwrap();
     let executor = WasmExecutor::new().unwrap();
@@ -509,7 +509,7 @@ fn tc_f07_06_driver_missing_execute_export_fails_abi_validation() {
     assert!(res.is_err());
     assert!(matches!(
         res.unwrap_err(),
-        ZapRuntimeError::MissingExport("zap_execute")
+        RivunRuntimeError::MissingExport("rivun_execute")
     ));
 }
 
@@ -544,7 +544,7 @@ fn tc_f07_08_driver_forbidden_network_permission_rejected() -> Result<()> {
     assert!(res.is_err());
     assert!(matches!(
         res.unwrap_err(),
-        ZapRuntimeError::PermissionDenied("network")
+        RivunRuntimeError::PermissionDenied("network")
     ));
     Ok(())
 }
@@ -565,7 +565,7 @@ fn tc_f07_09_driver_forbidden_filesystem_permission_rejected() -> Result<()> {
     assert!(res.is_err());
     assert!(matches!(
         res.unwrap_err(),
-        ZapRuntimeError::PermissionDenied("filesystem")
+        RivunRuntimeError::PermissionDenied("filesystem")
     ));
     Ok(())
 }
@@ -583,7 +583,7 @@ fn tc_f07_10_driver_output_exceeding_max_output_bytes_rejected() -> Result<()> {
     assert!(res.is_err());
     assert!(matches!(
         res.unwrap_err(),
-        ZapRuntimeError::OutputTooLarge { max: 4, .. }
+        RivunRuntimeError::OutputTooLarge { max: 4, .. }
     ));
     Ok(())
 }
@@ -708,9 +708,9 @@ fn tc_f09_08_stage_execution_failure_contains_stage_name_and_index() {
     let bad_wat = r#"
     (module
       (memory (export "memory") 1)
-      (func (export "zap_alloc") (param i32) (result i32) (i32.const 0))
-      (func (export "zap_dealloc") (param i32 i32))
-      (func (export "zap_execute") (param i32 i32 i32 i32) (result i64) (unreachable)))
+      (func (export "rivun_alloc") (param i32) (result i32) (i32.const 0))
+      (func (export "rivun_dealloc") (param i32 i32))
+      (func (export "rivun_execute") (param i32 i32 i32 i32) (result i64) (unreachable)))
     "#;
     let bad_wasm = wat::parse_str(bad_wat).unwrap();
     let pipeline = DriverPipeline::new("faulty_pipe").add_stage(
@@ -771,24 +771,24 @@ fn tc_f09_10_pipeline_stage_count_tracking() {
 #[test]
 fn tc_f10_06_expired_pact_fails_verification() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("agent.1", "agent.2", "act", 1000);
+    let mut pact = RivunPact::new("agent.1", "agent.2", "act", 1000);
     pact.expires_at_micros = Some(2000);
     pact.sign(&key)?;
 
     // Verify at timestamp 3000 > expires_at (2000)
     let res = pact.verify(Some(3000));
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapPactError::Expired));
+    assert!(matches!(res.unwrap_err(), RivunPactError::Expired));
     Ok(())
 }
 
 #[test]
 fn tc_f10_07_revoked_pact_fails_verification() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("agent.1", "agent.2", "act", 1000);
+    let mut pact = RivunPact::new("agent.1", "agent.2", "act", 1000);
     pact.sign(&key)?;
 
-    pact.revocation = Some(ZapPactRevocation::new(
+    pact.revocation = Some(RivunPactRevocation::new(
         pact.pact_id,
         "admin",
         "halted",
@@ -796,14 +796,14 @@ fn tc_f10_07_revoked_pact_fails_verification() -> Result<()> {
     ));
     let res = pact.verify(Some(1600));
     assert!(res.is_err());
-    assert!(matches!(res.unwrap_err(), ZapPactError::Revoked));
+    assert!(matches!(res.unwrap_err(), RivunPactError::Revoked));
     Ok(())
 }
 
 #[test]
 fn tc_f10_08_tampered_pact_terms_fails_hash_verification() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("agent.1", "agent.2", "act", 1000);
+    let mut pact = RivunPact::new("agent.1", "agent.2", "act", 1000);
     pact.terms = serde_json::json!({"amount": 100});
     pact.sign(&key)?;
 
@@ -813,20 +813,20 @@ fn tc_f10_08_tampered_pact_terms_fails_hash_verification() -> Result<()> {
     assert!(res.is_err());
     assert!(matches!(
         res.unwrap_err(),
-        ZapPactError::HashMismatch { .. }
+        RivunPactError::HashMismatch { .. }
     ));
     Ok(())
 }
 
 #[test]
 fn tc_f10_09_pact_with_empty_actor_fails_validation() {
-    let pact = ZapPact::new("", "target", "intent", 1000);
+    let pact = RivunPact::new("", "target", "intent", 1000);
     assert!(pact.validate().is_err());
 }
 
 #[test]
 fn tc_f10_10_pact_with_invalid_hash_prefix_fails_validation() {
-    let mut pact = ZapPact::new("actor", "target", "intent", 1000);
+    let mut pact = RivunPact::new("actor", "target", "intent", 1000);
     pact.hash = Some("md5:12345".to_string()); // Must start with blake3:
     assert!(pact.validate().is_err());
 }
@@ -839,7 +839,7 @@ fn tc_f10_10_pact_with_invalid_hash_prefix_fails_validation() {
 fn tc_f11_06_policy_set_with_invalid_default_decision_rejected() {
     let res = PolicySet::new_with_default(PolicyDecision::RequirePoa, vec![]);
     assert!(res.is_err());
-    assert_eq!(res.unwrap_err(), ZapPolicyError::InvalidDefaultDecision);
+    assert_eq!(res.unwrap_err(), RivunPolicyError::InvalidDefaultDecision);
 }
 
 #[test]
@@ -903,11 +903,11 @@ fn tc_f11_09_unmatched_input_in_default_deny_policy_is_denied() -> Result<()> {
 fn tc_f11_10_bundle_with_mismatched_revocation_id_rejected() -> Result<()> {
     let key = generate_keypair();
     let pact = create_test_pact("a", "b", "c", &key)?;
-    let mut bundle = ZapPactBundle::new(pact);
+    let mut bundle = RivunPactBundle::new(pact);
 
     // Add revocation for different pact ID
     let other_id = Uuid::new_v4();
-    let mut rev = ZapPactRevocation::new(other_id, "admin", "reason", 1000);
+    let mut rev = RivunPactRevocation::new(other_id, "admin", "reason", 1000);
     rev.sign(&key)?;
     bundle.revocations.push(rev);
 
@@ -933,7 +933,7 @@ fn tc_f12_06_provenance_builder_without_intent_fails() {
     );
     assert!(matches!(
         res,
-        Err(ZapAgentError::MissingStep(ProvenanceStage::Intent))
+        Err(RivunAgentError::MissingStep(ProvenanceStage::Intent))
     ));
 }
 
@@ -1004,7 +1004,7 @@ fn tc_f12_09_wrong_public_key_signature_fails_chain_verification() -> Result<()>
 
 #[test]
 fn tc_f12_10_empty_provenance_steps_fails_verification() {
-    let chain = zap_agent::ProvenanceChainDigest {
+    let chain = rivun_agent::ProvenanceChainDigest {
         schema_version: 1,
         chain_id: Uuid::new_v4(),
         session_id: Uuid::new_v4(),
@@ -1069,7 +1069,7 @@ fn tc_f13_07_fleet_topology_unreachable_node_triggers_critical() -> Result<()> {
 #[test]
 fn tc_f13_08_node_config_with_invalid_toml_fails_parsing() {
     let invalid_toml = "bind = 12345 [broken syntax";
-    let res = ZapNodeConfig::from_toml_str(invalid_toml);
+    let res = RivunNodeConfig::from_toml_str(invalid_toml);
     assert!(res.is_err());
 }
 
@@ -1147,20 +1147,20 @@ fn tc_f14_08_incident_snapshot_with_empty_metrics_handles_cleanly() -> Result<()
 
 #[test]
 fn tc_f14_09_prometheus_exporter_zero_metrics_handling() {
-    let snap = ZapNodeMetricsSnapshot::default();
+    let snap = RivunNodeMetricsSnapshot::default();
     let text = PrometheusExporter::export(&snap);
     let node_id = snap.node_id;
     assert!(text.contains(&format!(
-        "zap_replay_rejections_total{{node_id=\"{node_id}\"}} 0"
+        "rivun_replay_rejections_total{{node_id=\"{node_id}\"}} 0"
     )));
     assert!(text.contains(&format!(
-        "zap_agent_sessions_active{{node_id=\"{node_id}\"}} 0"
+        "rivun_agent_sessions_active{{node_id=\"{node_id}\"}} 0"
     )));
 }
 
 #[test]
 fn tc_f14_10_node_metrics_snapshot_counter_increments() {
-    let mut snap = ZapNodeMetricsSnapshot::default();
+    let mut snap = RivunNodeMetricsSnapshot::default();
     snap.replay_rejections_total += 2;
     snap.journal_segment_rotations_total += 1;
 
@@ -1222,7 +1222,7 @@ fn tc_f15_07_e2e_consensus_aborts_on_insufficient_quorum() -> Result<()> {
 #[test]
 fn tc_f15_08_e2e_pipeline_aborts_on_expired_pact() -> Result<()> {
     let key = generate_keypair();
-    let mut pact = ZapPact::new("agent.buyer", "agent.seller", "buy", 1000);
+    let mut pact = RivunPact::new("agent.buyer", "agent.seller", "buy", 1000);
     pact.expires_at_micros = Some(2000);
     pact.sign(&key)?;
 

@@ -7,8 +7,9 @@ Status: Completed
 - [x] Read ORIGINAL_REQUEST.md
 - [x] Read PROJECT.md
 - [x] Read worker_m3_fix handoff.md
-- [x] Source code forensic inspection (crates/zap-telemetry, zap-node, zap-cli)
-- [x] Behavioral verification (run all cargo tests: zap-telemetry, zap-node, zap-cli)
+- [x] Source code forensic inspection (crates/rivun-telemetry, rivun-node, rivun-cli)
+- [x] Behavioral verification (run all cargo tests: rivun-telemetry, rivun-node, rivun-cli)
 - [x] Adversarial review & stress testing
 - [x] Generate final audit report (handoff.md with verdict: CLEAN)
 - [x] Notify parent
+

@@ -2,20 +2,20 @@
 
 **Author**: `explorer_m3_3`  
 **Date**: 2026-08-15  
-**Target Crates**: `crates/zap-runtime` (with interface bindings to `crates/zap-driver-sdk` and `crates/zap-capability`)  
+**Target Crates**: `crates/rivun-runtime` (with interface bindings to `crates/rivun-driver-sdk` and `crates/rivun-capability`)  
 **Scope**: Milestone 3 (R3) — Async WASM Driver Execution Engine, Streaming I/O Buffers (TCP, Modbus, Ring-Buffers), Deterministic Inter-Driver IPC, and Chained `DriverPipeline` Orchestrator.
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 3 transforms ZAP from a synchronous, single-driver WebAssembly execution environment into a **high-throughput, non-blocking asynchronous execution fabric** capable of executing concurrent streaming pipelines with microsecond latency, zero-copy data paths, strict sandboxed memory isolation, and deterministic aggregate fuel metering.
+Milestone 3 transforms rivun from a synchronous, single-driver WebAssembly execution environment into a **high-throughput, non-blocking asynchronous execution fabric** capable of executing concurrent streaming pipelines with microsecond latency, zero-copy data paths, strict sandboxed memory isolation, and deterministic aggregate fuel metering.
 
 ### Core Architectural Discoveries:
 1. **Existing Runtime State**:
-   - `crates/zap-runtime/src/lib.rs` currently implements synchronous `WasmExecutor` using `wasmtime 45.0.1` with Cranelift, fuel consumption, and an OS thread-based epoch ticker.
-   - `crates/zap-runtime/src/pipeline.rs` currently contains a compilation defect (importing non-existent `WasmActionRuntime`), and uses heuristic fuel estimation rather than exact fuel tracking.
-   - `crates/zap-node` and other components depend on `WasmExecutor`. All M3 enhancements must maintain backward compatibility with `WasmExecutor` while introducing the asynchronous stack.
+   - `crates/rivun-runtime/src/lib.rs` currently implements synchronous `WasmExecutor` using `wasmtime 45.0.1` with Cranelift, fuel consumption, and an OS thread-based epoch ticker.
+   - `crates/rivun-runtime/src/pipeline.rs` currently contains a compilation defect (importing non-existent `WasmActionRuntime`), and uses heuristic fuel estimation rather than exact fuel tracking.
+   - `crates/rivun-node` and other components depend on `WasmExecutor`. All M3 enhancements must maintain backward compatibility with `WasmExecutor` while introducing the asynchronous stack.
 2. **Async WASM Execution (`async_engine.rs`)**:
    - Enabling Wasmtime's `async` feature allows WASM execution to be scheduled natively on Tokio tasks using async fibers, enabling non-blocking async host calls (e.g. streaming I/O, IPC receive, cooperative yields) without exhausting OS threads.
 3. **Lock-Free Streaming I/O (`streaming.rs`)**:
@@ -36,7 +36,7 @@ Milestone 3 transforms ZAP from a synchronous, single-driver WebAssembly executi
 ## 2. Module Architectural Specifications
 
 ```
-crates/zap-runtime/
+crates/rivun-runtime/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs              # Crate root, error definitions, re-exports, sync WasmExecutor
@@ -61,7 +61,7 @@ Executes sandboxed WebAssembly drivers asynchronously on Tokio worker threads. A
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use wasmtime::{Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder};
-use zap_capability::DriverPermissions;
+use @@rivun_HEADER@@capability::DriverPermissions;
 use crate::{ZapRuntimeError, Result, HostCallRecord, HostCallKind};
 
 /// Configuration for async execution limits.
@@ -105,7 +105,7 @@ pub struct AsyncWasmDriver {
 
 impl AsyncWasmDriver {
     pub fn validate_abi(&self) -> Result<()> {
-        // Validates: memory, zap_alloc, zap_dealloc, zap_execute
+        // Validates: memory, @@rivun_HEADER@@alloc, @@rivun_HEADER@@dealloc, @@rivun_HEADER@@execute
         crate::validate_driver_module(&self.module)
     }
 }
@@ -224,13 +224,13 @@ impl AsyncWasmExecutor {
 
 #### Async Host Bindings
 The linker registers async host functions using `func_wrap_async`:
-1. `zap:emit_event(ptr: i32, len: i32) -> i32`
-2. `zap:memory_read(key_ptr: i32, key_len: i32, out_ptr: i32, out_len: i32) -> i32`
-3. `zap:memory_write(ptr: i32, len: i32) -> i32`
-4. `zap:device_call(ptr: i32, len: i32) -> i32`
-5. `zap:yield_now() -> i32`: Invokes `tokio::task::yield_now().await` to cooperatively relinquish the Tokio execution thread.
-6. `zap:ipc_send(chan: i32, ptr: i32, len: i32) -> i32`
-7. `zap:ipc_recv(chan: i32, out_ptr: i32, out_len: i32) -> i64`
+1. `rivun:emit_event(ptr: i32, len: i32) -> i32`
+2. `rivun:memory_read(key_ptr: i32, key_len: i32, out_ptr: i32, out_len: i32) -> i32`
+3. `rivun:memory_write(ptr: i32, len: i32) -> i32`
+4. `rivun:device_call(ptr: i32, len: i32) -> i32`
+5. `rivun:yield_now() -> i32`: Invokes `tokio::task::yield_now().await` to cooperatively relinquish the Tokio execution thread.
+6. `rivun:ipc_send(chan: i32, ptr: i32, len: i32) -> i32`
+7. `rivun:ipc_recv(chan: i32, out_ptr: i32, out_len: i32) -> i64`
 
 ---
 
@@ -322,10 +322,10 @@ Enables isolated WebAssembly driver instances to exchange structured messages wi
 #### Memory Isolation Model
 - **No Shared Guest Memory**: WebAssembly instances MUST NOT share linear memory pointers. Sharing pointers between Wasmtime instances violates isolation invariants and leads to undefined behavior.
 - **Zero-Copy / Minimal-Copy Host Mediation**:
-  1. Driver A writes message to its own memory and calls `zap:ipc_send(channel, ptr, len)`.
+  1. Driver A writes message to its own memory and calls `rivun:ipc_send(channel, ptr, len)`.
   2. Host validates channel permissions, reads slice from Instance A's memory into a ref-counted immutable `bytes::Bytes`.
   3. Host routes `bytes::Bytes` to Driver B's inbox queue.
-  4. When Driver B calls `zap:ipc_recv(channel, out_ptr, max_len)` (or during pipeline handoff), host writes the bytes directly into Driver B's allocated memory buffer.
+  4. When Driver B calls `rivun:ipc_recv(channel, out_ptr, max_len)` (or during pipeline handoff), host writes the bytes directly into Driver B's allocated memory buffer.
 
 ```
 +--------------------------+                             +--------------------------+
@@ -334,7 +334,7 @@ Enables isolated WebAssembly driver instances to exchange structured messages wi
 |  Linear Memory 0..16MB   |                             |  Linear Memory 0..16MB   |
 +--------------------------+                             +--------------------------+
              |                                                         ^
-             | zap:ipc_send                                            | zap:ipc_recv
+             | rivun:ipc_send                                            | rivun:ipc_recv
              v                                                         |
 +-----------------------------------------------------------------------------------+
 |                                Host IPC Router                                    |
@@ -546,7 +546,7 @@ impl DriverPipeline {
         let pipeline_start = std::time::Instant::now();
 
         let mut causal_hasher = blake3::Hasher::new();
-        causal_hasher.update(b"ZAP-PIPELINE-START-v1:");
+        causal_hasher.update(b"rivun-PIPELINE-START-v1:");
         causal_hasher.update(self.name.as_bytes());
         causal_hasher.update(initial_payload);
 
@@ -639,7 +639,7 @@ impl DriverPipeline {
         let pipeline_start = std::time::Instant::now();
 
         let mut causal_hasher = blake3::Hasher::new();
-        causal_hasher.update(b"ZAP-PIPELINE-START-v1:");
+        causal_hasher.update(b"rivun-PIPELINE-START-v1:");
         causal_hasher.update(self.name.as_bytes());
         causal_hasher.update(initial_payload);
 
@@ -730,7 +730,7 @@ impl DriverPipeline {
 
 ## 3. Dependency Updates & Workspace Configuration
 
-To support async Wasmtime and Tokio primitives in `zap-runtime`:
+To support async Wasmtime and Tokio primitives in `rivun-runtime`:
 
 ### `Cargo.toml` (Workspace Root)
 Ensure `wasmtime` has `async` enabled:
@@ -738,7 +738,7 @@ Ensure `wasmtime` has `async` enabled:
 wasmtime = { version = "45.0.1", default-features = false, features = ["cranelift", "runtime", "std", "wat", "async"] }
 ```
 
-### `crates/zap-runtime/Cargo.toml`
+### `crates/rivun-runtime/Cargo.toml`
 ```toml
 [dependencies]
 blake3.workspace = true
@@ -748,7 +748,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["sync", "time", "rt", "macros", "net", "io-util"] }
 tracing.workspace = true
 wasmtime = { workspace = true, features = ["async"] }
-zap-capability.workspace = true
+rivun-capability.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
@@ -790,7 +790,7 @@ wat.workspace = true
    - Each driver module is instantiated inside an isolated `wasmtime::Store` with its own linear memory address space.
    - Pointer offsets in guest linear memory cannot address host memory or peer instance memory.
 2. **No Shared Guest Linear Memory**:
-   - Memory is strictly mediated by the host runtime. Slices are copied safely via bounds-checked host primitives into target instances using guest-exported `zap_alloc`.
+   - Memory is strictly mediated by the host runtime. Slices are copied safely via bounds-checked host primitives into target instances using guest-exported `@@rivun_HEADER@@alloc`.
 3. **Denial-of-Service Defense**:
    - Compute loops are bounded by strict instruction-level **fuel limits** and **epoch deadline tickers**.
    - Memory growth is strictly capped by `StoreLimits::memory_size`.
@@ -798,3 +798,4 @@ wat.workspace = true
 4. **Cryptographic Causal Provenance**:
    - Every intermediate stage produces a Blake3 digest of its output.
    - The aggregate causal chain hash binds the pipeline execution into an immutable, audit-verifiable artifact.
+

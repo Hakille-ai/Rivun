@@ -2,70 +2,70 @@
 
 **Author:** Explorer 3 (Crypto & Performance Specialist)  
 **Date:** 2026-08-15  
-**Scope:** Milestone 2 (`crates/zap-crypto`, `crates/zap-ledger`, `crates/zap-core`, Root `Cargo.toml`)  
+**Scope:** Milestone 2 (`crates/rivun-crypto`, `crates/rivun-ledger`, `crates/rivun-core`, Root `Cargo.toml`)  
 **Target Milestone:** R2: Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts  
 
 ---
 
 ## 1. Executive Summary
 
-Milestone 2 (R2) transforms ZAP's audit and receipt framework into an append-only, high-throughput cryptographic verification engine. The key deliverables encompass:
+Milestone 2 (R2) transforms rivun's audit and receipt framework into an append-only, high-throughput cryptographic verification engine. The key deliverables encompass:
 1. **Incremental Merkle Mountain Range (MMR) Accumulator** with $O(\log N)$ peak storage, compact multi-leaf batch inclusion proofs (with deduplicated sister DAGs), and non-membership / exclusion proofs.
 2. **Swarm Quorum Batch Sealing** featuring threshold multi-signatures ($K$-of-$N$) over batch commitments.
 3. **Blinded Commitments & Zero-Knowledge Verifiable Receipt Rollups** proving receipt batch integrity and causal state transitions without revealing private execution payloads or memory contents.
 4. **Sub-Millisecond Verification Performance** for 1,000+ receipt batches through Blake3 SIMD parallel tree evaluation, `ed25519-dalek` batch verification (Bos-Coster multi-scalar multiplication), and Rayon thread pool chunking.
 
-This analysis evaluates the current implementation state in `crates/zap-crypto` and `crates/zap-ledger`, specifies the exact missing primitives, defines domain separation constants, and details concrete performance architecture to achieve verified sub-millisecond 1,000-receipt proofs.
+This analysis evaluates the current implementation state in `crates/rivun-crypto` and `crates/rivun-ledger`, specifies the exact missing primitives, defines domain separation constants, and details concrete performance architecture to achieve verified sub-millisecond 1,000-receipt proofs.
 
 ---
 
-## 2. Current `zap-crypto` Architecture & Public API Catalog
+## 2. Current `rivun-crypto` Architecture & Public API Catalog
 
-### 2.1 Existing Capabilities in `crates/zap-crypto`
+### 2.1 Existing Capabilities in `crates/rivun-crypto`
 
-The current `crates/zap-crypto/src/lib.rs` (1,080 lines) provides:
+The current `crates/rivun-crypto/src/lib.rs` (1,080 lines) provides:
 
 - **Key Management & Node Identity**:
   - `Keypair`: Wraps `ed25519_dalek::SigningKey`, provides `generate()`, `from_secret_bytes()`, `secret_bytes()`, `verifying_key()`, `node_id()`, `to_key_file_toml()`, `from_key_file_toml()`.
   - `PublicKey`: Wraps `ed25519_dalek::VerifyingKey`, provides `from_bytes()`, `to_bytes()`, `node_id()`.
-  - Node IDs are derived deterministically via Blake3: `node_id_from_public_key` with domain `ZAP-NODE-ID-v1`, formatted into UUIDv8 RFC 9562 format (`bytes[6] = (bytes[6] & 0x0F) | 0x80`, `bytes[8] = (bytes[8] & 0x3F) | 0x80`).
+  - Node IDs are derived deterministically via Blake3: `node_id_from_public_key` with domain `rivun-NODE-ID-v1`, formatted into UUIDv8 RFC 9562 format (`bytes[6] = (bytes[6] & 0x0F) | 0x80`, `bytes[8] = (bytes[8] & 0x3F) | 0x80`).
 - **Single-Signature Signing & Verification**:
   - `sign_domain_message(domain: &[u8], message: &[u8]) -> [u8; 64]`
   - `verify_domain_message(domain: &[u8], message: &[u8], signature: &[u8; 64]) -> Result<()>`
   - `sign_frame(keypair: &Keypair, frame: &ZapFrame) -> Result<ZapFrame>`
   - `verify_frame(public_key: &PublicKey, frame: &ZapFrame) -> Result<()>`
-  - `signature_hint(signature: &[u8; 64]) -> [u8; 8]` using Blake3 domain `ZAP-SIGN-HINT-v1` for fast synchronous filtering in ZAP-Wire 64-byte frame headers.
+  - `signature_hint(signature: &[u8; 64]) -> [u8; 8]` using Blake3 domain `rivun-SIGN-HINT-v1` for fast synchronous filtering in @@@@rivun_HEADER@@WIRE@@ 64-byte frame headers.
 - **Proof-of-Action (PoA) Consensus Certification**:
   - `PoaAttestationRequest`, `PoaAttestationResponse`, `PoaValidatorDescriptor`, `PoaValidatorSet`, `SignedPoaValidatorSet`.
   - `certify_frame`, `verify_poa_certificate`, `poa_attestation_request`, `sign_poa_attestation_request`, `verify_poa_attestation_response`, `sign_poa_validator_set`.
   - Enforces threshold validation ($M$-of-$N$) across a validator set.
 
-### 2.2 Existing Domain Separation Constants in `zap-crypto`
+### 2.2 Existing Domain Separation Constants in `rivun-crypto`
 
 | Constant | Value | Purpose |
 |---|---|---|
-| `NODE_ID_DOMAIN` | `b"ZAP-NODE-ID-v1"` | Deterministic derivation of UUIDv8 node ID from public key |
-| `SIGN_HINT_DOMAIN` | `b"ZAP-SIGN-HINT-v1"` | 8-byte signature hint derivation for frame header fast-path |
-| `POA_DIGEST_DOMAIN` | `b"ZAP-POA-DIGEST-v1"` | Digest generation for consensus frames |
-| `POA_SIGNATURE_DOMAIN` | `b"ZAP-POA-SIGNATURE-v1"` | Individual validator signature domain |
-| `POA_VALIDATOR_SET_SIGNATURE_DOMAIN` | `b"ZAP-POA-VALIDATOR-SET-v1"` | Authority signature over validator set configuration |
+| `NODE_ID_DOMAIN` | `b"rivun-NODE-ID-v1"` | Deterministic derivation of UUIDv8 node ID from public key |
+| `SIGN_HINT_DOMAIN` | `b"rivun-SIGN-HINT-v1"` | 8-byte signature hint derivation for frame header fast-path |
+| `POA_DIGEST_DOMAIN` | `b"rivun-POA-DIGEST-v1"` | Digest generation for consensus frames |
+| `POA_SIGNATURE_DOMAIN` | `b"rivun-POA-SIGNATURE-v1"` | Individual validator signature domain |
+| `POA_VALIDATOR_SET_SIGNATURE_DOMAIN` | `b"rivun-POA-VALIDATOR-SET-v1"` | Authority signature over validator set configuration |
 
 ---
 
-## 3. Current `zap-ledger` Architecture & State
+## 3. Current `rivun-ledger` Architecture & State
 
-### 3.1 Existing Capabilities in `crates/zap-ledger`
+### 3.1 Existing Capabilities in `crates/rivun-ledger`
 
 - `ActionReceipt` & `SignedActionReceipt`: Durable local audit records storing execution metadata (`source_node`, `target_node`, `kind`, `subject`, `action`, `frame_hash`, `payload_hash`, `output_hash`, `processed_at_micros`, `flags`, `poa`, `pact`).
-- `ReceiptJournalStore`: Segment-based append-only persistence integrating `zap-journal`.
+- `ReceiptJournalStore`: Segment-based append-only persistence integrating `rivun-journal`.
 - `ReceiptSegmentManifest` & `SignedReceiptSegmentManifest`: Cryptographic manifests linking journal segments in a hash chain.
 - `ReceiptSegmentIndex`: In-memory multi-segment index with temporal overlap candidate filtering.
-- **Batch Verification in `zap-ledger/src/lib.rs`**:
+- **Batch Verification in `rivun-ledger/src/lib.rs`**:
   - `verify_action_receipts(receipts, expected_node_id)`:
     - If `receipts.len() < 4`: scalar verification.
     - If `4 <= receipts.len() < 128`: single-thread dalek `verify_batch`.
     - If `receipts.len() >= 128`: Rayon parallel chunked batch verification with `par_chunks(64)`.
-- **Initial MMR Accumulator in `zap-ledger/src/mmr.rs`**:
+- **Initial MMR Accumulator in `rivun-ledger/src/mmr.rs`**:
   - `MerkleMountainRange`: In-memory vector-backed MMR structure with `append`, `append_bytes`, `root`, `peaks`, `prove_inclusion`, `verify_proof`, and `create_rollup_commitment`.
   - `MmrInclusionProof`: Single-leaf inclusion proof structure containing `leaf_index`, `leaf_hash`, `total_leaves`, `sister_hashes`, and `peak_hashes`.
   - `MmrRollupCommitment`: Rollup summary containing `root_hash`, `leaf_count`, `first_leaf_hash`, `last_leaf_hash`, timestamp range.
@@ -100,7 +100,7 @@ Agents must be able to prove receipt execution correctness to external auditors 
      - `output_blinding: Option<[u8; 32]>`
      - Stored locally by the generating agent; disclosed only during dispute arbitration.
 
-3. **ZK Receipt Batch Rollup (`ZkReceiptBatchProof`) in `zap-ledger/src/zk.rs`**:
+3. **ZK Receipt Batch Rollup (`ZkReceiptBatchProof`) in `rivun-ledger/src/zk.rs`**:
    - `ZkRollupPublicInputs`:
      - `mmr_root: [u8; 32]`
      - `batch_seal_hash: [u8; 32]`
@@ -123,7 +123,7 @@ When a receipt segment or execution batch is finalized by the swarm consensus me
 #### Cryptographic Specification:
 1. **Batch Seal Digest**:
    $$\text{Seal Digest } D = \text{Blake3}(\text{BATCH\_SEAL\_DOMAIN} \parallel \text{mmr\_root} \parallel \text{first\_seq} \parallel \text{last\_seq} \parallel \text{first\_ts} \parallel \text{last\_ts} \parallel \text{receipt\_count})$$
-2. **`ReceiptBatchSeal` Data Structure (`zap-ledger/src/batch.rs`)**:
+2. **`ReceiptBatchSeal` Data Structure (`rivun-ledger/src/batch.rs`)**:
    ```rust
    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
    pub struct ReceiptBatchSeal {
@@ -148,7 +148,7 @@ When a receipt segment or execution batch is finalized by the swarm consensus me
    ```
 3. **Threshold Quorum Verification**:
    - Requires $\ge \text{required\_threshold}$ distinct, valid signatures from authorized validators in `PoaValidatorSet`.
-   - Batch verification in `zap-crypto`: instead of verifying each validator signature sequentially in a loop ($K \times 50\text{ µs}$), all $K$ signatures are verified in a single dalek `verify_batch` call ($\approx 15\text{ µs}$ total).
+   - Batch verification in `rivun-crypto`: instead of verifying each validator signature sequentially in a loop ($K \times 50\text{ µs}$), all $K$ signatures are verified in a single dalek `verify_batch` call ($\approx 15\text{ µs}$ total).
 
 ### 4.3 Requirement 3: Incremental MMR Accumulator & Multi-Leaf Proofs
 
@@ -159,7 +159,7 @@ When a receipt segment or execution batch is finalized by the swarm consensus me
    - When a leaf is appended:
      - Merge peaks from right to left with matching subtree heights: $h_{new} = \text{hash\_nodes}(peak_{left}, peak_{right})$.
    - Peak-bagging root calculation:
-     - Fold peaks right-to-left or left-to-right deterministically with `ZAP-MMR-PEAK-BAG-v1:`.
+     - Fold peaks right-to-left or left-to-right deterministically with `rivun-MMR-PEAK-BAG-v1:`.
    - Disk Persistence (`.zmmr` format):
      - Efficient binary / JSON persistence storing peak state and leaf count.
 2. **`MmrInclusionProof`**:
@@ -181,20 +181,20 @@ To prevent cross-protocol signature substitution and transcript collisions, the 
 
 | Domain String | Type / Scope | Usage |
 |---|---|---|
-| `b"ZAP-NODE-ID-v1"` | `&[u8]` (zap-crypto) | Blake3 derive UUIDv8 node ID from Ed25519 public key |
-| `b"ZAP-SIGN-HINT-v1"` | `&[u8]` (zap-crypto) | Blake3 derive 8-byte fast filter hint from signature |
-| `b"ZAP-POA-DIGEST-v1"` | `&[u8]` (zap-crypto) | Blake3 frame digest for PoA consensus certificates |
-| `b"ZAP-POA-SIGNATURE-v1"` | `&[u8]` (zap-crypto) | Ed25519 validator attestation signature transcript |
-| `b"ZAP-POA-VALIDATOR-SET-v1"` | `&[u8]` (zap-crypto) | Ed25519 authority signature over validator set |
-| `b"ZAP-BLINDED-COMMITMENT-v1"` | `&[u8]` (zap-crypto) | Blake3 blinded payload commitment hash |
-| `b"ZAP-BLINDED-RECEIPT-v1"` | `&[u8]` (zap-crypto) | Blake3 blinded receipt commitment summary |
-| `b"ZAP-BATCH-SEAL-v1"` | `&[u8]` (zap-crypto / zap-ledger) | Ed25519 Swarm Quorum multi-signature transcript |
-| `b"ZAP-ZK-ROLLUP-v1"` | `&[u8]` (zap-ledger) | Blake3 public inputs digest for ZK receipt batch proofs |
-| `b"ZAP-MMR-LEAF-v1:"` | `&[u8]` (zap-ledger) | Blake3 leaf hash domain prefix |
-| `b"ZAP-MMR-NODE-v1:"` | `&[u8]` (zap-ledger) | Blake3 internal node merge domain prefix |
-| `b"ZAP-MMR-PEAK-BAG-v1:"` | `&[u8]` (zap-ledger) | Blake3 peak-bagging accumulator domain prefix |
-| `b"ZAP-ACTION-RECEIPT-v1"` | `&[u8]` (zap-ledger) | Ed25519 single action receipt signature transcript |
-| `b"ZAP-RECEIPT-SEGMENT-MANIFEST-v1"`| `&[u8]` (zap-ledger) | Ed25519 segment manifest signature transcript |
+| `b"rivun-NODE-ID-v1"` | `&[u8]` (rivun-crypto) | Blake3 derive UUIDv8 node ID from Ed25519 public key |
+| `b"rivun-SIGN-HINT-v1"` | `&[u8]` (rivun-crypto) | Blake3 derive 8-byte fast filter hint from signature |
+| `b"rivun-POA-DIGEST-v1"` | `&[u8]` (rivun-crypto) | Blake3 frame digest for PoA consensus certificates |
+| `b"rivun-POA-SIGNATURE-v1"` | `&[u8]` (rivun-crypto) | Ed25519 validator attestation signature transcript |
+| `b"rivun-POA-VALIDATOR-SET-v1"` | `&[u8]` (rivun-crypto) | Ed25519 authority signature over validator set |
+| `b"rivun-BLINDED-COMMITMENT-v1"` | `&[u8]` (rivun-crypto) | Blake3 blinded payload commitment hash |
+| `b"rivun-BLINDED-RECEIPT-v1"` | `&[u8]` (rivun-crypto) | Blake3 blinded receipt commitment summary |
+| `b"rivun-BATCH-SEAL-v1"` | `&[u8]` (rivun-crypto / rivun-ledger) | Ed25519 Swarm Quorum multi-signature transcript |
+| `b"rivun-ZK-ROLLUP-v1"` | `&[u8]` (rivun-ledger) | Blake3 public inputs digest for ZK receipt batch proofs |
+| `b"rivun-MMR-LEAF-v1:"` | `&[u8]` (rivun-ledger) | Blake3 leaf hash domain prefix |
+| `b"rivun-MMR-NODE-v1:"` | `&[u8]` (rivun-ledger) | Blake3 internal node merge domain prefix |
+| `b"rivun-MMR-PEAK-BAG-v1:"` | `&[u8]` (rivun-ledger) | Blake3 peak-bagging accumulator domain prefix |
+| `b"rivun-ACTION-RECEIPT-v1"` | `&[u8]` (rivun-ledger) | Ed25519 single action receipt signature transcript |
+| `b"rivun-RECEIPT-SEGMENT-MANIFEST-v1"`| `&[u8]` (rivun-ledger) | Ed25519 segment manifest signature transcript |
 
 ---
 
@@ -246,16 +246,16 @@ To maintain high throughput and prevent GC/allocator jitter during heavy gossip 
 
 ## 6. Implementation Blueprint & Module Layout
 
-### 6.1 `crates/zap-crypto` Extensions
+### 6.1 `crates/rivun-crypto` Extensions
 
-Add the following structures and helpers to `crates/zap-crypto/src/lib.rs` (or dedicated submodules `blinded.rs` and `threshold.rs` re-exported from `lib.rs`):
+Add the following structures and helpers to `crates/rivun-crypto/src/lib.rs` (or dedicated submodules `blinded.rs` and `threshold.rs` re-exported from `lib.rs`):
 
 ```rust
-// In zap-crypto:
+// In rivun-crypto:
 
-pub const BLINDED_COMMITMENT_DOMAIN: &[u8] = b"ZAP-BLINDED-COMMITMENT-v1";
-pub const BLINDED_RECEIPT_DOMAIN: &[u8] = b"ZAP-BLINDED-RECEIPT-v1";
-pub const BATCH_SEAL_DOMAIN: &[u8] = b"ZAP-BATCH-SEAL-v1";
+pub const BLINDED_COMMITMENT_DOMAIN: &[u8] = b"rivun-BLINDED-COMMITMENT-v1";
+pub const BLINDED_RECEIPT_DOMAIN: &[u8] = b"rivun-BLINDED-RECEIPT-v1";
+pub const BATCH_SEAL_DOMAIN: &[u8] = b"rivun-BATCH-SEAL-v1";
 
 /// Cryptographic Blinding Utilities
 pub struct BlindedCommitment;
@@ -317,9 +317,9 @@ pub fn verify_batch_signatures(
 }
 ```
 
-### 6.2 `crates/zap-ledger` Extensions
+### 6.2 `crates/rivun-ledger` Extensions
 
-Structure `crates/zap-ledger/` into clean modules:
+Structure `crates/rivun-ledger/` into clean modules:
 - `src/lib.rs`: ActionReceipt, ReceiptJournalStore, replication protocol, exports.
 - `src/mmr.rs`:
   - `IncrementalMmr`: $O(\log N)$ peak accumulator with disk persistence (`.zmmr`).
@@ -341,13 +341,13 @@ Structure `crates/zap-ledger/` into clean modules:
 
 | Crate | Dependency | Required Features | Current Status | Note |
 |---|---|---|---|---|
-| `zap-crypto` | `ed25519-dalek` | `["batch", "rand_core"]` | ✅ Enabled | Dalek v2 with Bos-Coster batch verification |
-| `zap-crypto` | `blake3` | default | ✅ Enabled | Blake3 v1 with AVX-512 / AVX2 acceleration |
-| `zap-crypto` | `rand_core` | `["getrandom"]` | ✅ Enabled | OS random generator for key & blinding gen |
-| `zap-ledger` | `rayon` | default | ✅ Enabled | Rayon v1 for parallel chunked verification |
-| `zap-ledger` | `zap-crypto` | path | ✅ Enabled | Linked to `../zap-crypto` |
-| `zap-ledger` | `zap-journal` | path | ✅ Enabled | Linked to `../zap-journal` |
-| `zap-ledger` | `hex` | default | ✅ Enabled | Fast hex encoding/decoding |
+| `rivun-crypto` | `ed25519-dalek` | `["batch", "rand_core"]` | ✅ Enabled | Dalek v2 with Bos-Coster batch verification |
+| `rivun-crypto` | `blake3` | default | ✅ Enabled | Blake3 v1 with AVX-512 / AVX2 acceleration |
+| `rivun-crypto` | `rand_core` | `["getrandom"]` | ✅ Enabled | OS random generator for key & blinding gen |
+| `rivun-ledger` | `rayon` | default | ✅ Enabled | Rayon v1 for parallel chunked verification |
+| `rivun-ledger` | `rivun-crypto` | path | ✅ Enabled | Linked to `../rivun-crypto` |
+| `rivun-ledger` | `rivun-journal` | path | ✅ Enabled | Linked to `../rivun-journal` |
+| `rivun-ledger` | `hex` | default | ✅ Enabled | Fast hex encoding/decoding |
 
 ### 7.2 Release Compilation Flags (Root `Cargo.toml`)
 - `codegen-units = 1` (Maximized inter-procedural optimization across crypto loops)
@@ -356,12 +356,13 @@ Structure `crates/zap-ledger/` into clean modules:
 - `panic = "abort"` (Zero landing pads, reduced binary size and branch footprint)
 
 ### 7.3 Test & Verification Commands
-- `cargo test -p zap-crypto -p zap-ledger` — 100% pass with 0 failures.
-- `cargo bench -p zap-ledger --bench receipt` — Validate sub-millisecond MMR batch verification for 1,000+ receipts.
+- `cargo test -p rivun-crypto -p rivun-ledger` — 100% pass with 0 failures.
+- `cargo bench -p rivun-ledger --bench receipt` — Validate sub-millisecond MMR batch verification for 1,000+ receipts.
 - `cargo clippy --workspace --all-targets -- -D warnings` — 0 warnings.
 
 ---
 
 ## 8. Conclusion & Implementation Readiness
 
-The cryptographic foundations in `crates/zap-crypto` and `crates/zap-ledger` are solid, well-factored, and ready for Milestone 2 deliverables. The planned extensions (`IncrementalMmr`, `MmrBatchInclusionProof`, `MmrExclusionProof`, `ReceiptBatchSeal`, `ZkReceiptBatchProof`, and `BlindedReceiptCommitment`) are mathematically sound, have exact domain separation specifications, and will exceed the sub-millisecond verification requirement for 1,000+ receipts.
+The cryptographic foundations in `crates/rivun-crypto` and `crates/rivun-ledger` are solid, well-factored, and ready for Milestone 2 deliverables. The planned extensions (`IncrementalMmr`, `MmrBatchInclusionProof`, `MmrExclusionProof`, `ReceiptBatchSeal`, `ZkReceiptBatchProof`, and `BlindedReceiptCommitment`) are mathematically sound, have exact domain separation specifications, and will exceed the sub-millisecond verification requirement for 1,000+ receipts.
+

@@ -1,12 +1,12 @@
 # Governance
 
-ZAP production operations should require explicit human authority for changes
+rivun production operations should require explicit human authority for changes
 that alter executable code, trust roots, release artifacts, or emergency
-controls. `zap-ops` provides typed contracts for groups, roles, multi-sig
+controls. `rivun-ops` provides typed contracts for groups, roles, multi-sig
 approval policies, and hash-chained audit entries.
 
 The reference policy is
-`crates/zap-ops/config/governance/production-governance.toml`.
+`crates/rivun-ops/config/governance/production-governance.toml`.
 
 ## Roles
 
@@ -14,7 +14,7 @@ Recommended roles:
 
 - `release_manager`: cuts public releases and approves release notes;
 - `security_officer`: reviews trust roots, signing state, and security notes;
-- `registry_maintainer`: publishes, deprecates, or revokes ZapStore bundles;
+- `registry_maintainer`: publishes, deprecates, or revokes RivunStore bundles;
 - `sre`: operates production nodes;
 - `incident_commander`: authorizes break-glass actions;
 - `auditor`: reads approval and receipt trails but does not approve changes.
@@ -51,7 +51,7 @@ the previous entry hash, and its own BLAKE3 hash over the canonical entry body.
 Verify the chain before and after release or registry actions:
 
 ```bash
-cargo test -p zap-ops audit_chain_detects_mutation
+cargo test -p rivun-ops audit_chain_detects_mutation
 ```
 
 Production automation should write entries for:
@@ -81,3 +81,4 @@ for bypassing release or registry review. A break-glass request must record:
 
 After the incident, open a follow-up review and rotate any temporary trust
 material.
+

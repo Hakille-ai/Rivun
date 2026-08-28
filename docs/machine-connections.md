@@ -1,11 +1,11 @@
 # Machine Connections
 
-`zap-machine` adds a hardware-neutral layer for machine profiles and protocol adapters. It is designed so roadmap work can build against stable concepts while mock, stream-backed serial, TCP, and industrial-bus style adapters all share the same trait.
+`rivun-machine` adds a hardware-neutral layer for machine profiles and protocol adapters. It is designed so roadmap work can build against stable concepts while mock, stream-backed serial, TCP, and industrial-bus style adapters all share the same trait.
 
 ## Scope
 
 - Device profiles declare a profile id, transport, protocol, health policy, and capabilities.
-- Capability mapping converts profile commands, health, and state keys into ZAP `CapabilityId` values.
+- Capability mapping converts profile commands, health, and state keys into rivun `CapabilityId` values.
 - `MachineConnection` validates declared commands, typed payload schemas, and payload limits before dispatch.
 - `MachineBus` owns multiple device connections and routes commands by device id.
 - Built-in adapters cover mock, scripted serial-line, stream-backed serial, scripted TCP, real TCP length-prefixed frames, and Modbus-like register operations.
@@ -27,7 +27,7 @@ Commands are represented as `driver.execute:<command>` capabilities, state keys 
 ## Example
 
 ```rust
-use zap_machine::{
+use @@rivun_HEADER@@machine::{
     AdapterKind, CommandSpec, DeviceCapability, DeviceProfile, MachineBus,
     MachineCommand, MachineConnection, MachineId, MockAdapter, ProtocolProfile,
     TransportProfile,
@@ -62,7 +62,7 @@ let outcome = bus.execute(
     MachineCommand::new("thermostat.setpoint.write", b"22.0".to_vec())?,
 )?;
 assert_eq!(outcome.response, b"accepted");
-# Ok::<(), zap_machine::ZapMachineError>(())
+# Ok::<(), @@rivun_HEADER@@machine::ZapMachineError>(())
 ```
 
 ## Testing Without Hardware
@@ -92,3 +92,4 @@ let adapter = ModbusLikeAdapter::new(7)
 - Modbus-like operations are deterministic register mappings, not a full Modbus RTU/TCP stack.
 - Async methods are convenience APIs over the same adapter trait; adapters do not spawn background worker threads by themselves.
 - Heartbeat timers are deterministic and ticked by the caller or bus loop, so deployments can use their own scheduler/runtime.
+

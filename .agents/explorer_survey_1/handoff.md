@@ -1,29 +1,29 @@
 # Handoff Report: Explorer Survey 1 (R1 — P2P Swarm Gossip Consensus & Adaptive Quorum Mesh)
 
 **Agent**: Explorer 1  
-**Working Directory**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_1`  
+**Working Directory**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_1`  
 **Report Type**: Hard Handoff (Survey Phase Complete)  
-**Target Reference**: `ORIGINAL_REQUEST.md` (R1: `zap-net`, `zap-agent`, `zap-node`)  
-**Detailed Survey File**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_1\analysis.md`  
+**Target Reference**: `ORIGINAL_REQUEST.md` (R1: `rivun-net`, `rivun-agent`, `rivun-node`)  
+**Detailed Survey File**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_1\analysis.md`  
 
 ---
 
 ## 1. Observation
 
-### 1.1 `zap-net` Networking & Transport
-- **UDP AEAD Transport**: In `crates/zap-net/src/lib.rs` (lines 101–110, 326–354), `ZapEndpoint` encapsulates frames using ChaCha20-Poly1305 AEAD with a 52-byte header (`ZAPD` magic, version 1, 16-byte source/target UUIDs, 4-byte nonce prefix, 8-byte counter) and maximum datagram size of 65,507 bytes (`MAX_DATAGRAM_SIZE`).
-- **Static Peer Discovery**: `crates/zap-net/src/lib.rs` (lines 181–245, 298–324) stores peers statically in `PeerTables` (`HashMap<Uuid, Peer>`, `HashMap<SocketAddr, Uuid>`). `broadcast()` (lines 377–392) simply loops over all keys in `peers.by_id` and performs sequential unicast `send_frame()`.
-- **Replay Protection**: `crates/zap-net/src/durable_replay.rs` (lines 1–142) persists inbound nonces per peer in a binary WAL (`ZAPNONC1` magic, 36-byte records).
+### 1.1 `rivun-net` Networking & Transport
+- **UDP AEAD Transport**: In `crates/rivun-net/src/lib.rs` (lines 101–110, 326–354), `ZapEndpoint` encapsulates frames using ChaCha20-Poly1305 AEAD with a 52-byte header (`ZAPD` magic, version 1, 16-byte source/target UUIDs, 4-byte nonce prefix, 8-byte counter) and maximum datagram size of 65,507 bytes (`MAX_DATAGRAM_SIZE`).
+- **Static Peer Discovery**: `crates/rivun-net/src/lib.rs` (lines 181–245, 298–324) stores peers statically in `PeerTables` (`HashMap<Uuid, Peer>`, `HashMap<SocketAddr, Uuid>`). `broadcast()` (lines 377–392) simply loops over all keys in `peers.by_id` and performs sequential unicast `send_frame()`.
+- **Replay Protection**: `crates/rivun-net/src/durable_replay.rs` (lines 1–142) persists inbound nonces per peer in a binary WAL (`ZAPNONC1` magic, 36-byte records).
 - **Missing**: No epidemic gossip dissemination, fanout control, bloom filter anti-entropy sync, Kademlia DHT / PEX peer sampling, heartbeat liveness tracking, Phi accrual failure detection, partition detection, or relay routing.
 
-### 1.2 `zap-agent` Coordination Contracts & Provenance
-- **Agent Contracts**: In `crates/zap-agent/src/lib.rs` (lines 18–35, 252–597), the schema defines JSON contracts for `AgentIntent`, `AgentSession`, `DelegationRequest`, `DelegationResponse`, `CapabilityNegotiationRequest`, `CapabilityNegotiationResponse`, and `AgentResult`.
-- **Provenance Chain Engine**: In `crates/zap-agent/src/provenance.rs` (lines 20–29, 68–402), causal chaining links stages $H_{\text{intent}} \to H_{\text{negotiation}} \to H_{\text{policy}} \to H_{\text{driver}} \to H_{\text{poa}} \to H_{\text{receipt}} \to H_{\text{root}}$ signed with Ed25519 node identity keys.
+### 1.2 `rivun-agent` Coordination Contracts & Provenance
+- **Agent Contracts**: In `crates/rivun-agent/src/lib.rs` (lines 18–35, 252–597), the schema defines JSON contracts for `AgentIntent`, `AgentSession`, `DelegationRequest`, `DelegationResponse`, `CapabilityNegotiationRequest`, `CapabilityNegotiationResponse`, and `AgentResult`.
+- **Provenance Chain Engine**: In `crates/rivun-agent/src/provenance.rs` (lines 20–29, 68–402), causal chaining links stages $H_{\text{intent}} \to H_{\text{negotiation}} \to H_{\text{policy}} \to H_{\text{driver}} \to H_{\text{poa}} \to H_{\text{receipt}} \to H_{\text{root}}$ signed with Ed25519 node identity keys.
 - **Missing**: No multi-agent swarm consensus coordination state machine, no collective swarm quorum voting integration, and no decentralized capability index indexing.
 
-### 1.3 `zap-node` Daemon & PoA Consensus
-- **Node Execution Loop**: In `crates/zap-node/src/lib.rs` (lines 1677–1840), `ZapNode::handle_once()` sequentially receives inbound datagrams, validates signatures, verifies anti-replay, and handles subjects (`poa.attestation_request`, `zap.discovery.announce`, `zap.discovery.query`, `zap.receipt.replication`, etc.).
-- **Proof-of-Action (PoA) Mechanism**: In `crates/zap-node/src/lib.rs` (lines 3103–3117) and `crates/zap-crypto/src/lib.rs` (lines 494–528, 644–696), PoA collects $M$ individual 64-byte Ed25519 signatures in a `PoaTrailer` (`ZPOA`, $44 + 80M$ bytes).
+### 1.3 `rivun-node` Daemon & PoA Consensus
+- **Node Execution Loop**: In `crates/rivun-node/src/lib.rs` (lines 1677–1840), `ZapNode::handle_once()` sequentially receives inbound datagrams, validates signatures, verifies anti-replay, and handles subjects (`poa.attestation_request`, `rivun.discovery.announce`, `rivun.discovery.query`, `rivun.receipt.replication`, etc.).
+- **Proof-of-Action (PoA) Mechanism**: In `crates/rivun-node/src/lib.rs` (lines 3103–3117) and `crates/rivun-crypto/src/lib.rs` (lines 494–528, 644–696), PoA collects $M$ individual 64-byte Ed25519 signatures in a `PoaTrailer` (`ZPOA`, $44 + 80M$ bytes).
 - **Missing**: Not a BFT state machine replication protocol (no epochs, rounds, views, 2-phase/3-phase commit, leaderless or rotating leader proposals); no dynamic threshold signature bitmask aggregation; no background Tokio actors for mesh heartbeats or gossip dissemination.
 
 ---
@@ -46,10 +46,10 @@
    - *Therefore*, partition detection must monitor the reachable quorum ratio $R = N_{\text{reachable}} / N_{\text{quorum}}$, triggering read-only `PartitionDegraded` mode when $R < 2/3$ to prevent split-brain states.
    - *Therefore*, multi-peer failover routing must dynamically compute alternative 2-hop relay paths using `ZapRelayEnvelope` encapsulation when direct UDP links degrade.
 
-4. **Integration with `zap-agent` and `zap-node`**:
-   - *Observation 1.2* shows `zap-agent` has a clean modular design with provenance stages.
+4. **Integration with `rivun-agent` and `rivun-node`**:
+   - *Observation 1.2* shows `rivun-agent` has a clean modular design with provenance stages.
    - *Therefore*, swarm coordination can cleanly map agent intents to consensus proposals, and record swarm commit certificates in `ProvenanceStage::Consensus`.
-   - *Therefore*, `zap-node` can be restructured into concurrent Tokio tasks (`UdpRxTask`, `GossipDisseminatorTask`, `ConsensusWorkerTask`, `MeshHeartbeatTask`) with full backward compatibility.
+   - *Therefore*, `rivun-node` can be restructured into concurrent Tokio tasks (`UdpRxTask`, `GossipDisseminatorTask`, `ConsensusWorkerTask`, `MeshHeartbeatTask`) with full backward compatibility.
 
 ---
 
@@ -65,28 +65,28 @@
 
 The architectural pathway to implement **R1 (P2P Swarm Gossip Consensus & Adaptive Quorum Mesh)** is fully analyzed, mathematically modeled, and mapped to specific Rust crates:
 
-1. **`crates/zap-net`**:
+1. **`crates/rivun-net`**:
    - Add `gossip/` module: `GossipEnvelope`, epidemic fanout dispatcher, message deduplication cache, peer exchange (PEX), and anti-entropy sync.
    - Add `consensus/` module: `SwarmConsensusEngine` BFT state machine (Propose/Prevote/Precommit/Commit), bitmask-indexed threshold signatures, and equivocation proofs.
    - Add `mesh/` module: Jittered heartbeats, Phi Accrual Failure Detector, partition detector, and dynamic 2-hop failover relay routing.
-2. **`crates/zap-agent`**:
+2. **`crates/rivun-agent`**:
    - Add `SwarmAgentCoordinator` for intent-to-consensus mapping and update `provenance.rs` to record swarm commit certificates.
-3. **`crates/zap-node`**:
-   - Refactor runtime daemon into concurrent Tokio actor tasks (`GossipTask`, `ConsensusTask`, `MeshTask`), and extend `zap.toml` configuration with `[swarm]`, `[gossip]`, and `[mesh]` sections.
+3. **`crates/rivun-node`**:
+   - Refactor runtime daemon into concurrent Tokio actor tasks (`GossipTask`, `ConsensusTask`, `MeshTask`), and extend `rivun.toml` configuration with `[swarm]`, `[gossip]`, and `[mesh]` sections.
 
-All proposed specifications maintain strict backward compatibility with existing `ZAP_` wire framing, `ZENV` envelopes, and `zap-crypto` Ed25519 identity key models.
+All proposed specifications maintain strict backward compatibility with existing `@@rivun_HEADER@@` wire framing, `ZENV` envelopes, and `rivun-crypto` Ed25519 identity key models.
 
 ---
 
 ## 5. Verification Method
 
 1. **Inspect Documentation**:
-   - Review comprehensive survey in `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_1\analysis.md`.
+   - Review comprehensive survey in `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_1\analysis.md`.
 2. **Verify Codebase Consistency**:
-   - Check `crates/zap-net/src/lib.rs` for `ZapEndpoint`, `PeerTables`, and `broadcast()`.
-   - Check `crates/zap-crypto/src/lib.rs` for `PoaTrailer`, `certify_frame`, and `verify_poa_certificate`.
-   - Check `crates/zap-agent/src/provenance.rs` for `ProvenanceStage` and `ProvenanceChainDigest`.
-   - Check `crates/zap-node/src/lib.rs` for `ZapNode::handle_once()` and `verify_consensus()`.
+   - Check `crates/rivun-net/src/lib.rs` for `ZapEndpoint`, `PeerTables`, and `broadcast()`.
+   - Check `crates/rivun-crypto/src/lib.rs` for `PoaTrailer`, `certify_frame`, and `verify_poa_certificate`.
+   - Check `crates/rivun-agent/src/provenance.rs` for `ProvenanceStage` and `ProvenanceChainDigest`.
+   - Check `crates/rivun-node/src/lib.rs` for `ZapNode::handle_once()` and `verify_consensus()`.
 3. **Run Project Test Suite**:
    ```powershell
    cargo test --workspace --all-targets
@@ -94,4 +94,5 @@ All proposed specifications maintain strict backward compatibility with existing
    ```
 4. **Invalidation Conditions**:
    - If the wire protocol forbids new trailer magics (`ZSC1`), the design must fall back to embedding the consensus certificate inside the payload envelope.
-   - If network topology requires non-UDP transports (e.g. TCP or WebSockets), transport abstraction traits must be introduced in `zap-net`.
+   - If network topology requires non-UDP transports (e.g. TCP or WebSockets), transport abstraction traits must be introduced in `rivun-net`.
+

@@ -1,1 +1,2 @@
-# Explorer 1 Workspace — zap-net Architecture & Protocol Design
+# Explorer 1 Workspace — rivun-net Architecture & Protocol Design
+

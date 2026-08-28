@@ -1,4 +1,4 @@
-//! ZAP Next-Gen Frontier Comprehensive End-to-End Test Suite (`e2e_suite.rs`)
+//! Rivun Next-Gen Frontier Comprehensive End-to-End Test Suite (`e2e_suite.rs`)
 //!
 //! Master test suite orchestrating 4 tiers of opaque-box, requirement-driven tests
 //! across all 15 features in `PROJECT.md § Feature Inventory`.
@@ -14,11 +14,11 @@ pub mod tier2_boundary_tests;
 pub mod tier3_combination_tests;
 pub mod tier4_realworld_tests;
 
-use zap_e2e::harness::*;
+use rivun_e2e::harness::*;
 
 #[test]
 fn tc_e2e_suite_sanity_check() {
-    assert_eq!(zap_e2e::e2e_harness_version(), "0.1.0");
+    assert_eq!(rivun_e2e::e2e_harness_version(), "0.1.0");
     let key = generate_keypair();
     assert!(!public_key_string(&key).is_empty());
 }

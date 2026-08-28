@@ -6,20 +6,20 @@
 
 ## 1. Observation
 
-Adversarial stress testing of Milestone 1 Receipt Journal Segment Rotation & Manifest Signing was conducted in `zap-journal` and `zap-ledger`. Two test harnesses were created and executed:
-- `crates/zap-ledger/tests/m1_challenger_stress.rs`
-- `crates/zap-journal/tests/m1_journal_stress.rs`
+Adversarial stress testing of Milestone 1 Receipt Journal Segment Rotation & Manifest Signing was conducted in `rivun-journal` and `rivun-ledger`. Two test harnesses were created and executed:
+- `crates/rivun-ledger/tests/m1_challenger_stress.rs`
+- `crates/rivun-journal/tests/m1_journal_stress.rs`
 
 ### Confirmed Empirical Failures & Bugs
 
-#### Bug 1: `HashChainMismatch` panic in `zap-journal` upon segment pruning
-- **Command Executed**: `cargo test -p zap-journal --test m1_journal_stress -- --nocapture`
+#### Bug 1: `HashChainMismatch` panic in `rivun-journal` upon segment pruning
+- **Command Executed**: `cargo test -p rivun-journal --test m1_journal_stress -- --nocapture`
 - **Output / Failure Log**:
   ```text
-  thread 'test_journal_rapid_rotation_stress' (20828) panicked at crates\zap-journal\tests\m1_journal_stress.rs:45:33:
+  thread 'test_journal_rapid_rotation_stress' (20828) panicked at crates\rivun-journal\tests\m1_journal_stress.rs:45:33:
   called `Result::unwrap()` on an `Err` value: HashChainMismatch { path: "C:\\Users\\...\\00000000000000000020.zjseg", offset: 33 }
   ```
-- **Code Inspection**: In `crates/zap-journal/src/lib.rs` (lines 766–788):
+- **Code Inspection**: In `crates/rivun-journal/src/lib.rs` (lines 766–788):
   ```rust
   fn scan_records<F>(&self, allow_partial_tail: bool, callback: &mut F) -> Result<()> {
       let mut previous_hash = None;
@@ -41,7 +41,7 @@ Adversarial stress testing of Milestone 1 Receipt Journal Segment Rotation & Man
   ```text
   Index build result after pruning: Ok(ReceiptSegmentIndex { schema_version: 1, node_id: ..., entries: [] })
   ```
-- **Code Inspection**: In `crates/zap-ledger/src/lib.rs` (lines 535–541):
+- **Code Inspection**: In `crates/rivun-ledger/src/lib.rs` (lines 535–541):
   ```rust
   pub fn build_and_verify_segment_index(&self) -> Result<ReceiptSegmentIndex> {
       let node_id = self.keypair.as_ref().map(|k| k.node_id()).unwrap_or_default();
@@ -58,10 +58,10 @@ Adversarial stress testing of Milestone 1 Receipt Journal Segment Rotation & Man
   When sequence 0 is deleted due to `max_segment_count` pruning, `signed_manifest_path(0).exists()` evaluates to `false`. The loop immediately terminates at `sequence = 0`, producing an empty index (`entries: []`). Consequently, `query_fast` silently fails to use the signed segment index after segment pruning and degrades into full table scans.
 
 #### Bug 3: Automatic segment rotation in `JournalStore` skips `.zjmanifest.json.sig` generation
-- **Code Inspection**: In `crates/zap-journal/src/lib.rs` (lines 641–665), `current_segment()` triggers auto-rotation and calls `seal_segment(last.sequence)`. This writes unsigned `.zjmanifest.json`, but `JournalStore` has no reference to `Keypair`, so `.zjmanifest.json.sig` is never created during auto-rotations triggered by `append()`. Unless callers manually call `rotate_and_seal_segment(seq)` on `ReceiptJournalStore`, auto-rotated segments remain unsigned on disk.
+- **Code Inspection**: In `crates/rivun-journal/src/lib.rs` (lines 641–665), `current_segment()` triggers auto-rotation and calls `seal_segment(last.sequence)`. This writes unsigned `.zjmanifest.json`, but `JournalStore` has no reference to `Keypair`, so `.zjmanifest.json.sig` is never created during auto-rotations triggered by `append()`. Unless callers manually call `rotate_and_seal_segment(seq)` on `ReceiptJournalStore`, auto-rotated segments remain unsigned on disk.
 
 #### Bug 4: `ReceiptSegmentManifest::from_receipts` receives random `Uuid::new_v4()` for `segment_id`
-- **Code Inspection**: In `crates/zap-ledger/src/lib.rs` (lines 505–511):
+- **Code Inspection**: In `crates/rivun-ledger/src/lib.rs` (lines 505–511):
   ```rust
   let segment_id = Uuid::new_v4();
   let manifest = ReceiptSegmentManifest::from_receipts(
@@ -80,7 +80,7 @@ Adversarial stress testing of Milestone 1 Receipt Journal Segment Rotation & Man
 1. **Rapid Segment Rotation & Pruning Stress**:
    - Creating stores configured with `max_segment_count = Some(N)` causes `JournalStore` to delete older `.zjseg`, `.zjidx`, `.zjmanifest.json`, and `.zjmanifest.json.sig` files once segment count exceeds `N`.
    - When sequence 0 is pruned, any subsequent call to `JournalStore::records()`, `JournalStore::verify()`, or `ReceiptJournalStore::all()` fails with `ZapJournalError::HashChainMismatch` because `scan_records` assumes the first segment processed must have `previous_entry_hash == "none"`.
-   - Simultaneously, `build_and_verify_segment_index()` in `zap-ledger` relies on `signed_manifest_path(sequence)` starting at `sequence = 0_u64`. When sequence 0 is missing, the loop yields 0 entries, effectively disabling index-accelerated queries (`query_fast`) after segment pruning.
+   - Simultaneously, `build_and_verify_segment_index()` in `rivun-ledger` relies on `signed_manifest_path(sequence)` starting at `sequence = 0_u64`. When sequence 0 is missing, the loop yields 0 entries, effectively disabling index-accelerated queries (`query_fast`) after segment pruning.
 
 2. **Cryptographic Signature & Tampering Verification**:
    - Signature tampering (flipping bytes in base64 signature) correctly triggers `ZapLedgerError::InvalidSignature`.
@@ -101,7 +101,7 @@ Adversarial stress testing of Milestone 1 Receipt Journal Segment Rotation & Man
 ## 4. Conclusion
 
 Milestone 1 Receipt Journal Segment Rotation & Manifest Signing is **REJECTED** due to:
-1. `HashChainMismatch` runtime panic in `zap-journal` when querying pruned stores.
+1. `HashChainMismatch` runtime panic in `rivun-journal` when querying pruned stores.
 2. `build_and_verify_segment_index()` returning empty indexes when sequence 0 is pruned.
 3. Unsigned `.zjmanifest.json.sig` files during automatic `append()` rotations.
 4. Mismatched random `segment_id` in `rotate_and_seal_segment`.
@@ -122,6 +122,7 @@ To independently reproduce and verify these findings:
 
 2. **Run the Journal Stress Test Suite**:
    ```powershell
-   cargo test -p zap-journal --test m1_journal_stress -- --nocapture
+   cargo test -p rivun-journal --test m1_journal_stress -- --nocapture
    ```
    *Observe `test_journal_rapid_rotation_stress` failing with `HashChainMismatch` when `records()` is called after segment pruning.*
+

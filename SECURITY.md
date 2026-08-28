@@ -1,6 +1,6 @@
 # Security Policy
 
-ZAP is security-sensitive infrastructure. Please report suspected
+rivun is security-sensitive infrastructure. Please report suspected
 vulnerabilities privately before publishing details.
 
 ## Supported Versions
@@ -52,16 +52,17 @@ disclosure and release.
 
 The following are in scope:
 
-- malformed ZAP-Wire or `ZENV` data causing panic, memory pressure, or parser
+- malformed @@@@rivun_HEADER@@WIRE@@ or `ZENV` data causing panic, memory pressure, or parser
   bypass;
 - signature, PoA, replay, or key identity bypass;
 - plaintext exposure in encrypted datagrams;
 - WASM sandbox escape or missing permission enforcement;
 - unsafe defaults in daemon, CLI, Docker, or examples.
 
-The following are out of scope unless they demonstrate a ZAP bug:
+The following are out of scope unless they demonstrate a rivun bug:
 
 - attacks requiring access to a node private key;
 - denial of service from unlimited external traffic on an intentionally exposed
   UDP port;
 - issues in unreleased roadmap features.
+

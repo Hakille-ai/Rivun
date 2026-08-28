@@ -6,7 +6,7 @@ Perform independent quality and adversarial review (Round 2) for Milestone 3 Gat
 ## 🔒 My Identity
 - Archetype: reviewer_critic
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m3_1_r2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m3_1_r2
 - Original parent: 095fccca-c79e-45c9-b11a-9b726328b7e6
 - Milestone: Milestone 3 Gate Evaluation (Round 2)
 - Instance: 1 of 2
@@ -22,13 +22,13 @@ Perform independent quality and adversarial review (Round 2) for Milestone 3 Gat
 
 ## Review Scope
 - **Files to review**:
-  - `crates/zap-telemetry/src/doctor.rs`
-  - `crates/zap-telemetry/src/incident.rs`
-  - `crates/zap-telemetry/src/metrics.rs`
-  - `crates/zap-telemetry/src/lib.rs`
-  - `crates/zap-telemetry/tests/*`
+  - `crates/rivun-telemetry/src/doctor.rs`
+  - `crates/rivun-telemetry/src/incident.rs`
+  - `crates/rivun-telemetry/src/metrics.rs`
+  - `crates/rivun-telemetry/src/lib.rs`
+  - `crates/rivun-telemetry/tests/*`
   - `Cargo.toml` / workspace config
-- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\orchestrator\PROJECT.md`, `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\ORIGINAL_REQUEST.md`
+- **Interface contracts**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\orchestrator\PROJECT.md`, `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\ORIGINAL_REQUEST.md`
 - **Review criteria**: correctness, integrity, POSIX ustar tar + gzip implementation, real OS inspection, SecretRedactor completeness, Prometheus metric accuracy, build/test pass.
 
 ## Review Checklist
@@ -45,6 +45,7 @@ Perform independent quality and adversarial review (Round 2) for Milestone 3 Gat
 - Initializing review workflow.
 
 ## Artifact Index
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m3_1_r2\DISPATCH.md`
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m3_1_r2\BRIEFING.md`
-- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\reviewer_m3_1_r2\progress.md`
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m3_1_r2\DISPATCH.md`
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m3_1_r2\BRIEFING.md`
+- `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\reviewer_m3_1_r2\progress.md`
+

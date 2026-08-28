@@ -1,21 +1,21 @@
 # Swarm, Cluster Simulation, and Provenance
 
-This document covers the high-level coordination surface of ZAP: multi-node
+This document covers the high-level coordination surface of rivun: multi-node
 simulation, swarm benchmarking, chaos testing, and provenance verification.
-The underlying mechanisms live in `zap-net` (consensus/gossip/mesh, see
-[Network](network.md)) and `zap-agent` (swarm protocol and provenance chain).
+The underlying mechanisms live in `rivun-net` (consensus/gossip/mesh, see
+[Network](network.md)) and `rivun-agent` (swarm protocol and provenance chain).
 
 ## Cluster simulation
 
-`zap cluster up` spawns an in-memory N-node cluster with mutual heartbeat mesh
+`rivun cluster up` spawns an in-memory N-node cluster with mutual heartbeat mesh
 and in-process derived keys — no daemon processes to manage:
 
 ```bash
 # 3 nodes for 5 seconds
-cargo run -p zap-cli -- cluster up --nodes 3 --duration-secs 5 --json
+cargo run -p rivun-cli -- cluster up --nodes 3 --duration-secs 5 --json
 
 # Check simulated node status
-cargo run -p zap-cli -- cluster status --nodes 3 --json
+cargo run -p rivun-cli -- cluster status --nodes 3 --json
 ```
 
 Options: `--nodes` (default 3), `--base-port` (default 9000),
@@ -24,11 +24,11 @@ heartbeat, and consensus bookkeeping before deploying real nodes.
 
 ## Swarm benchmarking
 
-`zap swarm bench` runs a high-throughput P2P gossip consensus benchmark against
+`rivun swarm bench` runs a high-throughput P2P gossip consensus benchmark against
 an in-memory swarm:
 
 ```bash
-cargo run -p zap-cli -- swarm bench \
+cargo run -p rivun-cli -- swarm bench \
   --nodes 4 --rate 1000 --duration-secs 3 \
   --topic distributed_execution_lock --json
 ```
@@ -39,11 +39,11 @@ by real nodes, so results are representative of the protocol's cost model.
 
 ## Partition chaos test
 
-`zap swarm partition-test` simulates Byzantine network partitions and
+`rivun swarm partition-test` simulates Byzantine network partitions and
 evaluates quorum safety:
 
 ```bash
-cargo run -p zap-cli -- swarm partition-test \
+cargo run -p rivun-cli -- swarm partition-test \
   --nodes 5 --partition-fraction 0.4 --json
 ```
 
@@ -53,7 +53,7 @@ a minority subset cannot commit, while the majority can still reach consensus
 
 ## Swarm protocol
 
-`zap-agent::swarm` defines the intent lifecycle used by BFT consensus:
+`rivun-agent::swarm` defines the intent lifecycle used by BFT consensus:
 
 | State | Meaning |
 | --- | --- |
@@ -68,21 +68,21 @@ a minority subset cannot commit, while the majority can still reach consensus
 | `TimedOut` | The round timed out without a certificate |
 
 Restart-persistent anti-replay is layered at both the transport and daemon
-levels: `zap-net::durable_replay` persists datagram nonces in a write-ahead log,
-and `zap-node::durable_replay` (DurableReplayStore) persists frame fingerprints
+levels: `rivun-net::durable_replay` persists datagram nonces in a write-ahead log,
+and `rivun-node::durable_replay` (DurableReplayStore) persists frame fingerprints
 across restarts.
 
 ## Provenance verification
 
-`zap provenance verify` validates a cryptographic provenance chain digest
+`rivun provenance verify` validates a cryptographic provenance chain digest
 created by the gateway or node pipeline:
 
 ```bash
 # Verify with the node key file
-cargo run -p zap-cli -- provenance verify --chain chain.json --key .zap/node.key --json
+cargo run -p rivun-cli -- provenance verify --chain chain.json --key .rivun/node.key --json
 
 # Or verify against a raw public key
-cargo run -p zap-cli -- provenance verify \
+cargo run -p rivun-cli -- provenance verify \
   --chain chain.json --public-key <hex-or-base64-key> --json
 ```
 
@@ -93,7 +93,7 @@ verification (`MissingStep`, `StepVerificationFailed`).
 Receipt journals extended with provenance digests can be verified in one pass:
 
 ```bash
-cargo run -p zap-cli -- receipts verify --dir logs/receipts --provenance
+cargo run -p rivun-cli -- receipts verify --dir logs/receipts --provenance
 ```
 
 See [Gateway](gateway.md) for the chain engine reference.

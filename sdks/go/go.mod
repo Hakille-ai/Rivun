@@ -1,4 +1,4 @@
-module github.com/zap-protocol/zap-sdk-go
+module github.com/rivun-protocol/rivun-sdk-go
 
 go 1.22
 

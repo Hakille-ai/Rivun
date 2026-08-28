@@ -1,4 +1,4 @@
-package zap
+package rivun
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestRegistryBundleManifestControlFrameRoundTrips(t *testing.T) {
-	frame, err := (ZapStoreClient{}).RegistryBundleManifestRequest(true, true)
+	frame, err := (RivunStoreClient{}).RegistryBundleManifestRequest(true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestEnvelopeRejectsInvalidUTF8(t *testing.T) {
 		t.Fatal("expected invalid UTF-8 subject to be rejected")
 	}
 
-	env, err := NewEnvelope(KindControl, "zap.test", "application/json", []byte("{}"))
+	env, err := NewEnvelope(KindControl, "rivun.test", "application/json", []byte("{}"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,12 +259,12 @@ func TestPactFixturesReproduceHashAndVerify(t *testing.T) {
 	var record struct {
 		Subject     string  `json:"subject"`
 		ContentType string  `json:"content_type"`
-		BodyJSON    ZapPact `json:"body_json"`
+		BodyJSON    RivunPact `json:"body_json"`
 	}
 	var bundle struct {
 		Subject     string        `json:"subject"`
 		ContentType string        `json:"content_type"`
-		BodyJSON    ZapPactBundle `json:"body_json"`
+		BodyJSON    RivunPactBundle `json:"body_json"`
 	}
 	loadRootFixture(t, "pact-record-v1.json", &record)
 	loadRootFixture(t, "pact-bundle-v1.json", &bundle)
@@ -339,7 +339,7 @@ func TestSecurityProtocolFixturesCoverSignedPoaCapabilityAndDatagramShapes(t *te
 	if !poa.Security.Signed || poa.Security.POATrailer.Threshold != 1 {
 		t.Fatalf("poa fixture mismatch: %+v", poa.Security)
 	}
-	if capability.Subject != "zap.capability.response" || capability.ContentType != "application/zap-capability+json" {
+	if capability.Subject != "rivun.capability.response" || capability.ContentType != "application/rivun-capability+json" {
 		t.Fatalf("capability fixture route mismatch: %+v", capability)
 	}
 	if !containsString(capability.BodyJSON.Capabilities, "driver.execute:echo") {
@@ -473,7 +473,7 @@ func TestUDPClientSendsControlEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	frame, err := (ZapStoreClient{}).RegistryBundleManifestRequest(false, true)
+	frame, err := (RivunStoreClient{}).RegistryBundleManifestRequest(false, true)
 	if err != nil {
 		t.Fatal(err)
 	}

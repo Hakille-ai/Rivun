@@ -1,0 +1,23 @@
+[package]
+name = "rivun-pack"
+description = "Signed domain pack lifecycle and marketplace primitives for ZAP."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+uuid.workspace = true
+rivun-crypto = { path = "../rivun-crypto" }
+rivun-capability.workspace = true
+rivun-policy.workspace = true
+rivun-router.workspace = true
+rivun-store = { path = "../rivun-store" }
+
+[dev-dependencies]
+tempfile.workspace = true

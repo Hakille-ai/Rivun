@@ -3,33 +3,33 @@
 **Agent**: Explorer 2  
 **Milestone**: Milestone 2 (R2: MMR & Compact Cryptographic Receipts)  
 **Date**: 2026-08-15  
-**Working Directory**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\explorer_2`  
+**Working Directory**: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\explorer_2`  
 **Handoff Type**: Hard (Task Complete)  
 
 ---
 
 ## 1. Observation
 
-1. **Current Receipt & Manifest State in `zap-ledger`**:
-   - In `crates/zap-ledger/src/lib.rs` (lines 758–849), `ReceiptSegmentManifest` is defined with fields:
+1. **Current Receipt & Manifest State in `rivun-ledger`**:
+   - In `crates/rivun-ledger/src/lib.rs` (lines 758–849), `ReceiptSegmentManifest` is defined with fields:
      `schema_version`, `node_id`, `segment_id`, `segment_sequence`, `receipts_count`, `segment_bytes`, `segment_hash`, `first_receipt_hash`, `last_receipt_hash`, `first_processed_at_micros`, `last_processed_at_micros`, `previous_segment_hash`.
-   - `SignedReceiptSegmentManifest` (lines 851–931) signs a `ReceiptSegmentManifestSigningPayload` using a single `Keypair` with domain `ZAP-RECEIPT-SEGMENT-MANIFEST-v1`.
+   - `SignedReceiptSegmentManifest` (lines 851–931) signs a `ReceiptSegmentManifestSigningPayload` using a single `Keypair` with domain `rivun-RECEIPT-SEGMENT-MANIFEST-v1`.
    - `ReceiptJournalStore` (lines 440–756) writes signed manifests to `{sequence:020}.zjmanifest.json.sig`.
 
 2. **Absence of Batch Sealing with Multi-Signatures & ZK Rollups**:
-   - `crates/zap-ledger/src/batch.rs` and `crates/zap-ledger/src/zk.rs` currently do not exist in the codebase.
+   - `crates/rivun-ledger/src/batch.rs` and `crates/rivun-ledger/src/zk.rs` currently do not exist in the codebase.
    - Searching for `ReceiptBatchSeal` across `crates/` returned matches only in survey documentation and SCOPE.md.
    - Searching for `BlindedReceiptCommitment` or `ZkReceiptBatchProof` returned 0 code matches.
 
-3. **Existing Cryptographic Primitives in `zap-crypto`**:
-   - In `crates/zap-crypto/src/lib.rs`:
+3. **Existing Cryptographic Primitives in `rivun-crypto`**:
+   - In `crates/rivun-crypto/src/lib.rs`:
      - `Keypair` (lines 124–204) provides `sign_domain_message(domain, message)`.
      - `PublicKey` (lines 206–237) provides `verify_domain_message(domain, message, signature)`.
      - `PoaValidatorSet` and `SignedPoaValidatorSet` (lines 278–300, 365–445) provide validator set descriptions with `required_threshold`, static validation, and authority verification.
      - `node_id_from_public_key` (lines 705–715) derives deterministic node UUIDs from 32-byte Ed25519 public keys.
 
-4. **Integration Hooks in `ReceiptJournalStore` and `zap-journal`**:
-   - In `crates/zap-journal/src/lib.rs` (lines 248–407), `JournalStore` provides segment creation, reading (`read_record_at`), rotation (`rotate_and_seal`), index management, and segment queries.
+4. **Integration Hooks in `ReceiptJournalStore` and `rivun-journal`**:
+   - In `crates/rivun-journal/src/lib.rs` (lines 248–407), `JournalStore` provides segment creation, reading (`read_record_at`), rotation (`rotate_and_seal`), index management, and segment queries.
    - `ReceiptJournalStore` currently provides `rotate_and_seal_segment` and `read_segment_receipts`.
 
 ---
@@ -38,7 +38,7 @@
 
 1. **Step 1 (Batch Sealing Invariants)**:
    - Observation 1 & 2 show that `ReceiptSegmentManifest` is single-signed and binds only the linear byte stream hash of receipts without Merkle proofs, state transition hashes, or fuel accounting.
-   - Therefore, a dedicated `ReceiptBatchSeal` must be designed in `crates/zap-ledger/src/batch.rs` binding:
+   - Therefore, a dedicated `ReceiptBatchSeal` must be designed in `crates/rivun-ledger/src/batch.rs` binding:
      - `batch_id: Uuid`
      - `node_id: Uuid`
      - `segment_sequence: u64`
@@ -57,13 +57,13 @@
      - All static invariants and hash formats (`validate_artifact_hash`).
      - No duplicate validator signatures.
      - All signing nodes exist in `validator_set.validators` with matching public keys.
-     - Cryptographic Ed25519 signatures over the canonical domain-separated message `ZAP-RECEIPT-BATCH-SEAL-v1` are valid.
+     - Cryptographic Ed25519 signatures over the canonical domain-separated message `rivun-RECEIPT-BATCH-SEAL-v1` are valid.
      - Count of valid signatures $\ge \max(\text{seal.quorum\_threshold}, \text{validator\_set.required\_threshold})$.
 
 3. **Step 3 (Privacy-Preserving ZK Verifiable Receipt Rollups)**:
    - Sensitive payloads cannot be exposed in cross-cluster or untrusted multi-agent verification scenarios.
-   - Designing `BlindedReceiptCommitment` in `crates/zap-ledger/src/zk.rs` with random 32-byte salt $r$:
-     $$C = \text{Blake3}(\text{ZAP-ZK-RECEIPT-COMMITMENT-v1} \parallel \text{receipt\_id} \parallel \text{frame\_hash} \parallel \text{payload\_hash} \parallel \text{output\_hash} \parallel \text{salt})$$
+   - Designing `BlindedReceiptCommitment` in `crates/rivun-ledger/src/zk.rs` with random 32-byte salt $r$:
+     $$C = \text{Blake3}(\text{rivun-ZK-RECEIPT-COMMITMENT-v1} \parallel \text{receipt\_id} \parallel \text{frame\_hash} \parallel \text{payload\_hash} \parallel \text{output\_hash} \parallel \text{salt})$$
    - Designing `ZkReceiptBatchProof` and `ZkRollupPublicInputs` allows proving:
      - Public statement: Initial state root $\to$ Final state root, total receipts, total fuel consumed, quorum commitment, and MMR root consistency without disclosing secret payload contents.
      - Succinct proof generation (`generate_rollup`) and verification (`verify`) in $O(1)$ constant time against the transcript digest.
@@ -86,8 +86,8 @@
 The architectural design for **Cryptographic Batch Sealing** (`batch.rs`), **Swarm Quorum Multi-Signatures** ($T$-of-$N$), **Zero-Knowledge Verifiable Receipt Rollups** (`zk.rs`), and **`ReceiptJournalStore` Integration** is fully specified, mathematically sound, and ready for immediate implementation by Milestone 2 implementers.
 
 Key Deliverables Specified:
-- `crates/zap-ledger/src/batch.rs`: `ReceiptBatchSeal`, `BatchValidatorSignature`, `SignedReceiptBatch`, `BatchSealAttestationRequest`, `BatchSealAttestationResponse`, and `verify_quorum`.
-- `crates/zap-ledger/src/zk.rs`: `BlindedReceiptCommitment`, `ZkReceiptBatchProof`, `ZkRollupPublicInputs`, `generate_rollup`, `verify`, and `verify_opening`.
+- `crates/rivun-ledger/src/batch.rs`: `ReceiptBatchSeal`, `BatchValidatorSignature`, `SignedReceiptBatch`, `BatchSealAttestationRequest`, `BatchSealAttestationResponse`, and `verify_quorum`.
+- `crates/rivun-ledger/src/zk.rs`: `BlindedReceiptCommitment`, `ZkReceiptBatchProof`, `ZkRollupPublicInputs`, `generate_rollup`, `verify`, and `verify_opening`.
 - `ReceiptJournalStore` extensions for `.zjseal.json` persistence and rotation hooks.
 
 ---
@@ -95,14 +95,15 @@ Key Deliverables Specified:
 ## 5. Verification Method
 
 1. **Analysis Inspection**:
-   - Inspect `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\sub_orch_m2\explorer_2\analysis.md` for full technical specifications, schemas, data structures, algorithms, and integration code.
+   - Inspect `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\sub_orch_m2\explorer_2\analysis.md` for full technical specifications, schemas, data structures, algorithms, and integration code.
 
 2. **Independent Compilation & Test Command**:
-   - `cargo test -p zap-ledger -p zap-crypto`
-   - `cargo clippy -p zap-ledger -p zap-crypto --all-targets -- -D warnings`
+   - `cargo test -p rivun-ledger -p rivun-crypto`
+   - `cargo clippy -p rivun-ledger -p rivun-crypto --all-targets -- -D warnings`
 
 3. **Invalidation Conditions**:
    - If `ReceiptBatchSeal` accepts duplicate validator signatures or non-member validators.
    - If `verify_quorum` returns `true` when valid signatures are strictly less than `required_threshold`.
    - If `BlindedReceiptCommitment` opening verification succeeds with a tampered blinding salt.
    - If `ZkReceiptBatchProof::verify` accepts mismatched state roots or corrupted proof transcript digests.
+

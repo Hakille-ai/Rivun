@@ -6,16 +6,16 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
 ## 🔒 My Identity
 - Archetype: teamwork
 - Roles: reviewer, critic
-- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\teamwork_preview_reviewer_m1_2
+- Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\teamwork_preview_reviewer_m1_2
 - Original parent: 1dd88da9-09fe-47f9-bff3-bf5e4256896e
 - Milestone: Milestone 1 (R1)
 - Instance: 1 of 1
 
 ## 🔒 Key Constraints
 - Review-only — do NOT modify implementation code
-- Run tests: cargo test -p zap-net -p zap-node -p zap-journal -p zap-ledger and cargo clippy
+- Run tests: cargo test -p rivun-net -p rivun-node -p rivun-journal -p rivun-ledger and cargo clippy
 - Verify error handling and edge cases in DurableReplayStore and JournalRotator
-- Verify cryptographic signature verification for SignedReceiptSegmentManifest in zap-ledger
+- Verify cryptographic signature verification for SignedReceiptSegmentManifest in rivun-ledger
 - Write review report to handoff.md with explicit APPROVE or REQUEST_CHANGES verdict
 
 ## Current Parent
@@ -24,16 +24,16 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
 
 ## Review Scope
 - **Files to review**:
-  - `crates/zap-net/src/durable_replay.rs`, `crates/zap-net/src/lib.rs`
-  - `crates/zap-node/src/durable_replay.rs`, `crates/zap-node/src/lib.rs`
-  - `crates/zap-journal/src/lib.rs`
-  - `crates/zap-ledger/src/lib.rs`
-  - `crates/zap-ledger/tests/m1_challenger_stress.rs`
+  - `crates/rivun-net/src/durable_replay.rs`, `crates/rivun-net/src/lib.rs`
+  - `crates/rivun-node/src/durable_replay.rs`, `crates/rivun-node/src/lib.rs`
+  - `crates/rivun-journal/src/lib.rs`
+  - `crates/rivun-ledger/src/lib.rs`
+  - `crates/rivun-ledger/tests/m1_challenger_stress.rs`
 - **Interface contracts**: PROJECT.md
 - **Review criteria**: correctness, error handling, edge cases, signature verification, integrity, clippy clean
 
 ## Review Checklist
-- **Items reviewed**: `zap-net`, `zap-node`, `zap-journal`, `zap-ledger`, `m1_challenger_stress.rs`
+- **Items reviewed**: `rivun-net`, `rivun-node`, `rivun-journal`, `rivun-ledger`, `m1_challenger_stress.rs`
 - **Verdict**: REQUEST_CHANGES
 - **Unverified claims**: `cargo clippy --workspace --all-targets -- -D warnings` passing (FAILED due to compilation errors in `m1_challenger_stress.rs`).
 
@@ -55,3 +55,4 @@ Code quality & correctness review for Milestone 1 (R1: Durable Core & Replay Pro
 ## Artifact Index
 - handoff.md — Review Report & Verdict (REQUEST_CHANGES)
 - DISPATCH.md — Initial task dispatch
+

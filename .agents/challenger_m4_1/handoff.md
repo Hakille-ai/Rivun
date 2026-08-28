@@ -9,25 +9,25 @@
 
 ### 1.1 Empirical Test Suite Execution
 
-1. **Unit and Integration Tests (`crates/zap-agent`, `crates/zap-gateway`)**:
-   - Command: `cargo test -p zap-agent -p zap-gateway --all-targets`
+1. **Unit and Integration Tests (`crates/rivun-agent`, `crates/rivun-gateway`)**:
+   - Command: `cargo test -p rivun-agent -p rivun-gateway --all-targets`
    - Exit Code: `0`
    - Result: 45 passed, 0 failed.
-     - `zap-agent` lib unittests: 12 passed (`test_full_provenance_chain_generation_and_verification`, `test_tampered_step_fails_verification`, `test_tampered_signature_fails_verification`, etc.)
-     - `zap-agent` fixtures tests: 6 passed
-     - `zap-gateway` lib unittests: 1 passed (`test_rfc6455_accept_calculation`)
-     - `zap-gateway` adversarial challenger tests (`adversarial_challenger_m4_2.rs`): 8 passed (`test_empirical_6_stage_provenance_causal_chain_integrity`, `test_empirical_adversarial_tamper_matrix_all_6_stages`, `test_empirical_sse_broker_high_fanout_concurrency`, `test_empirical_ws_frame_size_overflow_rejection`, `test_empirical_full_e2e_ai_agent_workflow`, etc.)
-     - `zap-gateway` stress tests (`adversarial_stress_tests.rs`): 9 passed (`challenge_mcp_parse_error_32700`, `challenge_mcp_invalid_request_32600`, `challenge_mcp_method_not_found_32601`, `challenge_mcp_invalid_params_32602`, `challenge_mcp_all_registered_tools_execute`, `challenge_http_rest_status_codes_matrix`, `challenge_websocket_frame_size_limit_rejection`, `challenge_provenance_full_6_stages_and_all_tamper_vectors`, etc.)
-     - `zap-gateway` gateway integration tests (`gateway_tests.rs`): 9 passed
+     - `rivun-agent` lib unittests: 12 passed (`test_full_provenance_chain_generation_and_verification`, `test_tampered_step_fails_verification`, `test_tampered_signature_fails_verification`, etc.)
+     - `rivun-agent` fixtures tests: 6 passed
+     - `rivun-gateway` lib unittests: 1 passed (`test_rfc6455_accept_calculation`)
+     - `rivun-gateway` adversarial challenger tests (`adversarial_challenger_m4_2.rs`): 8 passed (`test_empirical_6_stage_provenance_causal_chain_integrity`, `test_empirical_adversarial_tamper_matrix_all_6_stages`, `test_empirical_sse_broker_high_fanout_concurrency`, `test_empirical_ws_frame_size_overflow_rejection`, `test_empirical_full_e2e_ai_agent_workflow`, etc.)
+     - `rivun-gateway` stress tests (`adversarial_stress_tests.rs`): 9 passed (`challenge_mcp_parse_error_32700`, `challenge_mcp_invalid_request_32600`, `challenge_mcp_method_not_found_32601`, `challenge_mcp_invalid_params_32602`, `challenge_mcp_all_registered_tools_execute`, `challenge_http_rest_status_codes_matrix`, `challenge_websocket_frame_size_limit_rejection`, `challenge_provenance_full_6_stages_and_all_tamper_vectors`, etc.)
+     - `rivun-gateway` gateway integration tests (`gateway_tests.rs`): 9 passed
 
 2. **Workspace Clippy Verification**:
    - Command: `cargo clippy --workspace --all-targets -- -D warnings`
    - Exit Code: `1`
    - Verbatim Compiler Errors:
-     - **Error 1** (`crates/zap-gateway/src/mcp/tools.rs:448:13`):
+     - **Error 1** (`crates/rivun-gateway/src/mcp/tools.rs:448:13`):
        ```
        error: this `if` statement can be collapsed
-          --> crates\zap-gateway\src\mcp\tools.rs:448:13
+          --> crates\rivun-gateway\src\mcp\tools.rs:448:13
        448 |             if !report.valid {
        449 |                 if let Some(node) = &ctx.node {
        450 |                     node.record_provenance_verification_failure();
@@ -35,20 +35,20 @@
        452 |             }
        note: `-D clippy::collapsible-if` implied by `-D warnings`
        ```
-     - **Error 2** (`crates/zap-gateway/src/transports/http.rs:704:13`):
+     - **Error 2** (`crates/rivun-gateway/src/transports/http.rs:704:13`):
        ```
        error: returning the result of a `let` binding from a block
-          --> crates\zap-gateway\src\transports\http.rs:704:13
+          --> crates\rivun-gateway\src\transports\http.rs:704:13
        687 |             let bytes = match hex::decode(pk_str) {
        ...
        704 |             bytes
            |             ^^^^^ unnecessary `let` binding
        note: `-D clippy::let-and-return` implied by `-D warnings`
        ```
-     - **Error 3** (`crates/zap-gateway/src/transports/http.rs:717:9`):
+     - **Error 3** (`crates/rivun-gateway/src/transports/http.rs:717:9`):
        ```
        error: this `if` statement can be collapsed
-          --> crates\zap-gateway\src\transports\http.rs:717:9
+          --> crates\rivun-gateway\src\transports\http.rs:717:9
        717 |         if !report.valid {
        718 |             if let Some(node) = &self.node {
        719 |                 node.record_provenance_verification_failure();
@@ -56,10 +56,10 @@
        721 |         }
        note: `-D clippy::collapsible-if` implied by `-D warnings`
        ```
-     - **Error 4** (`crates/zap-gateway/src/transports/ws.rs:66:18`):
+     - **Error 4** (`crates/rivun-gateway/src/transports/ws.rs:66:18`):
        ```
        error: the loop variable `i` is used to index `w`
-         --> crates\zap-gateway\src\transports\ws.rs:66:18
+         --> crates\rivun-gateway\src\transports\ws.rs:66:18
        66 |         for i in 0..80 {
           |                  ^^^^^
        note: `-D clippy::needless-range-loop` implied by `-D warnings`
@@ -109,20 +109,20 @@
 
 - **Verdict**: `REQUEST_CHANGES`
 - **Required Remediation**:
-  1. In `crates/zap-gateway/src/mcp/tools.rs:448`, collapse the nested `if` statements:
+  1. In `crates/rivun-gateway/src/mcp/tools.rs:448`, collapse the nested `if` statements:
      ```rust
      if !report.valid && let Some(node) = &ctx.node {
          node.record_provenance_verification_failure();
      }
      ```
-  2. In `crates/zap-gateway/src/transports/http.rs:686-705`, return the `match` expression directly without the unnecessary `let bytes = ...; bytes` assignment.
-  3. In `crates/zap-gateway/src/transports/http.rs:717`, collapse the nested `if` statements:
+  2. In `crates/rivun-gateway/src/transports/http.rs:686-705`, return the `match` expression directly without the unnecessary `let bytes = ...; bytes` assignment.
+  3. In `crates/rivun-gateway/src/transports/http.rs:717`, collapse the nested `if` statements:
      ```rust
      if !report.valid && let Some(node) = &self.node {
          node.record_provenance_verification_failure();
      }
      ```
-  4. In `crates/zap-gateway/src/transports/ws.rs:66`, simplify the loop:
+  4. In `crates/rivun-gateway/src/transports/ws.rs:66`, simplify the loop:
      ```rust
      for (i, &w_i) in w.iter().enumerate().take(80) { ... }
      // or
@@ -142,9 +142,10 @@ To independently verify after resolving the clippy errors:
    ```
 2. **Verify Milestone 4 Unit & Adversarial Tests**:
    ```bash
-   cargo test -p zap-agent -p zap-gateway --all-targets
+   cargo test -p rivun-agent -p rivun-gateway --all-targets
    ```
 3. **Verify End-to-End Suite**:
    ```bash
-   cargo test --package zap-e2e --test e2e
+   cargo test --package rivun-e2e --test e2e
    ```
+

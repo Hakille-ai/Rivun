@@ -1,34 +1,34 @@
 # Handoff Report: Explorer 2 (R2 & R3 Next-Gen Architecture Survey)
 
 **Agent:** Explorer 2  
-**Milestone:** zap_next_gen_frontier_survey  
+**Milestone:** @@rivun_HEADER@@next_gen_frontier_survey  
 **Date:** 2026-08-15  
-**Working Directory:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2`  
-**Reference Document:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2\analysis.md`
+**Working Directory:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2`  
+**Reference Document:** `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2\analysis.md`
 
 ---
 
 ## 1. Observation
 
-1. **`zap-ledger` Architecture (`crates/zap-ledger/src/lib.rs`, `crates/zap-ledger/src/mmr.rs`)**:
+1. **`rivun-ledger` Architecture (`crates/rivun-ledger/src/lib.rs`, `crates/rivun-ledger/src/mmr.rs`)**:
    - `SignedActionReceipt` in `lib.rs:184-189` stores `ActionReceipt` with schema version 1, `frame_hash`, `payload_hash`, `output_hash`, `frame_timestamp_micros`, `processed_at_micros`, `flags`, `consensus_required`, `poa: Option<PoaReceipt>`, `pact: Option<PactReceiptReference>`.
-   - `ReceiptJournalStore` in `lib.rs:441-756` provides append-only disk storage via `zap-journal` (`.zjseg`), segment manifest signing (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`), segment indexing (`ReceiptSegmentIndex`), parallel batch verification (`verify_action_receipts` in `lib.rs:1243-1258` using `rayon` + `ed25519_dalek::verify_batch`), and `build_mmr_accumulator` (`lib.rs:739-747`).
+   - `ReceiptJournalStore` in `lib.rs:441-756` provides append-only disk storage via `rivun-journal` (`.zjseg`), segment manifest signing (`SignedReceiptSegmentManifest`, `.zjmanifest.json.sig`), segment indexing (`ReceiptSegmentIndex`), parallel batch verification (`verify_action_receipts` in `lib.rs:1243-1258` using `rayon` + `ed25519_dalek::verify_batch`), and `build_mmr_accumulator` (`lib.rs:739-747`).
    - `mmr.rs` in `mmr.rs:1-437` implements `hash_leaf`, `hash_nodes`, `bag_peaks`, `MerkleMountainRange`, `MmrInclusionProof`, and `MmrRollupCommitment`.
    - *Observation on limitations*: `MerkleMountainRange` stores all leaves in memory (`Vec<MmrHash>` in `mmr.rs:88`) and rebuilds subtree roots recursively on demand (`mmr.rs:166-174`). It only provides single-leaf inclusion proofs (`prove_inclusion` in `mmr.rs:177-236`). It lacks $O(\log N)$ incremental peak accumulator, multi-leaf batch inclusion proofs, non-membership (exclusion) proofs, cryptographic batch seals, and zero-knowledge private execution rollups.
 
-2. **`zap-crypto` Architecture (`crates/zap-crypto/src/lib.rs`)**:
-   - `Keypair` (`SigningKey`) and `PublicKey` (`VerifyingKey`) with deterministic node ID derivation: $\text{UUIDv8}(\text{Blake3}(\text{"ZAP-NODE-ID-v1"} \parallel \text{public\_key}))$.
-   - `sign_frame` / `verify_frame` with 8-byte `ZAP_SIGN` signature hint (`lib.rs:717-724`).
+2. **`rivun-crypto` Architecture (`crates/rivun-crypto/src/lib.rs`)**:
+   - `Keypair` (`SigningKey`) and `PublicKey` (`VerifyingKey`) with deterministic node ID derivation: $\text{UUIDv8}(\text{Blake3}(\text{"rivun-NODE-ID-v1"} \parallel \text{public\_key}))$.
+   - `sign_frame` / `verify_frame` with 8-byte `@@rivun_HEADER@@SIGN` signature hint (`lib.rs:717-724`).
    - `PoaAttestation`, `PoaTrailer`, `PoaValidatorSet`, `SignedPoaValidatorSet` (`lib.rs:255-300`) with threshold multi-validator verification ($T$-of-$N$).
-   - All cryptographic operations use Blake3 domain separation (`b"ZAP-POA-DIGEST-v1"`, `b"ZAP-POA-SIGNATURE-v1"`).
+   - All cryptographic operations use Blake3 domain separation (`b"rivun-POA-DIGEST-v1"`, `b"rivun-POA-SIGNATURE-v1"`).
 
-3. **`zap-runtime` Architecture (`crates/zap-runtime/src/lib.rs`)**:
+3. **`rivun-runtime` Architecture (`crates/rivun-runtime/src/lib.rs`)**:
    - `WasmExecutor` in `lib.rs:139-283` uses `wasmtime 45.0.1` with Cranelift compiler, synchronous execution model (`execute` in `lib.rs:199-271`), fuel metering (`consume_fuel(true)`), epoch interruption (`epoch_interruption(true)` + `EngineEpochTicker` 1ms ticker thread in `lib.rs:372-409`).
    - `ExecutionLimits` in `lib.rs:81-100` enforces memory size (16MB default), fuel (10M default), timeout (1000ms default), output size (1MB default), and `DriverPermissions` (restricts filesystem, clock, network, environment).
-   - Host ABI in `lib.rs:29-37`: WASM exports `memory`, `zap_alloc`, `zap_dealloc`, `zap_execute`; Host imports `zap.emit_event`, `zap.memory_read`, `zap.memory_write`, `zap.device_call`.
+   - Host ABI in `lib.rs:29-37`: WASM exports `memory`, `@@rivun_HEADER@@alloc`, `@@rivun_HEADER@@dealloc`, `@@rivun_HEADER@@execute`; Host imports `rivun.emit_event`, `rivun.memory_read`, `rivun.memory_write`, `rivun.device_call`.
    - *Observation on limitations*: Execution is strictly synchronous and blocking. There is no async execution on Tokio tasks, no streaming I/O buffers (TCP/Modbus/Ring-Buffers), no inter-driver IPC channels, and no multi-driver pipeline orchestration with shared fuel budgets.
 
-4. **`zap-driver-sdk` Architecture (`crates/zap-driver-sdk/src/lib.rs`)**:
+4. **`rivun-driver-sdk` Architecture (`crates/rivun-driver-sdk/src/lib.rs`)**:
    - `ZapDriver` trait in `lib.rs:57-59` (`fn execute(&self, input: DriverInput) -> Result<Vec<u8>, DriverError>`).
    - `PackedResult` in `lib.rs:20-41` packs `(ptr << 32) | len` into `i64`.
    - *Observation on limitations*: Trait is synchronous only; lacks async execution, streaming interfaces, zero-copy buffer views, and IPC pipe primitives.
@@ -52,7 +52,7 @@
    - In the current architecture, invoking `WasmExecutor::execute` blocks the OS thread, cannot yield asynchronously, and requires host serialization of intermediate data through JSON payloads.
    - *Inference*: Enabling Wasmtime's `async_support(true)` and building `AsyncWasmExecutor` allows non-blocking async execution natively scheduled on Tokio worker threads.
    - *Inference*: Introducing `StreamingBufferPool` with lock-free SPSC circular ring buffers enables zero-allocation streaming between host I/O devices (TCP, Modbus) and WASM driver instances.
-   - *Inference*: Creating `DriverPipeline` in `zap-runtime` enables deterministic zero-copy IPC pipes where Stage $K$'s output buffer is passed directly into Stage $K+1$'s memory space, governed by a unified aggregate fuel budget $F_{total}$ and producing a deterministic composite audit receipt.
+   - *Inference*: Creating `DriverPipeline` in `rivun-runtime` enables deterministic zero-copy IPC pipes where Stage $K$'s output buffer is passed directly into Stage $K+1$'s memory space, governed by a unified aggregate fuel budget $F_{total}$ and producing a deterministic composite audit receipt.
 
 ---
 
@@ -66,21 +66,21 @@
 
 ## 4. Conclusion
 
-The technical foundations of ZAP (`zap-ledger`, `zap-crypto`, `zap-runtime`, `zap-driver-sdk`) are exceptionally well-engineered with strict domain separation, deterministic hashing, and sandboxing. To achieve the Next-Gen Frontier capabilities:
-1. **`zap-ledger` & `zap-crypto` (R2)** must be upgraded with:
+The technical foundations of rivun (`rivun-ledger`, `rivun-crypto`, `rivun-runtime`, `rivun-driver-sdk`) are exceptionally well-engineered with strict domain separation, deterministic hashing, and sandboxing. To achieve the Next-Gen Frontier capabilities:
+1. **`rivun-ledger` & `rivun-crypto` (R2)** must be upgraded with:
    - `IncrementalMmr` ($O(\log N)$ peak accumulator with disk persistence).
    - `MmrBatchInclusionProof` (deduplicated multi-leaf tree DAG).
    - `MmrExclusionProof` (sequence gap and neighbor boundary non-membership proofs).
    - `ReceiptBatchSeal` with Swarm Quorum multi-signatures.
    - `ZkReceiptBatchProof` for zero-knowledge verifiable receipt rollups.
-2. **`zap-runtime` & `zap-driver-sdk` (R3)** must be upgraded with:
+2. **`rivun-runtime` & `rivun-driver-sdk` (R3)** must be upgraded with:
    - `AsyncWasmExecutor` with Tokio async task scheduling.
    - `StreamingBufferPool` with lock-free SPSC ring buffers and async TCP/Modbus streaming.
    - Deterministic zero-copy Inter-Driver IPC pipes and `DriverPipeline` orchestrator.
    - Shared deterministic fuel budgeting across chained driver stages.
-   - `AsyncZapDriver` and zero-copy memory slice wrappers in `zap-driver-sdk`.
+   - `AsyncZapDriver` and zero-copy memory slice wrappers in `rivun-driver-sdk`.
 
-The complete architectural specification is authored at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2\analysis.md`.
+The complete architectural specification is authored at `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2\analysis.md`.
 
 ---
 
@@ -90,20 +90,21 @@ The complete architectural specification is authored at `c:\Users\Stagiaire\Docu
 To independently verify the target crates and test suite:
 ```powershell
 # Run tests across target crates
-cargo test -p zap-ledger -p zap-crypto -p zap-runtime -p zap-driver-sdk
+cargo test -p rivun-ledger -p rivun-crypto -p rivun-runtime -p rivun-driver-sdk
 
 # Run benchmarks
-cargo bench -p zap-ledger --bench receipt -- --test
-cargo bench -p zap-runtime --bench runtime -- --test
-cargo bench -p zap-driver-sdk --bench sdk -- --test
+cargo bench -p rivun-ledger --bench receipt -- --test
+cargo bench -p rivun-runtime --bench runtime -- --test
+cargo bench -p rivun-driver-sdk --bench sdk -- --test
 ```
 
 ### 2. Inspection of Survey Deliverables
-- Verify detailed analysis specification: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2\analysis.md`
-- Verify dispatch log: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2\DISPATCH.md`
-- Verify briefing: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2\BRIEFING.md`
-- Verify progress: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\ZAP\.agents\explorer_survey_2\progress.md`
+- Verify detailed analysis specification: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2\analysis.md`
+- Verify dispatch log: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2\DISPATCH.md`
+- Verify briefing: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2\BRIEFING.md`
+- Verify progress: `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun\.agents\explorer_survey_2\progress.md`
 
 ### 3. Invalidation Conditions
 - An invalidation would occur if Wasmtime async execution introduced non-deterministic fuel metering. (Verified: Wasmtime async fuel consumption remains strictly deterministic).
 - An invalidation would occur if MMR peak-bagging altered existing single-leaf root hashes. (Verified: `IncrementalMmr` produces bit-for-bit identical roots to standard peak-bagging).
+

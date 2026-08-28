@@ -1,6 +1,6 @@
 # Code of Conduct
 
-ZAP should be a place where serious technical work can happen without ego
+rivun should be a place where serious technical work can happen without ego
 getting in the way.
 
 ## Expected Behavior

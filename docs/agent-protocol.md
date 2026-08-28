@@ -1,11 +1,11 @@
-# ZAP Agent Protocol
+# rivun Agent Protocol
 
-The ZAP agent protocol is a high-level JSON contract for model gateways,
+The rivun agent protocol is a high-level JSON contract for model gateways,
 planners, tools, and operator agents. It is designed to travel inside `ZENV`
-envelopes with `content_type = application/zap-agent+json`; it does not change
+envelopes with `content_type = application/rivun-agent+json`; it does not change
 the wire frame, signature, transport, PoA, policy, or runtime layers.
 
-The Rust contracts live in `crates/zap-agent`.
+The Rust contracts live in `crates/rivun-agent`.
 
 ## Goals
 
@@ -20,15 +20,15 @@ The Rust contracts live in `crates/zap-agent`.
 
 | Subject | Payload |
 | --- | --- |
-| `zap.agent.intent` | `AgentMessage::Intent` |
-| `zap.agent.session` | `AgentMessage::Session` |
-| `zap.agent.delegation.request` | `AgentMessage::DelegationRequest` |
-| `zap.agent.delegation.response` | `AgentMessage::DelegationResponse` |
-| `zap.agent.capability_negotiation.request` | `AgentMessage::CapabilityNegotiationRequest` |
-| `zap.agent.capability_negotiation.response` | `AgentMessage::CapabilityNegotiationResponse` |
-| `zap.agent.status` | `AgentMessage::Status` |
-| `zap.agent.result` | `AgentMessage::Result` |
-| `zap.agent.error` | `AgentMessage::Error` |
+| `rivun.agent.intent` | `AgentMessage::Intent` |
+| `rivun.agent.session` | `AgentMessage::Session` |
+| `rivun.agent.delegation.request` | `AgentMessage::DelegationRequest` |
+| `rivun.agent.delegation.response` | `AgentMessage::DelegationResponse` |
+| `rivun.agent.capability_negotiation.request` | `AgentMessage::CapabilityNegotiationRequest` |
+| `rivun.agent.capability_negotiation.response` | `AgentMessage::CapabilityNegotiationResponse` |
+| `rivun.agent.status` | `AgentMessage::Status` |
+| `rivun.agent.result` | `AgentMessage::Result` |
+| `rivun.agent.error` | `AgentMessage::Error` |
 
 Every payload uses `schema_version = 1`. Receivers should reject unsupported
 schema versions before acting on the content.
@@ -64,7 +64,7 @@ where they are not semantically required.
 
 `AgentIntent` describes requested work. It includes an intent UUID, a session
 UUID, source and optional target agent IDs, an `IntentKind`, objective text,
-arbitrary JSON input, required `zap-capability` IDs, constraints, context
+arbitrary JSON input, required `rivun-capability` IDs, constraints, context
 references, an optional deadline, priority, and metadata.
 
 `AgentSession` tracks a related unit of work. It records owner agent, status,
@@ -112,23 +112,23 @@ receipts, and driver/runtime enforcement remain separate layers.
 
 ## Swarm Coordination
 
-`zap-agent::swarm` extends the agent protocol with consensus-tracked intents
+`rivun-agent::swarm` extends the agent protocol with consensus-tracked intents
 for multi-agent coordination. Subjects:
 
 | Subject | Payload |
 | --- | --- |
-| `zap.swarm.intent.propose` | `SwarmIntentProposal` — an intent submitted to the swarm |
-| `zap.swarm.intent.commit` | `SwarmCommitCertificateRef` — a BFT commit certificate |
+| `rivun.swarm.intent.propose` | `SwarmIntentProposal` — an intent submitted to the swarm |
+| `rivun.swarm.intent.commit` | `SwarmCommitCertificateRef` — a BFT commit certificate |
 
 Intent lifecycle: `Submitted → Proposed → Prevoting → Precommitting →
 Committed → Executing → Finalized`, with `Rejected` and `TimedOut` terminal
 states. Commit certificates reference the consensus coordinate
 `{epoch, view, round, block_height}`. The engine side lives in
-`zap-net::consensus` (see [Network](network.md)).
+`rivun-net::consensus` (see [Network](network.md)).
 
 ## Provenance Chain
 
-`zap-agent::provenance` defines a root-signed, 7-step cryptographic chain that
+`rivun-agent::provenance` defines a root-signed, 7-step cryptographic chain that
 crosses the whole execution path:
 
 ```text
@@ -136,7 +136,7 @@ intent → negotiation → policy → driver → poa → receipt → root
 ```
 
 - Each stage hashes its canonical payload with the previous stage digest
-  (SHA-256, domain `ZAP-PROVENANCE-CHAIN-v1`).
+  (SHA-256, domain `rivun-PROVENANCE-CHAIN-v1`).
 - The root stage signs the full chain with the node Ed25519 identity, so a
   modification at any stage invalidates the root signature.
 - `ProvenanceChainBuilder` assembles stages incrementally; the gateway can
@@ -145,30 +145,31 @@ intent → negotiation → policy → driver → poa → receipt → root
 Verify a chain digest:
 
 ```bash
-cargo run -p zap-cli -- provenance verify --chain chain.json --key .zap/node.key --json
+cargo run -p rivun-cli -- provenance verify --chain chain.json --key .rivun/node.key --json
 ```
 
 Receipt journals can also be checked with their provenance digests:
-`zap receipts verify --dir logs/receipts --provenance`. See
+`rivun receipts verify --dir logs/receipts --provenance`. See
 [Gateway](gateway.md) and [Swarm](swarm.md).
 
 ## Integration Notes
 
 Future CLI or node integrations should wrap these JSON messages in `ZENV`
 envelopes, set the subject from `AgentMessage::subject()`, and set
-`content_type = application/zap-agent+json`. Receivers should deserialize with
+`content_type = application/rivun-agent+json`. Receivers should deserialize with
 `AgentMessage::from_json_slice` so validation runs before policy evaluation or
 dispatch.
 
 The CLI can construct common agent messages locally without sending them:
-`zap agent intent`, `zap agent status`, and `zap agent result` print validated
-JSON to stdout or write it with `--out`. `zap agent delegate` and
-`zap agent negotiate` build delegation requests/responses and capability
-negotiation messages; `zap agent validate` checks any agent message against
-the contract, and `zap agent schema` exports the JSON schema. These builders
+`rivun agent intent`, `rivun agent status`, and `rivun agent result` print validated
+JSON to stdout or write it with `--out`. `rivun agent delegate` and
+`rivun agent negotiate` build delegation requests/responses and capability
+negotiation messages; `rivun agent validate` checks any agent message against
+the contract, and `rivun agent schema` exports the JSON schema. These builders
 are useful for fixtures, operator handoffs, and preparing payloads that a
 later step can wrap in `ZENV`.
 
-Agent capabilities reuse `zap-capability::CapabilityId`. A negotiated
+Agent capabilities reuse `rivun-capability::CapabilityId`. A negotiated
 capability is descriptive until existing node policy, manifest, registry, and
 grant checks authorize execution.
+

@@ -1,9 +1,9 @@
 use bytes::Bytes;
-use zap_core::{ZapFlags, ZapFrame};
-use zap_crypto::{Keypair, sign_frame, verify_frame};
+use rivun_core::{RivunFlags, RivunFrame};
+use rivun_crypto::{Keypair, sign_frame, verify_frame};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== ZAP Binary Frame Basics ===");
+    println!("=== Rivun Binary Frame Basics ===");
 
     // 1. Generate cryptographic identities (Ed25519)
     let alice_keys = Keypair::generate();
@@ -20,10 +20,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Build an unsigned frame containing a payload
     let payload = Bytes::from("action:thermostat.setpoint temperature_c=22.5");
-    let unsigned_frame = ZapFrame::new(
+    let unsigned_frame = RivunFrame::new(
         alice_node_id,      // Source Node ID
         bob_node_id,        // Target Node ID
-        ZapFlags::PRIORITY, // Frame flags (e.g. priority, broadcast, encrypted)
+        RivunFlags::PRIORITY, // Frame flags (e.g. priority, broadcast, encrypted)
         payload.clone(),    // Binary payload
     )?;
 
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Timestamp (µs): {}",
         unsigned_frame.header.timestamp_micros
     );
-    println!("  Payload Length: {} bytes", unsigned_frame.header.zap_len);
+    println!("  Payload Length: {} bytes", unsigned_frame.header.rivun_len);
 
     // 3. Sign the frame using Alice's private key
     // This updates the frame flags, sets a signature hint in the header, and attaches an Ed25519 signature trailer.
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!(
         "  Signature Hint (8 bytes): {:x?}",
-        signed_frame.header.zap_sign
+        signed_frame.header.rivun_sign
     );
     if let Some(auth) = &signed_frame.auth {
         println!(
@@ -62,8 +62,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\nEncoded frame size: {} bytes", binary_data.len());
 
     // 5. Simulate network transmission / reception
-    // Decode the binary data back into a ZapFrame struct on the receiver's end
-    let decoded_frame = ZapFrame::decode(&binary_data)?;
+    // Decode the binary data back into a RivunFrame struct on the receiver's end
+    let decoded_frame = RivunFrame::decode(&binary_data)?;
     println!(
         "\nDecoded frame: matches original payload? {}",
         decoded_frame.payload == payload
