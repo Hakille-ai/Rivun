@@ -187,6 +187,34 @@ go test ./sdks/go/...
 cargo test --manifest-path sdks/rust/Cargo.toml
 ```
 
+## Rivun Cloud & Operator Station Quickstart
+
+To run the local zero-trust control plane:
+
+1. **Start the Multi-Tenant Cloud API**:
+   ```bash
+   cargo run -p rivun-cloud-api -- --host 127.0.0.1 --port 8080
+   ```
+
+2. **Launch the Web Dashboard**:
+   ```bash
+   cd apps/rivun-dashboard
+   npm install
+   npm run dev
+   # Open http://localhost:3000
+   ```
+
+3. **Generate Local Operator Keys and Sign Staged Policies**:
+   ```bash
+   # Generate operator identity key in secure local vault
+   cargo run -p rivun-control -- keygen --label primary-operator
+
+   # List staged policy proposals awaiting operator review
+   cargo run -p rivun-control -- staged --org acme --token rivun_live_secret_token_123456789
+   ```
+
+For full architecture and API details, see [Rivun Cloud Architecture](cloud.md).
+
 ## When to Use rivun
 
 Use rivun when you need typed messages, cryptographic node identity, deterministic
@@ -196,4 +224,5 @@ receipts around distributed actions.
 Do not use rivun as a general database, a natural-language agent planner, a
 financial ledger, a replacement for every broker/RPC stack, or a way to bypass
 the identity, policy, PoA, grant, and receipt model.
+
 

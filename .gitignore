@@ -14,6 +14,10 @@ dist/
 !.gitkeep
 !.env.example
 node_modules/
+.next/
+dist_cjs/
+*.tsbuildinfo
+.turbo/
 __pycache__/
 .pytest_cache/
 *.pyc

@@ -94,6 +94,15 @@ Status values:
 | External audit plan | planned | Security docs exist | Add third-party review plan and audit scope |
 | Official examples strict doctor | planned | Example configs exist | Add CI that runs `doctor --strict` on official examples |
 
+## Phase 8: Rivun Cloud & Enterprise SaaS Control Plane
+
+| Item | Status | Evidence | Remaining Work |
+| --- | --- | --- | --- |
+| Multi-tenant Cloud API | done | `crates/rivun-cloud-api`, Axum 0.8, REST & SSE endpoints, multi-tenant DB, seed dataset, `api_tests.rs` | Add persistent SQL/Postgres backend adapter |
+| Edge Cloud Bridge | done | `crates/rivun-cloud-bridge`, tokio daemon, batch ingestion, policy polling, atomic tempfile swap, `bridge_tests.rs` | Add live WebSocket duplex transport channel |
+| Operator Station & Key Vault | done | `apps/rivun-control`, local Ed25519 vault, zero-trust invariant, offline human-in-the-loop policy signing CLI | Add Tauri native GUI window shell |
+| Enterprise Dark Web UI | done | `apps/rivun-dashboard`, Next.js 16 / React 19, Apple-grade Dark UI, live SSE streaming, 7-stage provenance graph, offline verifier modal | Add dark/light toggle and custom branding settings |
+
 ## Next Highest-Value Implementation Blocks
 
 1. Add per-profile journal compression policy and fleet-level journal supervision.

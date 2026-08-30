@@ -1,0 +1,46 @@
+[package]
+name = "rivun-cloud-api"
+description = "Multi-tenant Cloud SaaS API for Rivun and ZAP zero-trust protocol suite."
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "rivun-cloud-api"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+axum = { version = "0.8", features = ["macros", "tokio"] }
+base64.workspace = true
+bytes.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+clap = { workspace = true, features = ["derive", "env"] }
+ed25519-dalek.workspace = true
+futures-util = "0.3"
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-full", "set-header"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+rivun-agent = { path = "../rivun-agent" }
+rivun-core = { path = "../rivun-core" }
+rivun-crypto = { path = "../rivun-crypto" }
+rivun-ledger = { path = "../rivun-ledger" }
+rivun-policy = { path = "../rivun-policy" }
+rivun-store = { path = "../rivun-store" }
+rivun-telemetry = { path = "../rivun-telemetry" }
+
+[dev-dependencies]
+http-body-util = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tempfile.workspace = true

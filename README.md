@@ -63,14 +63,17 @@ gateways.
 ## Repository layout
 
 ```
-crates/       Workspace crates (23) — protocol, node, runtime, tooling
-docs/         Protocol, security, operations, and guide documentation
-examples/     Runnable examples, configs, domain packs, WASM drivers
-fixtures/     Versioned JSON protocol fixtures shared by SDKs and tests
-sdks/         Rust, Go, TypeScript, Python SDKs
-tests/e2e/    Opaque-box 4-tier end-to-end suite (174 tests)
-tools/        xtask and benchmark tooling
-website/      Marketing and docs site (Next.js)
+apps/
+  rivun-dashboard/    Next.js 16 / React 19 / Tailwind dark-mode enterprise SaaS UI
+  rivun-control/      Local operator workstation & Ed25519 secure key vault (Tauri/CLI)
+crates/               Workspace crates (26) — protocol, node, runtime, cloud bridge, cloud API
+docs/                 Protocol, security, operations, and cloud architecture guides
+examples/             Runnable examples, configs, domain packs, WASM drivers
+fixtures/             Versioned JSON protocol fixtures shared by SDKs and tests
+sdks/                 Rust, Go, TypeScript, Python SDKs
+tests/e2e/            Opaque-box 4-tier end-to-end suite (174 tests)
+tools/                xtask and benchmark tooling
+website/              Marketing and docs site (Next.js)
 ```
 
 ## Quickstart
@@ -206,8 +209,20 @@ cargo run -p Rivun-examples --bin driver_manifest   # signed manifests + registr
 | `Rivun-gateway` | AI agent gateway: MCP server, HTTP REST, SSE, WebSocket, provenance chain engine |
 | `Rivun-telemetry` | Fleet doctor, incident snapshots, Prometheus metrics, topology |
 | `Rivun-ops` | Operations contracts: observability, governance, production configs |
+| **Cloud & SaaS control plane** | |
+| `rivun-cloud-bridge` | Edge daemon: telemetry/receipt ingestion, policy polling, Ed25519 signature checks, atomic swap |
+| `rivun-cloud-api` | Multi-tenant Axum SaaS backend: REST API, Server-Sent Events (SSE), RBAC, pack registry |
+| `rivun-control` | Local operator workstation & Ed25519 key vault: offline signing for staged policy bundles |
 
-## CLI
+## Rivun Cloud & Operator Workstation
+
+Rivun Cloud extends the low-level protocol into an enterprise multi-tenant control plane under a strict **Zero-Trust Sovereign Invariant**:
+
+- **No Private Key Ingestion**: Private Ed25519 signing keys never leave local operator workstations (`Rivun Control`).
+- **Cryptographic Staging**: Policies are staged in the Cloud, inspected via side-by-side visual diffs, and signed with `Rivun Control` before edge nodes apply them via atomic filesystem rename.
+- **Enterprise Dark UI**: Next.js 16 / React 19 dashboard with live SSE streaming, 7-point Doctor diagnostic badges, interactive 7-stage causal provenance graphs ($H_{\text{intent}} \to \dots \to H_{\text{root}}$), and air-gapped CLI verification modals.
+
+See [Rivun Cloud Architecture Guide](docs/cloud.md) for complete details.
 
 Full command reference for a node:
 

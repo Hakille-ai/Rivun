@@ -98,6 +98,44 @@ keys when peer membership changes.
   validator sets from peers, then run strict config validation on the applied
   config.
 - Run `rivun check-config --strict --config <path>` before starting a daemon.
+- Run `rivun doctor --strict --config <path>` as a pre-flight readiness gate
+  before placing the node into service.
+
+## Rivun Cloud SaaS Deployment
+
+Rivun Cloud services can be deployed alongside your edge fleets:
+
+### 1. Rivun Cloud API (`crates/rivun-cloud-api`)
+```bash
+# Run standalone API daemon
+cargo run --release -p rivun-cloud-api -- --host 0.0.0.0 --port 8080
+```
+Environment variables:
+- `RIVUN_CLOUD_HOST`: Bind address (default `127.0.0.1`)
+- `RIVUN_CLOUD_PORT`: HTTP and SSE port (default `8080`)
+- `RUST_LOG`: Log filter (e.g. `info,rivun_cloud_api=debug`)
+
+### 2. Rivun Dashboard (`apps/rivun-dashboard`)
+```bash
+cd apps/rivun-dashboard
+npm install
+npm run build
+npm run start
+```
+Environment variables:
+- `NEXT_PUBLIC_RIVUN_API_URL`: URL of the Rivun Cloud API backend (default `http://localhost:8080`).
+
+### 3. Edge Bridge Daemon (`crates/rivun-cloud-bridge`)
+Connect an edge node to Rivun Cloud:
+```bash
+# Bridge daemon connects node to SaaS
+cargo run --release -p rivun-cloud-bridge -- \
+  --cloud-url https://api.rivun.cloud \
+  --org acme \
+  --token <API_BEARER_TOKEN> \
+  --node-id <NODE_UUID> \
+  --node-label fra1-edge-01 \
+  --active-policy-path /etc/rivun/policy.toml
+```
 - Pin container image digests in production orchestrators once images are
   published.
-

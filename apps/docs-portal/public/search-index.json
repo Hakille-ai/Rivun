@@ -1,0 +1,1453 @@
+[
+  {
+    "id": "/docs/getting-started/overview",
+    "url": "/docs/getting-started/overview",
+    "title": "Overview & Value Proposition",
+    "section": "1. Getting Started",
+    "description": "Introduction to Rivun (ZAP) — the zero-trust, high-throughput autonomous automation and consensus protocol.",
+    "headings": [
+      "What is Rivun?",
+      "Core Architecture Tenets",
+      "The ZAP Protocol Ecosystem",
+      "High-Level Action Flow"
+    ],
+    "keywords": [
+      "Overview & Value Proposition",
+      "1. Getting Started",
+      "getting-started",
+      "overview"
+    ],
+    "content": "Introduction to Rivun (ZAP) — the zero-trust, high-throughput autonomous automation and consensus protocol. Rivun (ZAP protocol) is the world's first **zero-trust, cryptographically verified orchestration and consensus runtime** built specifically for autonomous AI agents, industrial edge nodes, and multi-party decentralized automation. ### Key Capabilities - **Deterministic WASM Sandboxing**: Run untrusted action drivers with fuel metering, memory limits (16MB), and strict epoch timeouts via Wasmtime. - **Proof-of-Action (PoA) BFT Consensus**: Achieve sub-millisecond BFT quorum consensus ($T le N$) without proof-of-work energy waste or token staking friction. - **Durable Merkle Mountain Range (MMR) Receipts**: Every physical or digital action produces an Ed25519-signed action receipt anchored into an append-only cryptographic MMR log. - **Zero-Trust Sovereign Operator Station**: Private keys remain isolated on local operator workstations; policy changes require explicit human-in-the-loop offline signatures before deployment. - **Universal Multi-Language Support**: Official first-class SDKs for **Rust**, **TypeScript**, **Python**, and **Go** with 100% bit-for-bit wire compatibility verified via shared test fixtures."
+  },
+  {
+    "id": "/docs/getting-started/installation",
+    "url": "/docs/getting-started/installation",
+    "title": "Installation & Prerequisites",
+    "section": "1. Getting Started",
+    "description": "System requirements, binary installation, Cargo installation, and environment configuration.",
+    "headings": [
+      "System Requirements",
+      "Installing the Rivun CLI",
+      "Installing Language SDKs",
+      "Verifying Your Installation"
+    ],
+    "keywords": [
+      "Installation & Prerequisites",
+      "1. Getting Started",
+      "getting-started",
+      "installation"
+    ],
+    "content": "System requirements, binary installation, Cargo installation, and environment configuration. ### System Requirements Rivun nodes and SDKs are cross-platform and support: - **Operating Systems**: Linux (x86_64, aarch64), macOS (Apple Silicon / Intel), Windows 10/11 (x86_64). - **Memory**: Minimum 512 MB RAM per node (2 GB recommended for high-throughput journals). - **Storage**: Minimum 100 MB disk space for binaries + WAL storage. - **Networking**: UDP ports (default `9001-9003`) and HTTP/SSE ports (default `8080`). ### Environment Variables | Variable | Description | Default | |---|---|---| | `RIVUN_HOME` | Configuration directory | `~/.rivun` | | `RIVUN_LOG` | Logging level (`trace`, `debug`, `info`, `warn`, `error`) | `info` | | `RIVUN_BIND_ADDR` | Local UDP bind interface | `0.0.0.0:9001` | | `RIVUN_PEERS` | Comma-separated list of seed peers | `\"\"` |"
+  },
+  {
+    "id": "/docs/getting-started/cluster-quickstart",
+    "url": "/docs/getting-started/cluster-quickstart",
+    "title": "Local 3-Node Cluster Quickstart",
+    "section": "1. Getting Started",
+    "description": "Bootstrap a 3-node Proof-of-Action BFT consensus cluster in 30 seconds using the Rivun CLI.",
+    "headings": [
+      "Initializing Cluster Nodes",
+      "Starting the Swarm",
+      "Testing Consensus & Action Receipts",
+      "Inspecting the Merkle Mountain Range (MMR)"
+    ],
+    "keywords": [
+      "Local 3-Node Cluster Quickstart",
+      "1. Getting Started",
+      "getting-started",
+      "cluster-quickstart"
+    ],
+    "content": "Bootstrap a 3-node Proof-of-Action BFT consensus cluster in 30 seconds using the Rivun CLI. ### 1. Launch 3-Node In-Memory Cluster The `rivun cluster up` command spawns 3 isolated daemon actors with automatic loopback networking, ephemeral journals, and pre-funded validator keys: ```bash rivun cluster up --nodes 3 --daemon ``` Expected output: ```text [+] Node 1 started: ID=d8f1e09a-4c22-4819-bf91-30912384a101 (UDP :9001) [LEADER] [+] Node 2 started: ID=a13c907b-8910-412e-9d21-998811223344 (UDP :9002) [VALIDATOR] [+] Node 3 started: ID=ef449911-3322-4455-6677-8899aabbccdd (UDP :9003) [VALIDATOR] [✓] BFT Swarm Mesh Formed: N=3, Quorum Threshold T=2 ``` ### 2. Check Swarm Health Inspect live mesh topology, round-trip ping latencies, and vector clock anti-entropy status: ```bash rivun cluster status ``` ### 3. Dispatch Consensus Action Frame Send a signed action requiring Proof-of-Action quorum: ```bash rivun action dispatch \\ --subject \"hvac.temperature.set\" \\ --payload '{\"zone\": \"datacenter-1\", \"target_temp_c\": 21.5}' \\ --require-poa ``` The cluster collects 2-of-3 validator signatures, executes the sandboxed WASM driver, attaches the `ZPOA` trailer, appends the action receipt to the local `.zjseg` journal, and anchors the leaf into the `.zmmr` Merkle Mountain Range."
+  },
+  {
+    "id": "/docs/getting-started/rust-quickstart",
+    "url": "/docs/getting-started/rust-quickstart",
+    "title": "Quickstart: Rust SDK",
+    "section": "1. Getting Started",
+    "description": "Build high-performance, memory-safe Rivun applications using the native Rust SDK.",
+    "headings": [
+      "Cargo Dependencies",
+      "Generating Keys & Building Frames",
+      "Sending Encrypted Datagrams",
+      "Verifying Action Receipts & MMR Proofs"
+    ],
+    "keywords": [
+      "Quickstart: Rust SDK",
+      "1. Getting Started",
+      "getting-started",
+      "rust-quickstart"
+    ],
+    "content": "Build high-performance, memory-safe Rivun applications using the native Rust SDK. The **Rust SDK** provides zero-overhead, bare-metal protocol primitives, SIMD-accelerated BLAKE3 hashing, constant-time Ed25519 signing via `ed25519-dalek`, and native Tokio async networking."
+  },
+  {
+    "id": "/docs/getting-started/typescript-quickstart",
+    "url": "/docs/getting-started/typescript-quickstart",
+    "title": "Quickstart: TypeScript SDK",
+    "section": "1. Getting Started",
+    "description": "Integrate browser and Node.js applications with the Rivun protocol using TypeScript.",
+    "headings": [
+      "Installation",
+      "Initializing Client & Ed25519 Keypair",
+      "Building ZENV Envelopes",
+      "Verifying PACT Receipts in Browser"
+    ],
+    "keywords": [
+      "Quickstart: TypeScript SDK",
+      "1. Getting Started",
+      "getting-started",
+      "typescript-quickstart"
+    ],
+    "content": "Integrate browser and Node.js applications with the Rivun protocol using TypeScript. The **TypeScript SDK** runs identically in Node.js (v18+), Bun, Deno, and modern web browsers with pure WebCrypto and `@noble/ed25519` cryptography."
+  },
+  {
+    "id": "/docs/getting-started/python-quickstart",
+    "url": "/docs/getting-started/python-quickstart",
+    "title": "Quickstart: Python SDK",
+    "section": "1. Getting Started",
+    "description": "Python 3.10+ SDK with dataclasses, type annotations, and standard UDP transport.",
+    "headings": [
+      "Installation",
+      "Python Client Example",
+      "Signing PACT Records"
+    ],
+    "keywords": [
+      "Quickstart: Python SDK",
+      "1. Getting Started",
+      "getting-started",
+      "python-quickstart"
+    ],
+    "content": "Python 3.10+ SDK with dataclasses, type annotations, and standard UDP transport. The **Python SDK** is built for AI agent frameworks (LangChain, AutoGen, CrewAI), data science pipelines, and edge Python scripts."
+  },
+  {
+    "id": "/docs/getting-started/go-quickstart",
+    "url": "/docs/getting-started/go-quickstart",
+    "title": "Quickstart: Go SDK",
+    "section": "1. Getting Started",
+    "description": "Idiomatic Go client with BLAKE3 hashing, Ed25519 verification, and binary serialization.",
+    "headings": [
+      "Go Module Setup",
+      "Encoding & Signing Frames in Go"
+    ],
+    "keywords": [
+      "Quickstart: Go SDK",
+      "1. Getting Started",
+      "getting-started",
+      "go-quickstart"
+    ],
+    "content": "Idiomatic Go client with BLAKE3 hashing, Ed25519 verification, and binary serialization. The **Go SDK** delivers high-concurrency microservices integration, Kubernetes operators, and industrial gateway controllers."
+  },
+  {
+    "id": "/docs/architecture/overview",
+    "url": "/docs/architecture/overview",
+    "title": "Protocol Architecture & Layering",
+    "section": "2. Architecture & Core Protocol",
+    "description": "Deep dive into the 5-layer Rivun/ZAP protocol architecture from wire frames to multi-party PACT contracts.",
+    "headings": [
+      "Architectural Layer Model",
+      "Layer 1: Wire & Cryptographic Framing",
+      "Layer 2: Universal Messaging Envelope (ZENV)",
+      "Layer 3: BFT Consensus & Quorum Mesh",
+      "Layer 4: Sandboxed WASM & Streaming Runtime",
+      "Layer 5: Sovereign Multi-Party PACT Contracts"
+    ],
+    "keywords": [
+      "Protocol Architecture & Layering",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "overview"
+    ],
+    "content": "Deep dive into the 5-layer Rivun/ZAP protocol architecture from wire frames to multi-party PACT contracts. Rivun establishes a strict, mathematically verifiable 5-layer protocol stack designed for high throughput (100k+ ops/sec) and sub-millisecond wire dispatch. ### The 5-Layer Stack ```text +-------------------------------------------------------------+ | Layer 5: Autonomous Multi-Party Contracts (PACT) | | (Escrow, Threshold Arbitration, Dispute Proofs, Slashing) | +-------------------------------------------------------------+ | Layer 4: Sandboxed Runtime & Zero-Copy Streaming | | (Wasmtime ABI v1, Fuel Metering, SPSC Ring Buffers, Modbus) | +-------------------------------------------------------------+ | Layer 3: Consensus & Epidemic Swarm Mesh | | (Proof-of-Action BFT, Vector Clocks, Phi Accrual Detection) | +-------------------------------------------------------------+ | Layer 2: Universal Messaging Envelope (ZENV) | | (74-byte Zero-Copy Header, 8 Message Kinds, Causation IDs) | +-------------------------------------------------------------+ | Layer 1: Wire & Cryptographic Framing (RivunWire) | | (64-byte Header, Ed25519 ZSIG, ZPOA, ChaCha20-Poly1305) | +-------------------------------------------------------------+ ```"
+  },
+  {
+    "id": "/docs/architecture/wire-format",
+    "url": "/docs/architecture/wire-format",
+    "title": "Fixed 64-Byte Wire Header Format",
+    "section": "2. Architecture & Core Protocol",
+    "description": "Detailed binary layout, byte offsets, bitflags, and parsing invariants of the 64-byte RivunHeader.",
+    "headings": [
+      "Binary Header Layout",
+      "Field Specifications",
+      "RivunFlags Bitmask Table",
+      "Authentication & PoA Trailers"
+    ],
+    "keywords": [
+      "Fixed 64-Byte Wire Header Format",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "wire-format"
+    ],
+    "content": "Detailed binary layout, byte offsets, bitflags, and parsing invariants of the 64-byte RivunHeader. ### Binary Layout Specification (64-Byte RivunHeader) | Byte Range | Field Name | Type | Description | |---|---|---|---| | `00 - 03` | `magic` | `[u8; 4]` | Fixed `0x5A41505F` (ASCII `ZAP_`) | | `04 - 05` | `version` | `u16` | Protocol version (`0x0001` = v1) | | `06 - 07` | `flags` | `u16` | Bitfield flags (`RivunFlags`) | | `08 - 23` | `source_node` | `[u8; 16]` | 16-byte UUID of sender node | | `24 - 39` | `target_node` | `[u8; 16]` | 16-byte UUID of recipient (`00...00` for broadcast) | | `40 - 47` | `timestamp_micros` | `u64` | Unix timestamp in microseconds | | `48 - 55` | `rivun_len` | `u64` | Payload length in bytes (max 16 MiB) | | `56 - 63` | `rivun_sign` | `[u8; 8]` | 8-byte fast signature hint | ### Bitflag Definitions (`RivunFlags`) - `ENCRYPTED = 0x0001` (bit 0): Payload is encrypted with AEAD ChaCha20-Poly1305. - `PRIORITY = 0x0002` (bit 1): Urgent routing bypasses normal queue buffers. - `REQUIRES_CONSENSUS = 0x0004` (bit 2): Swarm must reach BFT quorum ($T \\le N$). - `SIGNED = 0x0008` (bit 3): Frame has attached `ZSIG` authentication trailer. - `BROADCAST = 0x0010` (bit 4): Frame addressed to entire mesh network."
+  },
+  {
+    "id": "/docs/architecture/universal-envelope",
+    "url": "/docs/architecture/universal-envelope",
+    "title": "Universal Envelope (ZENV)",
+    "section": "2. Architecture & Core Protocol",
+    "description": "74-byte zero-copy ZENV envelope layout, 8 typed message kinds, correlation tracking, and serialization.",
+    "headings": [
+      "74-Byte ZENV Binary Header",
+      "The 8 Typed Message Kinds",
+      "Correlation & Causation Tracking"
+    ],
+    "keywords": [
+      "Universal Envelope (ZENV)",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "universal-envelope"
+    ],
+    "content": "74-byte zero-copy ZENV envelope layout, 8 typed message kinds, correlation tracking, and serialization. The **Universal Envelope** (`ZENV`) carries structured messages across 8 discrete message kinds: ### Message Kinds (`RivunMessageKind`) 1. `Data (0x0001)`: Raw binary sensor readings or telemetry snapshots. 2. `Event (0x0002)`: Broadcast notification of a state change in the mesh. 3. `Command (0x0003)`: Instruction directing a node to execute an operation. 4. `Query (0x0004)`: Read-only request for node or ledger state. 5. `Response (0x0005)`: Direct reply to a prior Query or Command. 6. `StreamChunk (0x0006)`: Sequenced fragment of a zero-copy streaming ring buffer. 7. `Action (0x0007)`: State-mutating operational action subject to policy and PoA. 8. `Control (0x0008)`: Low-level mesh management, heartbeat, or peer exchange."
+  },
+  {
+    "id": "/docs/architecture/cryptography",
+    "url": "/docs/architecture/cryptography",
+    "title": "Cryptographic Signing & Transcripts",
+    "section": "2. Architecture & Core Protocol",
+    "description": "Ed25519 signing specifications, BLAKE3 domain separation transcripts, and blinded commitments.",
+    "headings": [
+      "BLAKE3 Domain Separator Catalog",
+      "ZSIG Authentication Trailer",
+      "Blinded Commitments & Zero-Knowledge Hashing"
+    ],
+    "keywords": [
+      "Cryptographic Signing & Transcripts",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "cryptography"
+    ],
+    "content": "Ed25519 signing specifications, BLAKE3 domain separation transcripts, and blinded commitments. ### Domain Separator Strings | Domain Separator | Purpose | |---|---| | `Rivun-NODE-ID-v1` | Derives 16-byte UUIDv8 from Ed25519 Public Key | | `Rivun-SIGN-HINT-v1` | Computes 8-byte fast rejection hint | | `Rivun-POA-DIGEST-v1` | Computes frame digest for validator signing | | `Rivun-POA-SIGNATURE-v1` | Transcript prefix for validator PoA attestation | | `Rivun-POA-VALIDATOR-SET-v1` | Transcript for validator quorum reconfiguration | | `Rivun-BLINDED-COMMITMENT-v1` | Blinds action intent with local salt | | `Rivun-BLINDED-RECEIPT-v1` | Blinds receipt hashes for private ZK audits | | `Rivun-BATCH-SEAL-v1` | MMR peak root batch seal signature | | `Rivun-PROVENANCE-CHAIN-v1` | Complete 7-stage causal provenance chain root | | `ZAP-PACT-v1` | PACT deterministic JSON contract signature | | `Rivun-POLICY-BUNDLE-v1` | Operator offline policy bundle signature |"
+  },
+  {
+    "id": "/docs/architecture/encrypted-udp",
+    "url": "/docs/architecture/encrypted-udp",
+    "title": "Encrypted UDP Datagrams (ZAPD)",
+    "section": "2. Architecture & Core Protocol",
+    "description": "ChaCha20-Poly1305 AEAD authenticated UDP datagrams, 12-byte nonces, and durable replay protection.",
+    "headings": [
+      "ZAPD Datagram Layout",
+      "12-Byte Nonce Construction",
+      "Durable WAL Replay Protection (ZAPFRM01)"
+    ],
+    "keywords": [
+      "Encrypted UDP Datagrams (ZAPD)",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "encrypted-udp"
+    ],
+    "content": "ChaCha20-Poly1305 AEAD authenticated UDP datagrams, 12-byte nonces, and durable replay protection. Every point-to-point UDP packet in Rivun is encapsulated in a **ZAPD** datagram with AEAD ChaCha20-Poly1305 encryption. ### Nonce Structure (12 Bytes) - Bytes 0-3: 4-byte random session prefix (generated during handshake). - Bytes 4-11: 8-byte monotonically increasing big-endian packet counter. ### Replay Guard Invariant Nodes maintain a hybrid in-memory sliding window + disk-backed WAL (`ZAPFRM01`) recording observed nonces. Packets with duplicated or stale nonces (>5000ms clock skew) are immediately dropped before decryption."
+  },
+  {
+    "id": "/docs/architecture/noise-handshake",
+    "url": "/docs/architecture/noise-handshake",
+    "title": "Noise Handshake Protocol",
+    "section": "2. Architecture & Core Protocol",
+    "description": "Implementation of Noise_NN_25519_ChaChaPoly_BLAKE2s for mutual peer authentication and key exchange.",
+    "headings": [
+      "Noise Pattern Specification",
+      "Ephemeral Key Derivation",
+      "Session Rekeying & Forward Secrecy"
+    ],
+    "keywords": [
+      "Noise Handshake Protocol",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "noise-handshake"
+    ],
+    "content": "Implementation of Noise_NN_25519_ChaChaPoly_BLAKE2s for mutual peer authentication and key exchange. Rivun nodes establish secure point-to-point sessions using the `Noise_NN_25519_ChaChaPoly_BLAKE2s` pattern, providing forward secrecy and authenticated symmetric session keys without centralized certificate authorities."
+  },
+  {
+    "id": "/docs/architecture/subject-catalog",
+    "url": "/docs/architecture/subject-catalog",
+    "title": "Control Subject Catalog",
+    "section": "2. Architecture & Core Protocol",
+    "description": "Standardized hierarchical subject namespaces for Agent, PACT, Driver, Ledger, and Discovery subjects.",
+    "headings": [
+      "Namespace Hierarchy Rules",
+      "Agent & Provenance Subjects",
+      "PACT & Dispute Subjects",
+      "System & Discovery Subjects"
+    ],
+    "keywords": [
+      "Control Subject Catalog",
+      "2. Architecture & Core Protocol",
+      "architecture",
+      "subject-catalog"
+    ],
+    "content": "Standardized hierarchical subject namespaces for Agent, PACT, Driver, Ledger, and Discovery subjects. ### Subject Namespace Hierarchy - `agent.intent.propose`: Initial agent intent proposal. - `agent.negotiation.request`: Capability negotiation between agents. - `pact.create`: Creation of a multi-party conditional contract. - `pact.dispute.raise`: Formal dispute escalation. - `scada.driver.execute`: Industrial actuator execution request. - `node.discovery.announce`: Swarm peer advertisement. - `ledger.receipt.commit`: Signed action receipt broadcast."
+  },
+  {
+    "id": "/docs/consensus/poa-model",
+    "url": "/docs/consensus/poa-model",
+    "title": "Proof-of-Action (PoA) Consensus Model",
+    "section": "3. Consensus & Quorum Mesh",
+    "description": "Cryptographic action verification without proof-of-work energy waste or token staking friction.",
+    "headings": [
+      "Why Proof-of-Action?",
+      "Action Verification Lifecycle",
+      "Threshold Mathematical Bounds"
+    ],
+    "keywords": [
+      "Proof-of-Action (PoA) Consensus Model",
+      "3. Consensus & Quorum Mesh",
+      "consensus",
+      "poa-model"
+    ],
+    "content": "Cryptographic action verification without proof-of-work energy waste or token staking friction. ### The Proof-of-Action (PoA) Paradigm Traditional blockchains rely on **Proof-of-Work (PoW)** which wastes immense energy, or **Proof-of-Stake (PoS)** which creates plutocratic staking centralization. **Proof-of-Action (PoA)** directly verifies the **cryptographic intent, capability authorization, simulation outcome, and execution correctness** of discrete actions before state commitment. $$\\text{Quorum Threshold: } T = \\left\\lfloor \\frac{2N}{3} \\right\\rfloor + 1$$ $$\\text{Fault Tolerance: } F = \\left\\lfloor \\frac{N - 1}{3} \\right\\rfloor$$"
+  },
+  {
+    "id": "/docs/consensus/bft-consensus",
+    "url": "/docs/consensus/bft-consensus",
+    "title": "BFT Swarm Consensus Engine",
+    "section": "3. Consensus & Quorum Mesh",
+    "description": "Two-phase commit state machine: Propose, Prevote, Precommit, and Commit phases.",
+    "headings": [
+      "2-Phase State Machine Phases",
+      "1. Proposal Dissemination",
+      "2. Prevote Collection",
+      "3. Precommit Certificate",
+      "4. Final Execution & Receipt Commit"
+    ],
+    "keywords": [
+      "BFT Swarm Consensus Engine",
+      "3. Consensus & Quorum Mesh",
+      "consensus",
+      "bft-consensus"
+    ],
+    "content": "Two-phase commit state machine: Propose, Prevote, Precommit, and Commit phases. ### The 4 Consensus States 1. **PROPOSE**: Leader broadcasts proposal containing action hash and execution gas budget. 2. **PREVOTE**: Validators verify policy rules, dry-run WASM bytecode, and sign a `SwarmVote::Prevote`. 3. **PRECOMMIT**: Upon collecting $\\ge T$ prevotes, leader assembles a `PrecommitCertificate` and requests final signatures. 4. **COMMIT**: Once $\\ge T$ precommits arrive, nodes execute action, write receipt to MMR, and attach `ZPOA` trailer."
+  },
+  {
+    "id": "/docs/consensus/threshold-signatures",
+    "url": "/docs/consensus/threshold-signatures",
+    "title": "Dynamic Threshold Signatures (ZPOA)",
+    "section": "3. Consensus & Quorum Mesh",
+    "description": "40 + 80*K byte ZPOA trailer format, multi-validator attestation certificates, and aggregate verification.",
+    "headings": [
+      "ZPOA Binary Layout",
+      "Validator Attestation Records",
+      "Batch Signature Verification"
+    ],
+    "keywords": [
+      "Dynamic Threshold Signatures (ZPOA)",
+      "3. Consensus & Quorum Mesh",
+      "consensus",
+      "threshold-signatures"
+    ],
+    "content": "40 + 80*K byte ZPOA trailer format, multi-validator attestation certificates, and aggregate verification. ### ZPOA Binary Layout ($40 + 80 \\times K$ Bytes) | Offset | Field | Size | Description | |---|---|---|---| | `0x00` | `magic` | 4 bytes | Fixed `0x5A504F41` (`ZPOA`) | | `0x04` | `version` | 2 bytes | Version (`0x0001`) | | `0x06` | `threshold` | 2 bytes | Required threshold $T$ | | `0x08` | `attestation_count` | 2 bytes | Count $K \\ge T$ | | `0x0A` | `reserved` | 2 bytes | Reserved `0x0000` | | `0x0C` | `frame_digest` | 32 bytes | BLAKE3 frame digest | | `0x2C` | `attestations` | $80 \\times K$ bytes | Array of (16-byte UUID + 64-byte Ed25519 signature) |"
+  },
+  {
+    "id": "/docs/consensus/gossip-protocol",
+    "url": "/docs/consensus/gossip-protocol",
+    "title": "Swarm Gossip & Anti-Entropy",
+    "section": "3. Consensus & Quorum Mesh",
+    "description": "Epidemic dissemination with k-fanout, bloom filter deduplication cache, peer exchange (PEX), and vector clock reconciliation.",
+    "headings": [
+      "Epidemic Dissemination ($k$-fanout)",
+      "Bloom Filter Deduplication Cache",
+      "Vector Clock Anti-Entropy"
+    ],
+    "keywords": [
+      "Swarm Gossip & Anti-Entropy",
+      "3. Consensus & Quorum Mesh",
+      "consensus",
+      "gossip-protocol"
+    ],
+    "content": "Epidemic dissemination with k-fanout, bloom filter deduplication cache, peer exchange (PEX), and vector clock reconciliation. Rivun employs a robust **Epidemic Gossip Mesh** with configurable fanout ($k=3$), ensuring message propagation in $O(\\log N)$ rounds across thousands of geo-distributed edge nodes."
+  },
+  {
+    "id": "/docs/consensus/mesh-failover",
+    "url": "/docs/consensus/mesh-failover",
+    "title": "Network Partition & Failover Mesh",
+    "section": "3. Consensus & Quorum Mesh",
+    "description": "Phi Accrual failure detection, heartbeat jitter, split-brain partition mitigation, dynamic 2-hop relay routing.",
+    "headings": [
+      "Phi Accrual Failure Detector",
+      "Partition Isolation & Safe Halting",
+      "2-Hop Relay Routing"
+    ],
+    "keywords": [
+      "Network Partition & Failover Mesh",
+      "3. Consensus & Quorum Mesh",
+      "consensus",
+      "mesh-failover"
+    ],
+    "content": "Phi Accrual failure detection, heartbeat jitter, split-brain partition mitigation, dynamic 2-hop relay routing. The **Phi Accrual Failure Detector** continuously monitors peer heartbeat intervals, computing a dynamic suspicion score $\\Phi$. If $\\Phi > 8.0$, peers are marked suspect; if $\\Phi > 12.0$, automatic failover reroutes traffic via 2-hop relay nodes."
+  },
+  {
+    "id": "/docs/consensus/slashing-disputes",
+    "url": "/docs/consensus/slashing-disputes",
+    "title": "Equivocation Detection & Slashing",
+    "section": "3. Consensus & Quorum Mesh",
+    "description": "Automated cryptographic proof of double-voting, Byzantine validator quarantine, and PACT escrow slashing.",
+    "headings": [
+      "Equivocation Proof Construction",
+      "Automated Quarantine & Eviction",
+      "PACT Escrow Slashing Execution"
+    ],
+    "keywords": [
+      "Equivocation Detection & Slashing",
+      "3. Consensus & Quorum Mesh",
+      "consensus",
+      "slashing-disputes"
+    ],
+    "content": "Automated cryptographic proof of double-voting, Byzantine validator quarantine, and PACT escrow slashing. If a validator signs two conflicting proposals at the same height or epoch, any peer can submit an **Equivocation Proof** containing both signed frames. The network verifies both signatures against the validator public key and executes immediate quarantine and escrow penalty."
+  },
+  {
+    "id": "/docs/runtime/wasm-sandboxing",
+    "url": "/docs/runtime/wasm-sandboxing",
+    "title": "Wasmtime Host Sandboxing",
+    "section": "4. Sandboxed WASM & Streaming",
+    "description": "Hardware-level sandboxing, capability-based host call security, and deterministic execution via Wasmtime.",
+    "headings": [
+      "Sandboxing Guarantees",
+      "Capability-Based Host Calls",
+      "Linear Memory Isolation"
+    ],
+    "keywords": [
+      "Wasmtime Host Sandboxing",
+      "4. Sandboxed WASM & Streaming",
+      "runtime",
+      "wasm-sandboxing"
+    ],
+    "content": "Hardware-level sandboxing, capability-based host call security, and deterministic execution via Wasmtime. Rivun integrates Bytecode Alliance's **Wasmtime** engine to execute compiled WebAssembly action drivers (`.wasm` or `.zpack`) with complete isolation."
+  },
+  {
+    "id": "/docs/runtime/driver-abi",
+    "url": "/docs/runtime/driver-abi",
+    "title": "Driver ABI v1 Specification",
+    "section": "4. Sandboxed WASM & Streaming",
+    "description": "Specification of the 3 required exports (rivun_alloc, rivun_dealloc, rivun_execute) and memory layout.",
+    "headings": [
+      "Required Exported Functions",
+      "rivun_alloc(len: i32) -> i32",
+      "rivun_dealloc(ptr: i32, len: i32)",
+      "rivun_execute(...) -> i64"
+    ],
+    "keywords": [
+      "Driver ABI v1 Specification",
+      "4. Sandboxed WASM & Streaming",
+      "runtime",
+      "driver-abi"
+    ],
+    "content": "Specification of the 3 required exports (rivun_alloc, rivun_dealloc, rivun_execute) and memory layout. All Rivun action drivers must target `wasm32-wasip1` and export the **Driver ABI v1** interface: - `rivun_alloc(len: i32) -> i32`: Allocates a linear memory buffer for host payload passing. - `rivun_dealloc(ptr: i32, len: i32)`: Deallocates linear memory buffers. - `rivun_execute(action_ptr, action_len, payload_ptr, payload_len) -> i64`: Main action entrypoint returning a 64-bit packed pointer/length tuple."
+  },
+  {
+    "id": "/docs/runtime/resource-metering",
+    "url": "/docs/runtime/resource-metering",
+    "title": "Resource Constraints & Fuel Metering",
+    "section": "4. Sandboxed WASM & Streaming",
+    "description": "Deterministic fuel budgeting, maximum memory caps (16MB), and epoch-based wall-clock timeouts.",
+    "headings": [
+      "Deterministic WebAssembly Fuel Metering",
+      "Linear Memory Hard Caps",
+      "Epoch Timeout Interrupts"
+    ],
+    "keywords": [
+      "Resource Constraints & Fuel Metering",
+      "4. Sandboxed WASM & Streaming",
+      "runtime",
+      "resource-metering"
+    ],
+    "content": "Deterministic fuel budgeting, maximum memory caps (16MB), and epoch-based wall-clock timeouts. To prevent infinite loops, memory exhaustion, or denial-of-service, every execution is constrained by: - **Fuel Metering**: Drivers consume 1 fuel unit per instruction (default budget: 10,000,000 fuel). - **Linear Memory Limit**: Hard capped at 16 MiB (256 Wasm pages). - **Epoch Timeout**: Wall-clock watchdog timer fires every 1000ms, triggering immediate trap if exceeded."
+  },
+  {
+    "id": "/docs/runtime/async-pipelines",
+    "url": "/docs/runtime/async-pipelines",
+    "title": "Async Tokio Driver Pipelines",
+    "section": "4. Sandboxed WASM & Streaming",
+    "description": "Non-blocking multi-threaded task scheduling, cooperative yields, and background telemetry queues.",
+    "headings": [
+      "Tokio Pipeline Architecture",
+      "Sequential & Concurrent Task Chaining"
+    ],
+    "keywords": [
+      "Async Tokio Driver Pipelines",
+      "4. Sandboxed WASM & Streaming",
+      "runtime",
+      "async-pipelines"
+    ],
+    "content": "Non-blocking multi-threaded task scheduling, cooperative yields, and background telemetry queues. The host execution engine coordinates driver execution across asynchronous Tokio workers, separating CPU-bound WASM compilation from I/O-bound sensor streaming."
+  },
+  {
+    "id": "/docs/runtime/spsc-ringbuffers",
+    "url": "/docs/runtime/spsc-ringbuffers",
+    "title": "Lock-Free SPSC Ring-Buffers",
+    "section": "4. Sandboxed WASM & Streaming",
+    "description": "Zero-copy high-throughput streaming I/O with cacheline-aligned atomic head/tail ring buffers.",
+    "headings": [
+      "Cacheline-Aligned Lock-Free Design",
+      "Zero-Copy Slicing & Modbus Ingestion"
+    ],
+    "keywords": [
+      "Lock-Free SPSC Ring-Buffers",
+      "4. Sandboxed WASM & Streaming",
+      "runtime",
+      "spsc-ringbuffers"
+    ],
+    "content": "Zero-copy high-throughput streaming I/O with cacheline-aligned atomic head/tail ring buffers. The `SpscRingBuffer` achieves over 25,000,000 ops/sec by utilizing 64-byte cacheline padding between producer and consumer atomic indices, preventing false sharing on modern multi-core CPUs."
+  },
+  {
+    "id": "/docs/runtime/inter-driver-ipc",
+    "url": "/docs/runtime/inter-driver-ipc",
+    "title": "Inter-Driver Zero-Copy IPC",
+    "section": "4. Sandboxed WASM & Streaming",
+    "description": "Deterministic chaining of drivers (Perception -> Policy -> Actuator) with aggregate fuel accounting.",
+    "headings": [
+      "Composing Driver Pipelines",
+      "Aggregate Fuel Budget Inheritance"
+    ],
+    "keywords": [
+      "Inter-Driver Zero-Copy IPC",
+      "4. Sandboxed WASM & Streaming",
+      "runtime",
+      "inter-driver-ipc"
+    ],
+    "content": "Deterministic chaining of drivers (Perception -> Policy -> Actuator) with aggregate fuel accounting. Drivers can be chained into continuous pipelines where output memory slices from a Perception driver feed directly into a Policy evaluation driver, and then into an Actuator driver with zero intermediate serialization overhead."
+  },
+  {
+    "id": "/docs/cloud/sovereign-architecture",
+    "url": "/docs/cloud/sovereign-architecture",
+    "title": "Sovereign Key Isolation Invariant",
+    "section": "5. Rivun Cloud & Operator Station",
+    "description": "Zero-trust cryptographic architecture ensuring private keys never touch cloud servers.",
+    "headings": [
+      "The Private Key Isolation Invariant",
+      "Role of the Rivun Cloud SaaS Plane",
+      "Threat Model & Security Boundaries"
+    ],
+    "keywords": [
+      "Sovereign Key Isolation Invariant",
+      "5. Rivun Cloud & Operator Station",
+      "cloud",
+      "sovereign-architecture"
+    ],
+    "content": "Zero-trust cryptographic architecture ensuring private keys never touch cloud servers. ### Sovereign Identity Model In traditional enterprise SaaS, cloud providers store API tokens, master keys, and private certificates. If the cloud database is breached, the entire enterprise is compromised. Rivun flips this model upside-down: 1. **Local Key Vault**: Ed25519 private keys are stored exclusively in `~/.rivun/operator_keys/` on the operator's local machine, encrypted with Argon2id + ChaCha20-Poly1305. 2. **Untrusted SaaS Broker**: Rivun Cloud acts merely as a distributed synchronization and telemetry relay. It receives **only cryptographic hashes, Merkle roots, and detached signatures**."
+  },
+  {
+    "id": "/docs/cloud/operator-workstation",
+    "url": "/docs/cloud/operator-workstation",
+    "title": "Operator Workstation (rivun-control)",
+    "section": "5. Rivun Cloud & Operator Station",
+    "description": "Tauri desktop app and CLI managing ~/.rivun/operator_keys/ with local signing approval workflows.",
+    "headings": [
+      "Desktop Workstation UI & Features",
+      "Key Generation & Vault Storage",
+      "Human-in-the-Loop Signing Flow"
+    ],
+    "keywords": [
+      "Operator Workstation (rivun-control)",
+      "5. Rivun Cloud & Operator Station",
+      "cloud",
+      "operator-workstation"
+    ],
+    "content": "Tauri desktop app and CLI managing ~/.rivun/operator_keys/ with local signing approval workflows. **`rivun-control`** is the sovereign command center for security operators and cluster administrators. Built as a native Rust + Tauri application, it provides: - Visual diff viewer for staged security policies. - Hardware security key (YubiKey / PKCS#11) and encrypted file vault support. - Offline batch signing and cryptographic bundle generation."
+  },
+  {
+    "id": "/docs/cloud/policy-lifecycle",
+    "url": "/docs/cloud/policy-lifecycle",
+    "title": "Zero-Trust Policy Staging & Signing",
+    "section": "5. Rivun Cloud & Operator Station",
+    "description": "5-step lifecycle: Draft -> Staging -> Local Operator Signature -> Broadcast -> Atomic Tempfile Swap.",
+    "headings": [
+      "Step 1: Policy Draft in Dashboard",
+      "Step 2: Staging on Cloud API",
+      "Step 3: Offline Inspection & Ed25519 Signing",
+      "Step 4: Push to Edge Nodes",
+      "Step 5: Cryptographic Verification & Atomic File Swap"
+    ],
+    "keywords": [
+      "Zero-Trust Policy Staging & Signing",
+      "5. Rivun Cloud & Operator Station",
+      "cloud",
+      "policy-lifecycle"
+    ],
+    "content": "5-step lifecycle: Draft -> Staging -> Local Operator Signature -> Broadcast -> Atomic Tempfile Swap. ### The 5-Step Policy Lifecycle 1. **Draft**: Policy author creates rules in TOML or Web UI. 2. **Staged**: Policy is uploaded to Cloud API with status `staged`. 3. **Signed**: Security operator inspects diff locally in `rivun-control` and signs using domain `Rivun-POLICY-BUNDLE-v1`. 4. **Broadcast**: Signed bundle is distributed to edge clusters via SSE / HTTPS. 5. **Atomic Swap**: Edge daemon `rivun-cloud-bridge` verifies signature against local trusted public key list, writes to temp file, and executes atomic file swap (`tempfile::persist`)."
+  },
+  {
+    "id": "/docs/cloud/edge-bridge-daemon",
+    "url": "/docs/cloud/edge-bridge-daemon",
+    "title": "Edge Daemon (rivun-cloud-bridge)",
+    "section": "5. Rivun Cloud & Operator Station",
+    "description": "Lightweight Rust sidecar for telemetry push, receipt batch synchronization, and client-side secret redaction.",
+    "headings": [
+      "Edge Sidecar Architecture",
+      "Client-Side Secret Redaction (SecretRedactor)",
+      "Batch Receipt Push & Offline Buffering"
+    ],
+    "keywords": [
+      "Edge Daemon (rivun-cloud-bridge)",
+      "5. Rivun Cloud & Operator Station",
+      "cloud",
+      "edge-bridge-daemon"
+    ],
+    "content": "Lightweight Rust sidecar for telemetry push, receipt batch synchronization, and client-side secret redaction. **`rivun-cloud-bridge`** runs as a lightweight daemon (under 12MB RAM) alongside edge nodes: - Pushes 7-Point Fleet Doctor health telemetry every 15 seconds. - Automatically scrubs credentials, private IP ranges, and proprietary payloads before transmitting logs using the compiled regex `SecretRedactor` engine. - Buffers up to 100,000 receipts locally on disk if network connection is disrupted."
+  },
+  {
+    "id": "/docs/cloud/rest-sse-api",
+    "url": "/docs/cloud/rest-sse-api",
+    "title": "Multi-Tenant REST & SSE API",
+    "section": "5. Rivun Cloud & Operator Station",
+    "description": "High-concurrency Axum 0.8 REST endpoints and real-time Server-Sent Events broker.",
+    "headings": [
+      "Axum 0.8 Architecture",
+      "Core REST Endpoints",
+      "Real-Time SSE Event Streams"
+    ],
+    "keywords": [
+      "Multi-Tenant REST & SSE API",
+      "5. Rivun Cloud & Operator Station",
+      "cloud",
+      "rest-sse-api"
+    ],
+    "content": "High-concurrency Axum 0.8 REST endpoints and real-time Server-Sent Events broker. The **`rivun-cloud-api`** crate delivers a sub-millisecond asynchronous REST and SSE backend powered by Tokio and Axum 0.8: - `GET /v1/status`: Cluster and cloud health status. - `GET /v1/orgs/{org_id}/nodes`: Fleet node inventory and telemetry. - `GET /v1/orgs/{org_id}/receipts`: Action receipt audit logs with MMR root proofs. - `GET /v1/orgs/{org_id}/events/stream`: Real-time SSE stream of fleet alerts, node heartbeats, and policy sync events."
+  },
+  {
+    "id": "/docs/cloud/dashboard-integration",
+    "url": "/docs/cloud/dashboard-integration",
+    "title": "Rivun Dashboard Integration",
+    "section": "5. Rivun Cloud & Operator Station",
+    "description": "Connecting the Next.js enterprise dashboard with the Rivun Cloud API and edge mesh.",
+    "headings": [
+      "Dashboard Features & Views",
+      "Live Fleet Visualization & Maps",
+      "Cryptographic Receipt Explorer"
+    ],
+    "keywords": [
+      "Rivun Dashboard Integration",
+      "5. Rivun Cloud & Operator Station",
+      "cloud",
+      "dashboard-integration"
+    ],
+    "content": "Connecting the Next.js enterprise dashboard with the Rivun Cloud API and edge mesh. The **Rivun Dashboard** (`apps/rivun-dashboard`) provides an Apple-grade visual management plane with live node status maps, 7-Point Fleet Doctor radar charts, policy diff viewers, and MMR receipt proof trees."
+  },
+  {
+    "id": "/docs/crates/rivun-core",
+    "url": "/docs/crates/rivun-core",
+    "title": "rivun-core — Core Wire Protocol & Framing",
+    "section": "6. 26 Crate API Reference",
+    "description": "Root binary protocol types, fixed 64-byte frame header, bitflags, auth and PoA trailers.",
+    "headings": [
+      "Crate Overview",
+      "Primary Types & Enums",
+      "Usage Example"
+    ],
+    "keywords": [
+      "rivun-core — Core Wire Protocol & Framing",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-core"
+    ],
+    "content": "Root binary protocol types, fixed 64-byte frame header, bitflags, auth and PoA trailers. ### Key Structs & Traits - `RivunHeader`: 64-byte big-endian header (`magic`, `version`, `flags`, `source_node`, `target_node`, `timestamp_micros`, `rivun_len`, `rivun_sign`). - `RivunFrame`: Memory-managed or zero-copy sliced wire frame container. - `RivunFlags`: Bitmask supporting `ENCRYPTED (0x01)`, `PRIORITY (0x02)`, `REQUIRES_CONSENSUS (0x04)`, `SIGNED (0x08)`, `BROADCAST (0x10)`. - `AuthTrailer`: 72-byte Ed25519 authentication trailer (`ZSIG`). - `PoaTrailer`: Variable-length Proof-of-Action quorum attestation trailer (`ZPOA`)."
+  },
+  {
+    "id": "/docs/crates/rivun-crypto",
+    "url": "/docs/crates/rivun-crypto",
+    "title": "rivun-crypto — Cryptographic Primitives & Signatures",
+    "section": "6. 26 Crate API Reference",
+    "description": "Ed25519 signing/verification, BLAKE3 domain separation, node ID derivation (UUID v8), blinded commitments.",
+    "headings": [
+      "Crate Overview",
+      "Primary Types & Functions",
+      "Usage Example"
+    ],
+    "keywords": [
+      "rivun-crypto — Cryptographic Primitives & Signatures",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-crypto"
+    ],
+    "content": "Ed25519 signing/verification, BLAKE3 domain separation, node ID derivation (UUID v8), blinded commitments. ### Key Structs & Functions - `Keypair`: Ed25519 secret and public keypair wrapper. - `PublicKey`: 32-byte Ed25519 public key. - `node_id_from_public_key(pk: &PublicKey) -> [u8; 16]`: Derives UUID v8 using domain `Rivun-NODE-ID-v1`. - `sign_frame(frame, keypair)`: Attaches `ZSIG` trailer. - `verify_frame(frame, pk)`: Verifies detached signature across header and payload bytes. - `BlindedReceiptCommitment`: Zero-knowledge blinded receipt hashing."
+  },
+  {
+    "id": "/docs/crates/rivun-envelope",
+    "url": "/docs/crates/rivun-envelope",
+    "title": "rivun-envelope — Universal 74-Byte ZENV Messaging",
+    "section": "6. 26 Crate API Reference",
+    "description": "Universal 74-byte zero-copy ZENV envelope parser, builder, 8 message kinds, and correlation tracking.",
+    "headings": [
+      "Crate Overview",
+      "RivunMessageKind Enum",
+      "Usage Example"
+    ],
+    "keywords": [
+      "rivun-envelope — Universal 74-Byte ZENV Messaging",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-envelope"
+    ],
+    "content": "Universal 74-byte zero-copy ZENV envelope parser, builder, 8 message kinds, and correlation tracking. ### Key Structs & Enums - `RivunEnvelope`: Owned container for ZENV messages. - `RivunEnvelopeRef<'a>`: Zero-copy borrowing parser. - `RivunMessageKind`: `Data (1)`, `Event (2)`, `Command (3)`, `Query (4)`, `Response (5)`, `StreamChunk (6)`, `Action (7)`, `Control (8)`. - `ZenvHeader`: 74-byte packed binary header."
+  },
+  {
+    "id": "/docs/crates/rivun-agent",
+    "url": "/docs/crates/rivun-agent",
+    "title": "rivun-agent — Agent Protocols & 7-Stage Provenance",
+    "section": "6. 26 Crate API Reference",
+    "description": "Autonomous AI agent contracts, intents, sessions, delegations, and 7-stage causal provenance chain engine.",
+    "headings": [
+      "Crate Overview",
+      "7-Stage Causal Provenance Chain",
+      "Primary Types"
+    ],
+    "keywords": [
+      "rivun-agent — Agent Protocols & 7-Stage Provenance",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-agent"
+    ],
+    "content": "Autonomous AI agent contracts, intents, sessions, delegations, and 7-stage causal provenance chain engine. ### 7-Stage Causal Provenance Chain The `ProvenanceChainBuilder` links: 1. `Intent`: Human/Agent initial proposal. 2. `Negotiation`: Multi-agent capability handshake. 3. `Policy`: Policy engine evaluation result. 4. `Consensus`: Precommit quorum certificate. 5. `Driver`: WASM sandbox execution record. 6. `PoA`: Multi-validator threshold attestation. 7. `Receipt`: MMR leaf commitment root."
+  },
+  {
+    "id": "/docs/crates/rivun-capability",
+    "url": "/docs/crates/rivun-capability",
+    "title": "rivun-capability — Hierarchical Permission Trees",
+    "section": "6. 26 Crate API Reference",
+    "description": "Capability identifiers, permission matrices, driver declarations, and cached grant trees.",
+    "headings": [
+      "Crate Overview",
+      "CapabilityId Hierarchies"
+    ],
+    "keywords": [
+      "rivun-capability — Hierarchical Permission Trees",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-capability"
+    ],
+    "content": "Capability identifiers, permission matrices, driver declarations, and cached grant trees. Provides hierarchical dot-separated capabilities (e.g. `scada.hvac.read`, `scada.hvac.write`, `scada.hvac.*`) with dynamic grant token verification and permission caching."
+  },
+  {
+    "id": "/docs/crates/rivun-cli",
+    "url": "/docs/crates/rivun-cli",
+    "title": "rivun-cli — Unified Command-Line Interface",
+    "section": "6. 26 Crate API Reference",
+    "description": "Operator CLI for cluster orchestration, keygen, doctor, journal inspection, and pack packaging.",
+    "headings": [
+      "Crate Overview",
+      "Top-Level Commands"
+    ],
+    "keywords": [
+      "rivun-cli — Unified Command-Line Interface",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-cli"
+    ],
+    "content": "Operator CLI for cluster orchestration, keygen, doctor, journal inspection, and pack packaging. ### Commands - `rivun keygen`: Generate Ed25519 keypairs. - `rivun cluster up`: Launch local in-memory or UDP clusters. - `rivun doctor`: Run 7-Point Fleet Doctor diagnostics. - `rivun receipts verify`: Offline MMR proof validator. - `rivun pack init / build / sign / audit`: Domain pack lifecycle."
+  },
+  {
+    "id": "/docs/crates/rivun-cloud-api",
+    "url": "/docs/crates/rivun-cloud-api",
+    "title": "rivun-cloud-api — Multi-Tenant SaaS Server",
+    "section": "6. 26 Crate API Reference",
+    "description": "Axum 0.8 REST API and Server-Sent Events broker for fleet observability, receipts, and policy staging.",
+    "headings": [
+      "Crate Overview",
+      "REST & SSE Endpoints"
+    ],
+    "keywords": [
+      "rivun-cloud-api — Multi-Tenant SaaS Server",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-cloud-api"
+    ],
+    "content": "Axum 0.8 REST API and Server-Sent Events broker for fleet observability, receipts, and policy staging. Axum 0.8 async server supporting database storage, multi-tenant organization boundaries, receipt search, and real-time SSE stream broadcasting."
+  },
+  {
+    "id": "/docs/crates/rivun-cloud-bridge",
+    "url": "/docs/crates/rivun-cloud-bridge",
+    "title": "rivun-cloud-bridge — Edge Telemetry & Policy Sync Sidecar",
+    "section": "6. 26 Crate API Reference",
+    "description": "Edge daemon pushing telemetry and receipts to Rivun Cloud and pulling signed policy bundles with atomic file swap.",
+    "headings": [
+      "Crate Overview",
+      "Atomic Policy Swap Engine"
+    ],
+    "keywords": [
+      "rivun-cloud-bridge — Edge Telemetry & Policy Sync Sidecar",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-cloud-bridge"
+    ],
+    "content": "Edge daemon pushing telemetry and receipts to Rivun Cloud and pulling signed policy bundles with atomic file swap. Lightweight sidecar daemon integrating `SecretRedactor`, receipt spooling, and offline signature validation for staged policies."
+  },
+  {
+    "id": "/docs/crates/rivun-driver-sdk",
+    "url": "/docs/crates/rivun-driver-sdk",
+    "title": "rivun-driver-sdk — Rust Guest WASM Driver SDK",
+    "section": "6. 26 Crate API Reference",
+    "description": "Ergonomic macros, buffer wrappers, and ABI v1 helpers for authoring WebAssembly action drivers.",
+    "headings": [
+      "Crate Overview",
+      "rivun_driver! Macro & PackedResult"
+    ],
+    "keywords": [
+      "rivun-driver-sdk — Rust Guest WASM Driver SDK",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-driver-sdk"
+    ],
+    "content": "Ergonomic macros, buffer wrappers, and ABI v1 helpers for authoring WebAssembly action drivers. Provides zero-boilerplate helpers for compiling Rust crates to `wasm32-wasip1` drivers adhering to Driver ABI v1."
+  },
+  {
+    "id": "/docs/crates/rivun-gateway",
+    "url": "/docs/crates/rivun-gateway",
+    "title": "rivun-gateway — Agent Gateway & MCP Protocol Server",
+    "section": "6. 26 Crate API Reference",
+    "description": "Model Context Protocol (MCP) server over stdio/SSE/WebSocket and HTTP REST bridge to the Rivun mesh.",
+    "headings": [
+      "Crate Overview",
+      "Model Context Protocol (MCP) Tools"
+    ],
+    "keywords": [
+      "rivun-gateway — Agent Gateway & MCP Protocol Server",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-gateway"
+    ],
+    "content": "Model Context Protocol (MCP) server over stdio/SSE/WebSocket and HTTP REST bridge to the Rivun mesh. Bridges LLM agents (Claude, ChatGPT, Local Models) directly to Rivun capabilities via standard MCP tool calls and WebSocket connections."
+  },
+  {
+    "id": "/docs/crates/rivun-journal",
+    "url": "/docs/crates/rivun-journal",
+    "title": "rivun-journal — Segmented Append-Only Binary Storage",
+    "section": "6. 26 Crate API Reference",
+    "description": "High-throughput append-only disk storage, binary index files, segment rotation (ZJSEG001), and recovery.",
+    "headings": [
+      "Crate Overview",
+      "ZJSEG001 Segment Format"
+    ],
+    "keywords": [
+      "rivun-journal — Segmented Append-Only Binary Storage",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-journal"
+    ],
+    "content": "High-throughput append-only disk storage, binary index files, segment rotation (ZJSEG001), and recovery. Manages durable WAL segments on disk with CRC32/BLAKE3 checksums, 64MB automatic rotation boundaries, and crash-safe indexing."
+  },
+  {
+    "id": "/docs/crates/rivun-ledger",
+    "url": "/docs/crates/rivun-ledger",
+    "title": "rivun-ledger — Action Receipts & Merkle Mountain Ranges",
+    "section": "6. 26 Crate API Reference",
+    "description": "Signed action receipts, Merkle Mountain Range (MMR) accumulator, inclusion/exclusion proofs, batch seals.",
+    "headings": [
+      "Crate Overview",
+      "Incremental Merkle Mountain Range (MMR)"
+    ],
+    "keywords": [
+      "rivun-ledger — Action Receipts & Merkle Mountain Ranges",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-ledger"
+    ],
+    "content": "Signed action receipts, Merkle Mountain Range (MMR) accumulator, inclusion/exclusion proofs, batch seals. ### Key Structs - `ActionReceipt`: Cryptographic record of action execution. - `SignedActionReceipt`: Ed25519-certified action receipt. - `IncrementalMmr`: Append-only Merkle Mountain Range with $O(\\log N)$ peak bagging and inclusion proofs. - `MmrExclusionProof`: Non-membership verification."
+  },
+  {
+    "id": "/docs/crates/rivun-machine",
+    "url": "/docs/crates/rivun-machine",
+    "title": "rivun-machine — Industrial Machine Connection Primitives",
+    "section": "6. 26 Crate API Reference",
+    "description": "Hardware-neutral device profiles, Modbus/Serial/TCP protocol adapters, and deterministic machine state.",
+    "headings": [
+      "Crate Overview",
+      "DeviceProfile & ProtocolAdapter"
+    ],
+    "keywords": [
+      "rivun-machine — Industrial Machine Connection Primitives",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-machine"
+    ],
+    "content": "Hardware-neutral device profiles, Modbus/Serial/TCP protocol adapters, and deterministic machine state. Provides deterministic abstractions over physical PLC, SCADA, and IoT hardware controllers with built-in simulation fallback modes."
+  },
+  {
+    "id": "/docs/crates/rivun-memory",
+    "url": "/docs/crates/rivun-memory",
+    "title": "rivun-memory — Auditable Hash-Chained Memory Journal",
+    "section": "6. 26 Crate API Reference",
+    "description": "Auditable local binary memory journal, hash-chained entry trees, tombstones, and cryptographic verification.",
+    "headings": [
+      "Crate Overview",
+      "MemoryJournalStore & Verification"
+    ],
+    "keywords": [
+      "rivun-memory — Auditable Hash-Chained Memory Journal",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-memory"
+    ],
+    "content": "Auditable local binary memory journal, hash-chained entry trees, tombstones, and cryptographic verification. Tamper-evident agent memory storage where every read, write, and tombstone deletion is cryptographically hash-chained."
+  },
+  {
+    "id": "/docs/crates/rivun-net",
+    "url": "/docs/crates/rivun-net",
+    "title": "rivun-net — Encrypted UDP, BFT Consensus & Gossip Mesh",
+    "section": "6. 26 Crate API Reference",
+    "description": "ChaCha20-Poly1305 UDP transport (ZAPD), BFT consensus engine, gossip mesh, and failure detection.",
+    "headings": [
+      "Crate Overview",
+      "UdpTransport & SwarmMeshTopology"
+    ],
+    "keywords": [
+      "rivun-net — Encrypted UDP, BFT Consensus & Gossip Mesh",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-net"
+    ],
+    "content": "ChaCha20-Poly1305 UDP transport (ZAPD), BFT consensus engine, gossip mesh, and failure detection. Handles point-to-point AEAD UDP framing, peer discovery, vector clock reconciliation, and BFT consensus round coordination."
+  },
+  {
+    "id": "/docs/crates/rivun-node",
+    "url": "/docs/crates/rivun-node",
+    "title": "rivun-node — Node Daemon Actor & Dispatch Runtime",
+    "section": "6. 26 Crate API Reference",
+    "description": "Main node daemon runtime, configuration validation, peer trust management, and message dispatch loop.",
+    "headings": [
+      "Crate Overview",
+      "NodeDaemon & Message Dispatch Loop"
+    ],
+    "keywords": [
+      "rivun-node — Node Daemon Actor & Dispatch Runtime",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-node"
+    ],
+    "content": "Main node daemon runtime, configuration validation, peer trust management, and message dispatch loop. The central daemon orchestrating the networking stack, policy enforcer, WASM runtime, and journal storage into a unified actor."
+  },
+  {
+    "id": "/docs/crates/rivun-ops",
+    "url": "/docs/crates/rivun-ops",
+    "title": "rivun-ops — Governance, Approvals & Audit Trails",
+    "section": "6. 26 Crate API Reference",
+    "description": "Operational governance contracts, multi-signature quorums, release manifests, and audit trails.",
+    "headings": [
+      "Crate Overview",
+      "ApprovalPolicy & Multi-Sig Quorums"
+    ],
+    "keywords": [
+      "rivun-ops — Governance, Approvals & Audit Trails",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-ops"
+    ],
+    "content": "Operational governance contracts, multi-signature quorums, release manifests, and audit trails. Formalizes operational approval workflows for sensitive actions like firmware upgrades and cluster reconfigurations."
+  },
+  {
+    "id": "/docs/crates/rivun-pack",
+    "url": "/docs/crates/rivun-pack",
+    "title": "rivun-pack — .zpack Archive Bundling & Auditing",
+    "section": "6. 26 Crate API Reference",
+    "description": "Domain Pack bundle compiler, pack.toml manifest parser, detached signatures, and security auditing.",
+    "headings": [
+      "Crate Overview",
+      "DomainPackBundle & audit_bundle()"
+    ],
+    "keywords": [
+      "rivun-pack — .zpack Archive Bundling & Auditing",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-pack"
+    ],
+    "content": "Domain Pack bundle compiler, pack.toml manifest parser, detached signatures, and security auditing. Compiles policies, WASM drivers, schemas, and routes into compressed `.zpack` archives with cryptographic author signatures."
+  },
+  {
+    "id": "/docs/crates/rivun-pact",
+    "url": "/docs/crates/rivun-pact",
+    "title": "rivun-pact — Multi-Party Conditional Contracts & Escrow",
+    "section": "6. 26 Crate API Reference",
+    "description": "PACT portable action records, escrow deposits, threshold arbitration, slashing engine, and dispute proofs.",
+    "headings": [
+      "Crate Overview",
+      "RivunPact & DisputeEngine"
+    ],
+    "keywords": [
+      "rivun-pact — Multi-Party Conditional Contracts & Escrow",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-pact"
+    ],
+    "content": "PACT portable action records, escrow deposits, threshold arbitration, slashing engine, and dispute proofs. Enables autonomous agents to negotiate binding multi-party contracts with automated escrow release or threshold arbitration rulings."
+  },
+  {
+    "id": "/docs/crates/rivun-policy",
+    "url": "/docs/crates/rivun-policy",
+    "title": "rivun-policy — Deterministic Rule Engine & Gates",
+    "section": "6. 26 Crate API Reference",
+    "description": "Conditional rule evaluation (Allow/Deny/PoA/Grant), break-glass overrides, and dispute evaluators.",
+    "headings": [
+      "Crate Overview",
+      "PolicySet, PolicyRule & Decision Gates"
+    ],
+    "keywords": [
+      "rivun-policy — Deterministic Rule Engine & Gates",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-policy"
+    ],
+    "content": "Conditional rule evaluation (Allow/Deny/PoA/Grant), break-glass overrides, and dispute evaluators. Evaluates subject patterns, payload predicates, time-of-day windows, and risk categories to determine action authorization in sub-microsecond speeds."
+  },
+  {
+    "id": "/docs/crates/rivun-router",
+    "url": "/docs/crates/rivun-router",
+    "title": "rivun-router — Deterministic Message Routing & Priority Queues",
+    "section": "6. 26 Crate API Reference",
+    "description": "Subject-based message routing, capability-based dispatch, priority queues, and routing explanations.",
+    "headings": [
+      "Crate Overview",
+      "RouteTable & PriorityQueue"
+    ],
+    "keywords": [
+      "rivun-router — Deterministic Message Routing & Priority Queues",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-router"
+    ],
+    "content": "Subject-based message routing, capability-based dispatch, priority queues, and routing explanations. Fast prefix-tree pattern matching engine that resolves target node endpoints and local handler channels for incoming envelopes."
+  },
+  {
+    "id": "/docs/crates/rivun-runtime",
+    "url": "/docs/crates/rivun-runtime",
+    "title": "rivun-runtime — Wasmtime Execution & Ring-Buffers",
+    "section": "6. 26 Crate API Reference",
+    "description": "Wasmtime runtime host, Driver ABI v1 executor, SPSC ring-buffers, driver pipelines, and Modbus streaming.",
+    "headings": [
+      "Crate Overview",
+      "AsyncWasmExecutor & DriverPipeline"
+    ],
+    "keywords": [
+      "rivun-runtime — Wasmtime Execution & Ring-Buffers",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-runtime"
+    ],
+    "content": "Wasmtime runtime host, Driver ABI v1 executor, SPSC ring-buffers, driver pipelines, and Modbus streaming. The host execution environment managing WebAssembly module compilation, instance pooling, fuel tracking, and lock-free ring-buffer I/O."
+  },
+  {
+    "id": "/docs/crates/rivun-schema",
+    "url": "/docs/crates/rivun-schema",
+    "title": "rivun-schema — ZENV Schema & Contract Validation",
+    "section": "6. 26 Crate API Reference",
+    "description": "Typed JSON and binary message contracts for ZENV envelopes, schema validation, and field constraints.",
+    "headings": [
+      "Crate Overview",
+      "MessageContract & Schema Validation"
+    ],
+    "keywords": [
+      "rivun-schema — ZENV Schema & Contract Validation",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-schema"
+    ],
+    "content": "Typed JSON and binary message contracts for ZENV envelopes, schema validation, and field constraints. Enforces strict schema constraints on message payloads before passing them to drivers or ledger storage."
+  },
+  {
+    "id": "/docs/crates/rivun-store",
+    "url": "/docs/crates/rivun-store",
+    "title": "rivun-store — Offline Signed Driver Registry",
+    "section": "6. 26 Crate API Reference",
+    "description": "Driver registry, semantic version resolution, offline installation plans, and publication manifests.",
+    "headings": [
+      "Crate Overview",
+      "DriverRegistry, DriverManifest & InstallPlan"
+    ],
+    "keywords": [
+      "rivun-store — Offline Signed Driver Registry",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-store"
+    ],
+    "content": "Driver registry, semantic version resolution, offline installation plans, and publication manifests. Maintains an offline-capable, cryptographically verified registry of WASM drivers and domain pack bundles with dependency solving."
+  },
+  {
+    "id": "/docs/crates/rivun-telemetry",
+    "url": "/docs/crates/rivun-telemetry",
+    "title": "rivun-telemetry — 7-Point Fleet Doctor Diagnostics",
+    "section": "6. 26 Crate API Reference",
+    "description": "Prometheus metrics, OpenTelemetry tracing, fleet topology aggregation, 7-Point Fleet Doctor, incident forensics.",
+    "headings": [
+      "Crate Overview",
+      "FleetDoctor 7-Point Diagnostic Engine"
+    ],
+    "keywords": [
+      "rivun-telemetry — 7-Point Fleet Doctor Diagnostics",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-telemetry"
+    ],
+    "content": "Prometheus metrics, OpenTelemetry tracing, fleet topology aggregation, 7-Point Fleet Doctor, incident forensics. Implements the comprehensive 7-point health check suite, secret-scrubbing forensic snapshots, and Prometheus metric exporters."
+  },
+  {
+    "id": "/docs/crates/rivun-control",
+    "url": "/docs/crates/rivun-control",
+    "title": "rivun-control — Sovereign Operator Desktop Workstation",
+    "section": "6. 26 Crate API Reference",
+    "description": "Operator workstation desktop app (Tauri) and local Ed25519 key vault for staging and signing policies.",
+    "headings": [
+      "Crate Overview",
+      "OperatorVault & Offline Signing Commands"
+    ],
+    "keywords": [
+      "rivun-control — Sovereign Operator Desktop Workstation",
+      "6. 26 Crate API Reference",
+      "crates",
+      "rivun-control"
+    ],
+    "content": "Operator workstation desktop app (Tauri) and local Ed25519 key vault for staging and signing policies. Native Tauri application providing sovereign key isolation, policy diff review, offline signature generation, and cloud synchronization."
+  },
+  {
+    "id": "/docs/sdks/rust",
+    "url": "/docs/sdks/rust",
+    "title": "Rust SDK Developer Manual",
+    "section": "7. 4 SDK Developer Manuals",
+    "description": "Comprehensive manual for building zero-overhead, memory-safe Rivun applications in Rust.",
+    "headings": [
+      "Cargo Configuration",
+      "Frame & Envelope Builders",
+      "Async Tokio Transport",
+      "Authoring WASM Guest Drivers",
+      "MMR Proof Verification"
+    ],
+    "keywords": [
+      "Rust SDK Developer Manual",
+      "7. 4 SDK Developer Manuals",
+      "sdks",
+      "rust"
+    ],
+    "content": "Comprehensive manual for building zero-overhead, memory-safe Rivun applications in Rust. The **Rivun Rust SDK** provides low-level wire primitives, zero-copy memory parsing, and seamless Tokio async integration."
+  },
+  {
+    "id": "/docs/sdks/typescript",
+    "url": "/docs/sdks/typescript",
+    "title": "TypeScript SDK Developer Manual",
+    "section": "7. 4 SDK Developer Manuals",
+    "description": "Manual for Node.js, Bun, and browser applications using @rivun/sdk.",
+    "headings": [
+      "Installation & Setup",
+      "WebCrypto & Noble Ed25519 Signing",
+      "Building & Parsing ZENV Envelopes",
+      "PACT Record Verification in the Browser"
+    ],
+    "keywords": [
+      "TypeScript SDK Developer Manual",
+      "7. 4 SDK Developer Manuals",
+      "sdks",
+      "typescript"
+    ],
+    "content": "Manual for Node.js, Bun, and browser applications using @rivun/sdk. The **TypeScript SDK** supports ESM and CommonJS, zero native C/C++ build requirements, and universal cryptographic execution across Node.js, Deno, Bun, and modern browsers."
+  },
+  {
+    "id": "/docs/sdks/python",
+    "url": "/docs/sdks/python",
+    "title": "Python SDK Developer Manual",
+    "section": "7. 4 SDK Developer Manuals",
+    "description": "Manual for Python 3.10+ with dataclasses, typing, and standard socket transport.",
+    "headings": [
+      "Package Setup",
+      "Dataclass Framing & Serialization",
+      "AI Agent Framework Integration"
+    ],
+    "keywords": [
+      "Python SDK Developer Manual",
+      "7. 4 SDK Developer Manuals",
+      "sdks",
+      "python"
+    ],
+    "content": "Manual for Python 3.10+ with dataclasses, typing, and standard socket transport. The **Python SDK** bridges Python AI systems (LangChain, AutoGen, CrewAI) with the verified Rivun consensus mesh."
+  },
+  {
+    "id": "/docs/sdks/go",
+    "url": "/docs/sdks/go",
+    "title": "Go SDK Developer Manual",
+    "section": "7. 4 SDK Developer Manuals",
+    "description": "Idiomatic Go package with BLAKE3 hashing, Ed25519 verification, and high-concurrency dispatchers.",
+    "headings": [
+      "Installation",
+      "Binary Codecs & Transports",
+      "Microservices & Worker Pools"
+    ],
+    "keywords": [
+      "Go SDK Developer Manual",
+      "7. 4 SDK Developer Manuals",
+      "sdks",
+      "go"
+    ],
+    "content": "Idiomatic Go package with BLAKE3 hashing, Ed25519 verification, and high-concurrency dispatchers. The **Go SDK** delivers high-performance networking for cloud infrastructure, Kubernetes sidecars, and edge gateways."
+  },
+  {
+    "id": "/docs/sdks/conformance-matrix",
+    "url": "/docs/sdks/conformance-matrix",
+    "title": "Cross-SDK Conformance & Test Fixtures Matrix",
+    "section": "7. 4 SDK Developer Manuals",
+    "description": "11 shared JSON test vectors proving bit-for-bit wire and cryptographic equivalence across all 4 SDKs.",
+    "headings": [
+      "The 11 Shared Test Fixtures",
+      "Language Conformance Matrix",
+      "Running Conformance Tests"
+    ],
+    "keywords": [
+      "Cross-SDK Conformance & Test Fixtures Matrix",
+      "7. 4 SDK Developer Manuals",
+      "sdks",
+      "conformance-matrix"
+    ],
+    "content": "11 shared JSON test vectors proving bit-for-bit wire and cryptographic equivalence across all 4 SDKs. ### The 11 Shared JSON Test Fixtures (`fixtures/`) 1. `01_wire_header_minimal.json`: 64-byte header encoding and endianness. 2. `02_wire_header_flags.json`: Bitflag combinations and parsing. 3. `03_zenv_8_kinds.json`: Universal envelope encoding across all 8 message kinds. 4. `04_ed25519_zsig.json`: Detached signature transcript and 72-byte trailer. 5. `05_zpoa_multisig.json`: 40 + 80*K byte PoA trailer and attestation verification. 6. `06_zapd_chacha_aead.json`: AEAD ChaCha20-Poly1305 encryption and 12-byte nonces. 7. `07_blake3_domains.json`: Domain-separated hash transcripts. 8. `08_pact_canonical_json.json`: Deterministic JSON key sorting and PACT signatures. 9. `09_mmr_peak_bagging.json`: Incremental MMR leaf insertion and peak-bagging roots. 10. `10_secret_redactor_regex.json`: Redaction patterns for tokens, keys, and credentials. 11. `11_driver_abi_v1.json`: Linear memory packed result 64-bit return layout. ### Conformance Status Table | Fixture | Rust SDK | TypeScript SDK | Python SDK | Go SDK | |---|---|---|---|---| | 01 - Header Minimal | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 02 - Header Flags | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 03 - ZENV 8 Kinds | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 04 - Ed25519 ZSIG | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 05 - ZPOA Multi-Sig | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 06 - ZAPD AEAD | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 07 - BLAKE3 Domains | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 08 - PACT Canonical | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 09 - MMR Peak Bagging | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 10 - Secret Redactor | 100% PASS | 100% PASS | 100% PASS | 100% PASS | | 11 - Driver ABI v1 | 100% PASS | 100% PASS | 100% PASS | 100% PASS |"
+  },
+  {
+    "id": "/docs/domain-packs/architecture",
+    "url": "/docs/domain-packs/architecture",
+    "title": "Domain Pack Architecture & pack.toml Contract",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Structure of .zpack bundles, pack.toml manifest contracts, safety defaults, and risk vocabularies.",
+    "headings": [
+      "Pack Directory Structure",
+      "pack.toml Manifest Schema",
+      "Risk Vocabularies & Safety Defaults"
+    ],
+    "keywords": [
+      "Domain Pack Architecture & pack.toml Contract",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "architecture"
+    ],
+    "content": "Structure of .zpack bundles, pack.toml manifest contracts, safety defaults, and risk vocabularies. ### Domain Pack Anatomy (`.zpack`) A Domain Pack is a self-contained, cryptographically signed bundle containing: - `pack.toml`: Metadata, risk definitions, capability dependencies, and driver mappings. - `schemas/`: JSON / Binary schema definitions for domain messages. - `policies/`: Declarative rule sets (`Allow`, `Deny`, `RequirePoa`). - `routes/`: Subject routing tables. - `drivers/`: Compiled WebAssembly action drivers (`wasm32-wasip1`). - `dashboards/`: Embedded UI telemetry widget definitions."
+  },
+  {
+    "id": "/docs/domain-packs/lifecycle",
+    "url": "/docs/domain-packs/lifecycle",
+    "title": "Pack Lifecycle & CLI Commands",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Step-by-step CLI guide: rivun pack init -> build -> sign -> verify -> install -> audit.",
+    "headings": [
+      "The 6 Lifecycle Steps",
+      "CLI Workflow Commands"
+    ],
+    "keywords": [
+      "Pack Lifecycle & CLI Commands",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "lifecycle"
+    ],
+    "content": "Step-by-step CLI guide: rivun pack init -> build -> sign -> verify -> install -> audit. ### The 6-Step Pack Lifecycle 1. `rivun pack init <name>`: Scaffolds a new domain pack with template files. 2. `rivun pack build`: Compiles WASM drivers and validates schemas. 3. `rivun pack sign --key <keyfile>`: Generates detached Ed25519 signature over BLAKE3 bundle digest. 4. `rivun pack verify <bundle.zpack>`: Validates internal checksums and author signature. 5. `rivun pack install <bundle.zpack>`: Deploys pack to local node registry. 6. `rivun pack audit <bundle.zpack>`: Runs static security analysis against capabilities and fuel limits."
+  },
+  {
+    "id": "/docs/domain-packs/agentic-dev",
+    "url": "/docs/domain-packs/agentic-dev",
+    "title": "Pack 1: Agentic Development (rivun-pack-agentic-dev)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Auditable coding agents, git repository access, code patch verification, and test execution.",
+    "headings": [
+      "Pack Overview",
+      "Declared Capabilities",
+      "Safety Policy Rules"
+    ],
+    "keywords": [
+      "Pack 1: Agentic Development (rivun-pack-agentic-dev)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "agentic-dev"
+    ],
+    "content": "Auditable coding agents, git repository access, code patch verification, and test execution. Provides sandboxed execution for autonomous AI coding agents: - Capabilities: `repo.read`, `repo.patch`, `test.run`, `branch.create`. - Policy: Blocks direct pushes to `main`, requires 2-of-3 BFT consensus for destructive git resets."
+  },
+  {
+    "id": "/docs/domain-packs/smart-building",
+    "url": "/docs/domain-packs/smart-building",
+    "title": "Pack 2: Smart Building Automation (rivun-pack-smart-building)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "HVAC control, access control, lighting, and environmental sensor monitoring with fail-closed safety.",
+    "headings": [
+      "Pack Overview",
+      "Fail-Closed Safety Gates"
+    ],
+    "keywords": [
+      "Pack 2: Smart Building Automation (rivun-pack-smart-building)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "smart-building"
+    ],
+    "content": "HVAC control, access control, lighting, and environmental sensor monitoring with fail-closed safety. Automates commercial building management systems (BMS) with hard temperature bounds (16°C to 28°C) and emergency fire alarm overrides."
+  },
+  {
+    "id": "/docs/domain-packs/cloud-ops",
+    "url": "/docs/domain-packs/cloud-ops",
+    "title": "Pack 3: Cloud & Infrastructure Ops (rivun-pack-cloud-ops)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Automated deployment pipelines, Kubernetes pod scaling, canary rollouts, and disaster recovery.",
+    "headings": [
+      "Pack Overview",
+      "Canary Verification & Auto-Rollback"
+    ],
+    "keywords": [
+      "Pack 3: Cloud & Infrastructure Ops (rivun-pack-cloud-ops)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "cloud-ops"
+    ],
+    "content": "Automated deployment pipelines, Kubernetes pod scaling, canary rollouts, and disaster recovery. Manages zero-downtime infrastructure operations with automated rollback safeguards if error rates exceed 0.5% during canary deployment."
+  },
+  {
+    "id": "/docs/domain-packs/industrial",
+    "url": "/docs/domain-packs/industrial",
+    "title": "Pack 4: Industrial Control & SCADA (rivun-pack-industrial)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Modbus/TCP register access, PLC valve actuation, conveyor control, and deterministic simulation gates.",
+    "headings": [
+      "Pack Overview",
+      "Pre-Execution Simulation Gates"
+    ],
+    "keywords": [
+      "Pack 4: Industrial Control & SCADA (rivun-pack-industrial)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "industrial"
+    ],
+    "content": "Modbus/TCP register access, PLC valve actuation, conveyor control, and deterministic simulation gates. Interfaces with physical factory hardware, requiring digital twin simulation verification before opening pressure relief valves or adjusting motor RPM."
+  },
+  {
+    "id": "/docs/domain-packs/personal-ai",
+    "url": "/docs/domain-packs/personal-ai",
+    "title": "Pack 5: Personal AI Assistant (rivun-pack-personal-ai)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Calendar management, email triage, personal finance summaries, and human-in-the-loop approval gates.",
+    "headings": [
+      "Pack Overview",
+      "Human-in-the-Loop Prompts"
+    ],
+    "keywords": [
+      "Pack 5: Personal AI Assistant (rivun-pack-personal-ai)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "personal-ai"
+    ],
+    "content": "Calendar management, email triage, personal finance summaries, and human-in-the-loop approval gates. Empowers personal AI agents while strictly requiring local biometric or mobile confirmation for outgoing bank transfers or email sends."
+  },
+  {
+    "id": "/docs/domain-packs/healthcare",
+    "url": "/docs/domain-packs/healthcare",
+    "title": "Pack 6: Healthcare & Patient Care (rivun-pack-healthcare)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "HIPAA-compliant patient vitals ingestion, medical device telemetry, and auditable care coordination.",
+    "headings": [
+      "Pack Overview",
+      "Cryptographic HIPAA Audit Trails"
+    ],
+    "keywords": [
+      "Pack 6: Healthcare & Patient Care (rivun-pack-healthcare)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "healthcare"
+    ],
+    "content": "HIPAA-compliant patient vitals ingestion, medical device telemetry, and auditable care coordination. Ensures patient health information (PHI) is end-to-end encrypted with zero-knowledge blinded receipt commitments for compliance audits."
+  },
+  {
+    "id": "/docs/domain-packs/finance",
+    "url": "/docs/domain-packs/finance",
+    "title": "Pack 7: Financial Services & Trading (rivun-pack-finance)",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Algorithmic trade proposals, risk checks, multi-signature threshold approval, and atomic settlement.",
+    "headings": [
+      "Pack Overview",
+      "Multi-Signature Threshold Execution"
+    ],
+    "keywords": [
+      "Pack 7: Financial Services & Trading (rivun-pack-finance)",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "finance"
+    ],
+    "content": "Algorithmic trade proposals, risk checks, multi-signature threshold approval, and atomic settlement. Enforces strict value-at-risk (VaR) position limits and requires 3-of-4 algorithmic risk validator signatures for trades exceeding $100,000."
+  },
+  {
+    "id": "/docs/domain-packs/rivunstore-publishing",
+    "url": "/docs/domain-packs/rivunstore-publishing",
+    "title": "RivunStore Bundle Publishing",
+    "section": "8. 7 Domain Packs & RivunStore",
+    "description": "Publishing signed domain packs and drivers to the decentralized RivunStore registry.",
+    "headings": [
+      "Publishing Workflow",
+      "Cryptographic Registry Index Signatures"
+    ],
+    "keywords": [
+      "RivunStore Bundle Publishing",
+      "8. 7 Domain Packs & RivunStore",
+      "domain-packs",
+      "rivunstore-publishing"
+    ],
+    "content": "Publishing signed domain packs and drivers to the decentralized RivunStore registry. Authors publish packs by submitting signed `.zpack` archives to the RivunStore registry. The registry signs index manifests with Ed25519, allowing offline clients to verify authenticity."
+  },
+  {
+    "id": "/docs/operations/fleet-doctor",
+    "url": "/docs/operations/fleet-doctor",
+    "title": "7-Point Fleet Doctor Diagnostic Suite",
+    "section": "9. Fleet Doctor & MMR Forensics",
+    "description": "Comprehensive 7-point health check suite verifying network, storage, replay WAL, journal rotation, registry, certificate validity, and peer trust.",
+    "headings": [
+      "The 7 Diagnostic Checks",
+      "1. Network Reachability & Sockets",
+      "2. Storage Mounts & Permissions",
+      "3. Durable Replay WAL (ZAPFRM01)",
+      "4. Receipt Journal Manifests (ZJSEG001)",
+      "5. RivunStore Registry Signatures",
+      "6. Node Key & PoA Quorum Threshold (T <= N)",
+      "7. Peer Trust & Quarantine Status",
+      "Running Fleet Doctor from CLI"
+    ],
+    "keywords": [
+      "7-Point Fleet Doctor Diagnostic Suite",
+      "9. Fleet Doctor & MMR Forensics",
+      "operations",
+      "fleet-doctor"
+    ],
+    "content": "Comprehensive 7-point health check suite verifying network, storage, replay WAL, journal rotation, registry, certificate validity, and peer trust. The **7-Point Fleet Doctor** provides continuous deep health inspections across every operational subsystem: ### The 7 Core Checks 1. **`cluster_network_reachability`**: Tests UDP bind sockets, MTU bounds, packet drop rates, and peer ping latencies (<50ms). 2. **`storage_mounts_and_permissions`**: Verifies read/write permissions, available disk space (>1GB), and POSIX lock semantics on `~/.rivun/data/`. 3. **`durable_replay_store_wal`**: Validates replay WAL integrity (`ZAPFRM01` magic header), sequence numbering, and clock skew tolerance ($\\pm 5000$ms). 4. **`segment_rotation_and_manifest_signatures`**: Inspects receipt journal rotation (`ZJSEG001`) and verifies `SignedReceiptSegmentManifest` signatures. 5. **`rivun_store_index_and_signatures`**: Validates offline RivunStore registry index manifests against trusted publisher keys. 6. **`node_identity_key_and_poa_quorum`**: Confirms local Ed25519 identity key validity, PACT signature threshold, and active PoA quorum availability ($T \\le N$). 7. **`peer_trust_status`**: Analyzes swarm topology for quarantined, revoked, or equivocation-banned nodes."
+  },
+  {
+    "id": "/docs/operations/incident-forensics",
+    "url": "/docs/operations/incident-forensics",
+    "title": "Incident Forensics & Secret Redaction",
+    "section": "9. Fleet Doctor & MMR Forensics",
+    "description": "Capturing diagnostic bundles and scrubbing credentials with compiled regex SecretRedactor.",
+    "headings": [
+      "Forensic Snapshot Generation",
+      "SecretRedactor Regex Rules"
+    ],
+    "keywords": [
+      "Incident Forensics & Secret Redaction",
+      "9. Fleet Doctor & MMR Forensics",
+      "operations",
+      "incident-forensics"
+    ],
+    "content": "Capturing diagnostic bundles and scrubbing credentials with compiled regex SecretRedactor. When an anomaly occurs, operators run `rivun doctor snapshot --out incident.zip`. The internal **`SecretRedactor`** automatically scrubs API tokens, Ed25519 private keys, AWS credentials, and proprietary payload fields before outputting the diagnostic bundle."
+  },
+  {
+    "id": "/docs/operations/mmr-offline-verification",
+    "url": "/docs/operations/mmr-offline-verification",
+    "title": "MMR Offline Proof Verification",
+    "section": "9. Fleet Doctor & MMR Forensics",
+    "description": "Mathematical verification of Merkle Mountain Range (MMR) inclusion and exclusion proofs without a network connection.",
+    "headings": [
+      "MMR Peak-Bagging Mathematics",
+      "Verifying Inclusion Proofs ($O(\\log N)$)",
+      "Verifying Non-Membership (Exclusion Proofs)"
+    ],
+    "keywords": [
+      "MMR Offline Proof Verification",
+      "9. Fleet Doctor & MMR Forensics",
+      "operations",
+      "mmr-offline-verification"
+    ],
+    "content": "Mathematical verification of Merkle Mountain Range (MMR) inclusion and exclusion proofs without a network connection. ### Peak Bagging Equation Given peak hashes $P_1, P_2, \\dots, P_k$ representing balanced subtrees of size $2^{h_i}$, the overall Merkle Mountain Range root is computed via right-to-left peak bagging: $$\\text{Root} = \\text{BLAKE3}\\left(\\dots \\text{BLAKE3}\\left(\\text{BLAKE3}(P_k \\parallel P_{k-1}) \\parallel P_{k-2}\\right) \\dots \\parallel P_1\\right)$$ Inclusion proofs require at most $O(\\log N)$ hash evaluations, allowing third-party auditors to verify any historical action receipt with zero network access."
+  },
+  {
+    "id": "/docs/operations/provenance-reconstruction",
+    "url": "/docs/operations/provenance-reconstruction",
+    "title": "7-Stage Causal Provenance Graph Reconstruction",
+    "section": "9. Fleet Doctor & MMR Forensics",
+    "description": "Graph reconstruction linking Intent -> Negotiation -> Policy -> Consensus -> Driver -> PoA -> Receipt.",
+    "headings": [
+      "Reconstructing the Causal DAG",
+      "Auditing Provenance with rivun-cli"
+    ],
+    "keywords": [
+      "7-Stage Causal Provenance Graph Reconstruction",
+      "9. Fleet Doctor & MMR Forensics",
+      "operations",
+      "provenance-reconstruction"
+    ],
+    "content": "Graph reconstruction linking Intent -> Negotiation -> Policy -> Consensus -> Driver -> PoA -> Receipt. The **7-Stage Causal Provenance Graph** guarantees complete non-repudiation for autonomous systems. Every receipt can be traced backward through each stage to identify exactly which AI agent initiated the intent, which policies evaluated it, and which validators signed the quorum certificate."
+  }
+]

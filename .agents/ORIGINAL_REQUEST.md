@@ -1,45 +1,41 @@
 # Original User Request
 
-## 2026-08-15T14:57:13Z
+## Initial Request — 2026-08-29T00:49:53Z
 
-rivun Next-Gen Frontier: Transform rivun into an autonomous, hyper-scalable, cross-cluster decentralized execution and verification fabric featuring P2P multi-agent swarm gossip consensus, Merkle Mountain Range (MMR) receipt aggregation, async WASM driver pipeline with inter-driver IPC, multi-party pact dispute settlement, and native multi-node cluster simulation.
+You are the Project Orchestrator for the Rivun web platforms project.
 
-Working directory: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\rivun
-Integrity mode: development
+Working directory for your metadata: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\Rivun\.agents\orchestrator_1
+Project root: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\Rivun
+Verbatim user request: c:\Users\Stagiaire\Documents\Amadou PGC\Prs\Rivun\.agents\ORIGINAL_REQUEST.md
 
-## Requirements
+## Mission & Requirements
+Build two distinct, production-ready, Apple-grade web platforms for Rivun (ZAP protocol):
+1. **Rivun Marketing Showcase Platform** (`apps/marketing-site`):
+   - World-class enterprise landing page, interactive architecture & protocol visualizer, feature showcases, pricing/cloud tiers, live interactive sandbox/playground, conversion funnels.
+   - Apple-grade dark aesthetic with refined glassmorphism, subtle micro-interactions, canvas/WebGL particle mesh visualizer for P2P swarm, typography inspired by Apple/Linear design systems.
+   - Interactive hero with real-time signed frame encoder/decoder demonstration.
+   - Comprehensive sections: Value proposition, Core Protocol innovations (Ed25519, ChaCha20-Poly1305, Proof-of-Action, WASM sandboxing, MMR accumulators), Rivun Cloud SaaS & Zero-Trust Operator Workstation, 7 Domain Packs showcase, enterprise security & compliance breakdown, interactive pricing calculator, developer community links.
+   - Fully responsive, accessible, SEO-optimized, 0 TypeScript/build errors.
 
-### R1. P2P Swarm Gossip Consensus & Adaptive Quorum Mesh (`rivun-net`, `rivun-agent`, `rivun-node`)
-- Implement a decentralized P2P gossip protocol enabling autonomous multi-agent nodes to discover peers, broadcast state, negotiate capabilities, and reach Byzantine-fault-tolerant swarm consensus with dynamic threshold signatures (T-of-N).
-- Add network partition detection, automatic heartbeats with jitter backoff, and seamless multi-peer dynamic failover routing.
+2. **Rivun Developer Documentation Portal** (`apps/docs-portal`):
+   - Dedicated documentation engine with instant client-side full-text search, multi-level sidebar navigation, table of contents, copyable multi-language code tabs (Rust, TypeScript, Python, Go, CLI), callouts, Mermaid diagram renderers.
+   - Exhaustive content from A to Z covering:
+     - Architecture & Core Protocol (`@@rivun_HEADER@@` wire format, ZENV envelopes, cryptographic signing, ChaCha20-Poly1305 transport).
+     - Proof-of-Action consensus engine & BFT quorum mesh ($T \le N$).
+     - Sandboxed WASM execution & zero-copy streaming runtime.
+     - Multi-tenant Rivun Cloud SaaS & local operator workstation (`rivun-control` key vault, zero-trust staging & signing).
+     - 26 Crate-by-crate API references and 4 SDK developer manuals.
+     - 7 Domain Packs guide & RivunStore bundle publishing.
+     - 7-Point Fleet Doctor diagnostics, incident forensics, and MMR offline verifications.
+   - Interactive API explorer & live protocol frame sandbox.
 
-### R2. Merkle Mountain Range (MMR) & Compact Cryptographic Batch Receipts (`rivun-ledger`, `rivun-crypto`)
-- Implement Merkle Mountain Range (MMR) accumulator for high-throughput batch receipt sealing, supporting O(log N) compact inclusion/exclusion proofs and peak-bagging root computation.
-- Enable zero-knowledge verifiable receipt rollups allowing agents to prove execution correctness without revealing private memory contents or internal payloads.
+3. **Acceptance Criteria & Verification**:
+   - `npm run build` succeeds in both `apps/marketing-site` and `apps/docs-portal` with 0 errors and 0 warnings.
+   - Zero missing routes, broken internal links, or unrendered markdown/diagram components.
+   - Apple-grade visual polish across both apps.
+   - Interactive live visualizers function smoothly in-browser.
+   - 100% feature coverage across all 26 workspace crates, protocol specs, SDK fixtures, CLI commands, and Rivun Cloud workflows.
+   - Complete unit and integration tests.
 
-### R3. Async WASM Driver Pipeline & Inter-Driver IPC (`rivun-runtime`, `rivun-driver-sdk`)
-- Implement non-blocking asynchronous WASM driver host execution with streaming I/O buffers (TCP, Modbus, Shared Ring-Buffers).
-- Implement deterministic zero-copy inter-driver IPC pipes (allowing chaining of machine perception, safety policy, and physical actuator drivers with strict fuel budgets).
-
-### R4. Decentralized Agent Pact & Dispute Resolution Engine (`rivun-pact`, `rivun-policy`, `rivun-agent`)
-- Implement multi-party conditional Pact execution with escrow locks, timeout slashes, multi-signature releases, and deterministic policy dispute mediation.
-- Enforce causal execution chains linking negotiation pacts, resource allocations, signed attestations, and cryptographic settlement receipts.
-
-### R5. Cluster Simulator & Swarm Benchmarking Tooling (`rivun-cli`, `rivun-telemetry`)
-- Implement `rivun cluster` and `rivun swarm` CLI commands (`rivun cluster up --nodes N`, `rivun swarm bench --rate R --duration D`, `rivun swarm partition-test`).
-- Deliver comprehensive stress benchmarking fixtures validating 10,000+ consensus operations/sec under high concurrency and simulated Byzantine network chaos.
-
-## Acceptance Criteria
-
-### Test & Build Integrity
-- [ ] `cargo test --workspace --all-targets` passes with 0 failures across all crates and new benchmarks.
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings` runs with 0 warnings.
-- [ ] All golden protocol fixtures and multi-language SDKs remain fully backward-compatible and compliant.
-
-### Functional Guardrails
-- [ ] P2P swarm gossip establishes consensus across N >= 3 nodes and tolerates simulated node drops and network partitions.
-- [ ] MMR root accumulator cryptographically verifies batch inclusion proofs for 1,000+ receipts with sub-millisecond verification.
-- [ ] Async WASM drivers execute concurrent streaming pipelines with strict fuel metering and isolated memory sandboxing.
-- [ ] Multi-party Agent Pacts settle or slash cleanly based on deterministic policy evaluation and PoA validator quorum.
-- [ ] `rivun cluster up` and `rivun swarm bench` execute live multi-node topology simulations cleanly.
-
+Maintain your `plan.md`, `progress.md`, and `context.md` in your working directory `c:\Users\Stagiaire\Documents\Amadou PGC\Prs\Rivun\.agents\orchestrator_1\`.
+When all implementations, builds, and quality verifications are 100% complete and passing, send a completion report with evidence back to Sentinel.
