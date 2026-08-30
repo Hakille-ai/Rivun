@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="100%" height="100%">
+  <defs>
+    <radialGradient id="bgGlow3" cx="50%" cy="46%" r="65%">
+      <stop offset="0%" stop-color="#0b172a" />
+      <stop offset="55%" stop-color="#050811" />
+      <stop offset="100%" stop-color="#020306" />
+    </radialGradient>
+    <filter id="laserGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="cyanLaser" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F5D4" />
+      <stop offset="50%" stop-color="#00BBF9" />
+      <stop offset="100%" stop-color="#3A86FF" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" rx="40" fill="url(#bgGlow3)" />
+  <g transform="translate(400, 360)">
+    <circle cx="0" cy="0" r="190" fill="#00f5d4" opacity="0.06" filter="url(#laserGlow)" />
+    <polygon points="0,-180 156,-90 156,90 0,180 -156,90 -156,-90" fill="none" stroke="url(#cyanLaser)" stroke-width="6" filter="url(#laserGlow)" />
+    <polygon points="0,-180 135,110 -135,110" fill="none" stroke="#00F5D4" stroke-width="5" stroke-linejoin="round" opacity="0.9" filter="url(#laserGlow)" />
+    <polygon points="0,180 135,-110 -135,-110" fill="none" stroke="#00BBF9" stroke-width="5" stroke-linejoin="round" opacity="0.9" filter="url(#laserGlow)" />
+    <polygon points="0,-60 52,-30 52,30 0,60 -52,30 -52,-30" fill="#00F5D4" fill-opacity="0.12" stroke="#FFFFFF" stroke-width="3" filter="url(#laserGlow)" />
+    <circle cx="0" cy="0" r="6" fill="#FFFFFF" filter="url(#laserGlow)" />
+    <circle cx="0" cy="-180" r="7" fill="#00F5D4" />
+    <circle cx="156" cy="-90" r="7" fill="#00BBF9" />
+    <circle cx="156" cy="90" r="7" fill="#3A86FF" />
+    <circle cx="0" cy="180" r="7" fill="#00F5D4" />
+    <circle cx="-156" cy="90" r="7" fill="#00BBF9" />
+    <circle cx="-156" cy="-90" r="7" fill="#3A86FF" />
+  </g>
+  <text x="400" y="660" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', sans-serif" font-size="62" font-weight="900" letter-spacing="16" fill="#FFFFFF" filter="url(#laserGlow)">RIVUN</text>
+  <text x="400" y="705" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', sans-serif" font-size="15" font-weight="700" letter-spacing="9" fill="#00F5D4" opacity="0.95">ZERO-TRUST SECURITY</text>
+</svg>
